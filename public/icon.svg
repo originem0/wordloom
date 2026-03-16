@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#09090b"/>
+  <!-- Book shape -->
+  <path d="M128 120 C128 108 138 96 152 96 L256 96 L256 384 L152 384 C138 384 128 372 128 360 Z" fill="none" stroke="#a78bfa" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M384 120 C384 108 374 96 360 96 L256 96 L256 384 L360 384 C374 384 384 372 384 360 Z" fill="none" stroke="#a78bfa" stroke-width="12" stroke-linejoin="round"/>
+  <!-- Page lines left -->
+  <line x1="160" y1="152" x2="240" y2="152" stroke="#a78bfa" stroke-width="6" stroke-linecap="round" opacity="0.5"/>
+  <line x1="160" y1="184" x2="232" y2="184" stroke="#a78bfa" stroke-width="6" stroke-linecap="round" opacity="0.5"/>
+  <line x1="160" y1="216" x2="236" y2="216" stroke="#a78bfa" stroke-width="6" stroke-linecap="round" opacity="0.5"/>
+  <!-- Page lines right -->
+  <line x1="272" y1="152" x2="352" y2="152" stroke="#a78bfa" stroke-width="6" stroke-linecap="round" opacity="0.5"/>
+  <line x1="272" y1="184" x2="344" y2="184" stroke="#a78bfa" stroke-width="6" stroke-linecap="round" opacity="0.5"/>
+  <line x1="272" y1="216" x2="348" y2="216" stroke="#a78bfa" stroke-width="6" stroke-linecap="round" opacity="0.5"/>
+  <!-- Pen / quill -->
+  <path d="M320 260 L380 380 L370 400 L350 394 L296 278 Z" fill="#c4b5fd" opacity="0.9"/>
+  <path d="M370 400 L380 380 L392 388 Z" fill="#7c3aed"/>
+  <!-- Sparkle -->
+  <circle cx="340" cy="248" r="4" fill="#fbbf24"/>
+  <path d="M340 236 L340 228 M340 260 L340 268 M328 248 L320 248 M352 248 L360 248" stroke="#fbbf24" stroke-width="3" stroke-linecap="round"/>
+  <!-- SW text -->
+  <text x="256" y="448" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="48" font-weight="700" fill="#a78bfa" letter-spacing="8">SW</text>
+</svg>
