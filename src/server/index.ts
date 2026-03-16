@@ -3,12 +3,22 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { logger } from "hono/logger";
 import { cors } from "hono/cors";
+import { migrate } from "drizzle-orm/libsql/migrator";
+import { db } from "./db/index.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { authRoutes } from "./routes/auth.js";
 import { storyRoutes } from "./routes/stories.js";
 import { cardRoutes } from "./routes/cards.js";
 import { settingRoutes } from "./routes/settings.js";
 import { readFileSync, existsSync } from "fs";
+
+try {
+  await migrate(db, { migrationsFolder: "./drizzle" });
+  console.log("DB migrations applied");
+} catch (err) {
+  console.error("DB migration failed:", err);
+  process.exit(1);
+}
 
 const app = new Hono();
 
