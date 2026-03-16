@@ -13,7 +13,6 @@ import { Button } from "@/client/components/ui/button";
 import { Input } from "@/client/components/ui/input";
 import { Badge } from "@/client/components/ui/badge";
 import { useSettings, useUpdateSetting } from "@/client/hooks/useSettings";
-import { apiPost } from "@/client/lib/api";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
 
