@@ -43,7 +43,7 @@ export function useGenerateDeep() {
   return useMutation({
     mutationFn: (cardId: number) =>
       apiPost<Card>(`/api/cards/${cardId}/deep`, {}),
-    onSuccess: (data) => qc.setQueryData(["cards", data.id], data),
+    onSuccess: (data: Card) => qc.setQueryData(["cards", data.id], data),
   });
 }
 

@@ -70,20 +70,28 @@ async function retryWithBackoff<T>(
 // API Key from DB
 // ---------------------------------------------------------------------------
 
-async function getApiKey(): Promise<string> {
+async function getSetting(key: string): Promise<string> {
   const row = await db
     .select()
     .from(settings)
-    .where(eq(settings.key, "gemini_api_key"))
+    .where(eq(settings.key, key))
     .get();
-  if (!row?.value)
-    throw new Error("Gemini API Key not configured. Set it in Settings.");
-  return row.value;
+  return row?.value ?? "";
 }
 
 async function getClient(): Promise<GoogleGenAI> {
-  const apiKey = await getApiKey();
-  return new GoogleGenAI({ apiKey });
+  const apiKey = await getSetting("gemini_api_key");
+  if (!apiKey)
+    throw new Error("Gemini API Key not configured. Set it in Settings.");
+  const baseUrl = await getSetting("gemini_base_url");
+  return new GoogleGenAI({
+    apiKey,
+    ...(baseUrl ? { httpOptions: { baseUrl } } : {}),
+  });
+}
+
+async function getModel(settingKey: string, fallback: string): Promise<string> {
+  return (await getSetting(settingKey)) || fallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +134,7 @@ export async function generateStory(
   try {
     return await retryWithBackoff(async () => {
       const ai = await getClient();
+      const model = await getModel("story_model", "gemini-2.5-pro");
 
       let systemInstruction = STORY_SYSTEM_PROMPT;
       if (prompt) {
@@ -133,7 +142,7 @@ export async function generateStory(
       }
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-pro",
+        model,
         contents: [
           {
             role: "user",
@@ -189,9 +198,10 @@ export async function generateTTS(text: string): Promise<string> {
   try {
     return await retryWithBackoff(async () => {
       const ai = await getClient();
+      const model = await getModel("tts_model", "gemini-2.5-flash-preview-tts");
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
+        model,
         contents: [
           {
             role: "user",
@@ -232,9 +242,10 @@ export async function translateText(text: string): Promise<string> {
   try {
     return await retryWithBackoff(async () => {
       const ai = await getClient();
+      const model = await getModel("general_model", "gemini-2.5-flash");
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model,
         contents: `Translate the following text to Simplified Chinese. Keep the markdown formatting intact. Only return the translated text, nothing else.\n\n${text}`,
       });
 
@@ -297,9 +308,10 @@ export async function generateCards(
   try {
     return await retryWithBackoff(async () => {
       const ai = await getClient();
+      const model = await getModel("general_model", "gemini-2.5-flash");
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model,
         contents: `${CARDS_PROMPT}\n\nWords to analyze: ${JSON.stringify(words)}`,
         config: {
           responseMimeType: "application/json",
@@ -386,9 +398,10 @@ export async function generateDeepLayer(
   try {
     return await retryWithBackoff(async () => {
       const ai = await getClient();
+      const model = await getModel("general_model", "gemini-2.5-flash");
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model,
         contents: `${DEEP_PROMPT}\n\nWord: "${word}"`,
         config: {
           responseMimeType: "application/json",
@@ -424,9 +437,10 @@ export async function extractWords(text: string): Promise<string[]> {
   try {
     return await retryWithBackoff(async () => {
       const ai = await getClient();
+      const model = await getModel("general_model", "gemini-2.5-flash");
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model,
         contents: `Extract English words worth studying from the following text. Exclude common/simple words (the, is, a, it, etc.). Focus on vocabulary useful for intermediate-to-advanced English learners.
 
 Return a JSON array of strings (just the words).

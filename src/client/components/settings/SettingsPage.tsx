@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Key, Volume2, Sun, Moon, Monitor, Info, Loader2 } from "lucide-react";
+import { Key, Volume2, Sun, Moon, Monitor, Info, Loader2, Globe, Cpu } from "lucide-react";
 import { toast } from "sonner";
 import {
   Card,
@@ -34,7 +34,7 @@ function ApiKeySection() {
           toast.success("API key saved");
           setApiKey("");
         },
-        onError: (err) => toast.error(err.message),
+        onError: (err: Error) => toast.error(err.message),
       },
     );
   }
@@ -80,6 +80,165 @@ function ApiKeySection() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ── API Base URL Section ────────────────────────────────────────────
+function BaseUrlSection() {
+  const { data: settings } = useSettings();
+  const updateSetting = useUpdateSetting();
+  const [url, setUrl] = useState("");
+
+  const current = settings?.gemini_base_url ?? "";
+
+  function handleSave() {
+    updateSetting.mutate(
+      { key: "gemini_base_url", value: url.trim() },
+      {
+        onSuccess: () => {
+          toast.success("Base URL saved");
+          setUrl("");
+        },
+        onError: (err: Error) => toast.error(err.message),
+      },
+    );
+  }
+
+  function handleClear() {
+    updateSetting.mutate(
+      { key: "gemini_base_url", value: "" },
+      {
+        onSuccess: () => toast.success("Reset to default Google API"),
+        onError: (err: Error) => toast.error(err.message),
+      },
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Globe className="size-4" />
+          API Base URL
+        </CardTitle>
+        <CardDescription>
+          Leave empty for Google official API. Set a proxy URL if you use a relay service.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {current && (
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="font-mono text-xs">
+              {current}
+            </Badge>
+            <Button variant="ghost" size="sm" onClick={handleClear}>
+              Reset
+            </Button>
+          </div>
+        )}
+        <div className="flex gap-2">
+          <Input
+            placeholder="https://your-proxy.example.com"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSave()}
+          />
+          <Button
+            onClick={handleSave}
+            disabled={!url.trim() || updateSetting.isPending}
+          >
+            Save
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Model Configuration Section ─────────────────────────────────────
+function ModelSection() {
+  const { data: settings } = useSettings();
+  const updateSetting = useUpdateSetting();
+
+  const models = [
+    { key: "story_model", label: "Story Model", fallback: "gemini-2.5-pro", desc: "Used for image → story generation" },
+    { key: "general_model", label: "General Model", fallback: "gemini-2.5-flash", desc: "Used for cards, translation, extraction" },
+    { key: "tts_model", label: "TTS Model", fallback: "gemini-2.5-flash-preview-tts", desc: "Used for AI voice narration" },
+  ];
+
+  function handleSave(key: string, value: string) {
+    updateSetting.mutate(
+      { key, value: value.trim() },
+      {
+        onSuccess: () => toast.success("Model saved"),
+        onError: (err: Error) => toast.error(err.message),
+      },
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Cpu className="size-4" />
+          Models
+        </CardTitle>
+        <CardDescription>
+          Override model names. Leave empty for defaults.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {models.map(({ key, label, fallback, desc }) => {
+          const current = settings?.[key] ?? "";
+          return (
+            <ModelInput
+              key={key}
+              settingKey={key}
+              label={label}
+              fallback={fallback}
+              desc={desc}
+              current={current}
+              onSave={handleSave}
+            />
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ModelInput({ settingKey, label, fallback, desc, current, onSave }: {
+  settingKey: string; label: string; fallback: string; desc: string; current: string;
+  onSave: (key: string, value: string) => void;
+}) {
+  const [value, setValue] = useState("");
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between">
+        <span className="text-sm font-medium">{label}</span>
+        <span className="text-xs text-muted-foreground">
+          {current || fallback}
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground">{desc}</p>
+      <div className="flex gap-2">
+        <Input
+          placeholder={fallback}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && value.trim() && onSave(settingKey, value)}
+          className="font-mono text-sm"
+        />
+        <Button
+          size="sm"
+          onClick={() => { onSave(settingKey, value); setValue(""); }}
+          disabled={!value.trim()}
+        >
+          Save
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -242,6 +401,8 @@ export function SettingsPage() {
     <div className="mx-auto max-w-2xl space-y-6 p-6">
       <h2 className="text-2xl font-semibold">Settings</h2>
       <ApiKeySection />
+      <BaseUrlSection />
+      <ModelSection />
       <TtsSection />
       <ThemeSection />
       <AboutSection />

@@ -116,7 +116,7 @@ function StoryStudioInner() {
         <section className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">历史故事</h3>
           <div className="grid gap-3 sm:grid-cols-2">
-            {stories.map((s) => (
+            {stories.map((s: Story) => (
               <Card
                 key={s.id}
                 className={`group cursor-pointer transition-shadow hover:shadow-md ${
