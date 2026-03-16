@@ -34,7 +34,7 @@ async function retryWithBackoff<T>(
         error instanceof Error ? error.message : String(error);
       // Only retry on transient errors
       const shouldRetry =
-        /503|overloaded|429|rate.limit|UNAVAILABLE|network|timeout|fetch/i.test(
+        /503|overloaded|429|rate.limit|UNAVAILABLE|network|timeout|fetch|ECONNRESET|socket|SSL|TLS|eof|getoxsrf/i.test(
           msg,
         );
       if (!shouldRetry || attempt === maxRetries - 1) throw error;
@@ -44,6 +44,53 @@ async function retryWithBackoff<T>(
     }
   }
   throw lastError;
+}
+
+// ---------------------------------------------------------------------------
+// Lenient JSON parsing (some models wrap JSON in markdown fences)
+// ---------------------------------------------------------------------------
+
+function extractJsonCandidate(raw: string): string {
+  const text = raw.trim();
+  if (!text) return text;
+
+  // Common case: ```json ... ```
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch?.[1]) return fenceMatch[1].trim();
+
+  // Fallback: grab the largest {...} or [...] block
+  const firstObj = text.indexOf("{");
+  const lastObj = text.lastIndexOf("}");
+  const firstArr = text.indexOf("[");
+  const lastArr = text.lastIndexOf("]");
+
+  const candidates: string[] = [];
+  if (firstArr !== -1 && lastArr !== -1 && lastArr > firstArr) {
+    candidates.push(text.slice(firstArr, lastArr + 1));
+  }
+  if (firstObj !== -1 && lastObj !== -1 && lastObj > firstObj) {
+    candidates.push(text.slice(firstObj, lastObj + 1));
+  }
+
+  if (candidates.length) {
+    candidates.sort((a, b) => b.length - a.length);
+    return candidates[0].trim();
+  }
+
+  return text;
+}
+
+function parseJsonLenient(raw: string): unknown {
+  const candidate = extractJsonCandidate(raw);
+  try {
+    return JSON.parse(candidate);
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    const snippet = raw.trim().slice(0, 220);
+    throw new Error(
+      `Failed to parse JSON from model output (${reason}). Snippet: ${snippet}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -301,9 +348,10 @@ export async function generateCards(
       const text = response.text ?? "[]";
       let parsed: unknown;
       try {
-        parsed = JSON.parse(text);
-      } catch {
-        throw new Error(`Failed to parse Gemini JSON response: ${text.slice(0, 200)}`);
+        parsed = parseJsonLenient(text);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`Failed to parse Gemini JSON response: ${msg}`);
       }
 
       const result = aiCardsResponseSchema.safeParse(parsed);
@@ -391,9 +439,10 @@ export async function generateDeepLayer(
       const text = response.text ?? "{}";
       let parsed: unknown;
       try {
-        parsed = JSON.parse(text);
-      } catch {
-        throw new Error(`Failed to parse deep layer JSON: ${text.slice(0, 200)}`);
+        parsed = parseJsonLenient(text);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`Failed to parse deep layer JSON: ${msg}`);
       }
 
       const result = aiDeepLayerSchema.safeParse(parsed);
@@ -435,9 +484,10 @@ ${text}`,
       const raw = response.text ?? "[]";
       let parsed: unknown;
       try {
-        parsed = JSON.parse(raw);
-      } catch {
-        throw new Error(`Failed to parse extracted words JSON: ${raw.slice(0, 200)}`);
+        parsed = parseJsonLenient(raw);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`Failed to parse extracted words JSON: ${msg}`);
       }
 
       if (!Array.isArray(parsed)) return [];

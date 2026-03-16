@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { randomUUID } from "crypto";
 import { mkdir, readFile, unlink, writeFile } from "fs/promises";
 import { join } from "path";
@@ -78,8 +79,8 @@ storyRoutes.post("/generate", async (c) => {
   return c.json(toStory(inserted[0]));
 });
 
-// POST /:id/tts — generate TTS audio for a story
-storyRoutes.post("/:id/tts", async (c) => {
+// GET /:id/tts — generate TTS audio for a story (audio tag-friendly)
+const ttsHandler = async (c: Context) => {
   const id = Number(c.req.param("id"));
   const row = await db.select().from(stories).where(eq(stories.id, id)).get();
   if (!row) {
@@ -92,7 +93,11 @@ storyRoutes.post("/:id/tts", async (c) => {
   return new Response(wavBuffer, {
     headers: { "Content-Type": "audio/wav" },
   });
-});
+};
+
+storyRoutes.get("/:id/tts", ttsHandler);
+// Keep POST for backward compatibility (older clients may POST)
+storyRoutes.post("/:id/tts", ttsHandler);
 
 // POST /:id/translate — translate a story to Chinese
 storyRoutes.post("/:id/translate", async (c) => {
