@@ -29,7 +29,7 @@ const JSON_FIELDS = [
 ] as const;
 
 /** Parse a card DB row into the API shape (JSON-decode text fields). */
-function toCard(row: typeof cards.$inferSelect): Card {
+export function toCard(row: typeof cards.$inferSelect): Card {
   const card: Record<string, unknown> = { ...row };
   for (const field of JSON_FIELDS) {
     const raw = card[field];

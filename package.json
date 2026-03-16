@@ -11,7 +11,9 @@
     "start": "node dist/server/index.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@google/genai": "^1.45.0",
@@ -63,6 +65,7 @@
     "typescript-eslint": "^8.56.1",
     "vite": "^8.0.0",
     "vite-plugin-pwa": "^1.2.0",
+    "vitest": "^4.1.0",
     "workbox-precaching": "^7.4.0"
   }
 }

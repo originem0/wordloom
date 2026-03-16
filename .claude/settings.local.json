@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(git remote:*)",
-      "Bash(find . -type f -not -path './.git/*' -not -path './node_modules/*' -not -path './.next/*' -not -path './dist/*' | grep -E '\\\\.\\(ts|tsx\\)$' | sort)"
+      "Bash(find . -type f -not -path './.git/*' -not -path './node_modules/*' -not -path './.next/*' -not -path './dist/*' | grep -E '\\\\.\\(ts|tsx\\)$' | sort)",
+      "Bash(cd D:/Development/Apps/wordloom && pnpm test 2>&1)"
     ]
   }
 }
