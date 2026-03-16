@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Key, Volume2, Sun, Moon, Monitor, Info, Loader2, Globe, Cpu } from "lucide-react";
+import { Key, Volume2, Sun, Moon, Monitor, Info, Loader2, Globe, Cpu, PlayCircle } from "lucide-react";
 import { toast } from "sonner";
+import { apiPost } from "@/client/lib/api";
 import {
   Card,
   CardHeader,
@@ -12,16 +13,80 @@ import { Button } from "@/client/components/ui/button";
 import { Input } from "@/client/components/ui/input";
 import { Badge } from "@/client/components/ui/badge";
 import { useSettings, useUpdateSetting } from "@/client/hooks/useSettings";
+import { apiPost } from "@/client/lib/api";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
 
 type Theme = "light" | "dark" | "system";
+
+type SettingTestTarget =
+  | "apiKey"
+  | "baseUrl"
+  | "listModels"
+  | "storyModel"
+  | "generalModel"
+  | "ttsModel";
+
+type SettingTestResponse = {
+  ok: boolean;
+  target?: SettingTestTarget;
+  latencyMs?: number;
+  warnings?: string[];
+  request?: {
+    baseUrl?: string;
+    apiVersion?: string;
+    requestRoot?: string | null;
+  };
+  requestUrl?: string;
+  model?: string;
+  result?: unknown;
+  error?: {
+    message?: string;
+    hint?: string;
+    upstream?: unknown;
+  };
+  // passthrough fields for debugging
+  [key: string]: unknown;
+};
+
+function TestResultView({ res }: { res: SettingTestResponse | null }) {
+  if (!res) return null;
+
+  const ok = Boolean(res.ok);
+  const title = ok ? "OK" : "FAIL";
+  const message = ok
+    ? `OK${typeof res.latencyMs === "number" ? ` (${res.latencyMs}ms)` : ""}`
+    : (res.error?.message as string | undefined) || "Test failed";
+
+  const hint = !ok ? (res.error?.hint as string | undefined) : undefined;
+
+  return (
+    <div className="mt-2 space-y-1 rounded-md border bg-muted/30 p-2 text-xs">
+      <div className="flex items-center justify-between">
+        <span className={ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+          {title}
+        </span>
+        {res.model && <span className="font-mono text-muted-foreground">{String(res.model)}</span>}
+      </div>
+      <div className="text-foreground/90">{message}</div>
+      {hint && <div className="text-muted-foreground">Hint: {hint}</div>}
+      <details className="pt-1">
+        <summary className="cursor-pointer text-muted-foreground">details</summary>
+        <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2">
+          {JSON.stringify(res, null, 2)}
+        </pre>
+      </details>
+    </div>
+  );
+}
 
 // ── API Key Section ─────────────────────────────────────────────────
 function ApiKeySection() {
   const { data: settings } = useSettings();
   const updateSetting = useUpdateSetting();
   const [apiKey, setApiKey] = useState("");
+  const [testRes, setTestRes] = useState<SettingTestResponse | null>(null);
+  const [testing, setTesting] = useState(false);
 
   const isConfigured = settings?.gemini_api_key === "configured";
 
@@ -37,6 +102,29 @@ function ApiKeySection() {
         onError: (err: Error) => toast.error(err.message),
       },
     );
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    try {
+      const payload: Record<string, unknown> = { target: "apiKey" satisfies SettingTestTarget };
+      if (apiKey.trim()) payload.apiKey = apiKey.trim();
+      const res = await apiPost<SettingTestResponse>("/api/settings/test", payload);
+      setTestRes(res);
+
+      if (res.ok) {
+        const count = (res.result as any)?.modelCount;
+        toast.success(typeof count === "number" ? `API key OK (${count} models)` : "API key OK");
+      } else {
+        toast.error((res.error?.message as string | undefined) || "API key test failed");
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(msg);
+      setTestRes({ ok: false, error: { message: msg } });
+    } finally {
+      setTesting(false);
+    }
   }
 
   return (
@@ -77,7 +165,21 @@ function ApiKeySection() {
             )}
             Save
           </Button>
+          <Button
+            variant="outline"
+            onClick={handleTest}
+            disabled={testing || (!apiKey.trim() && !isConfigured)}
+          >
+            {testing ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <PlayCircle className="size-4" />
+            )}
+            Test
+          </Button>
         </div>
+
+        <TestResultView res={testRes} />
       </CardContent>
     </Card>
   );
@@ -88,6 +190,8 @@ function BaseUrlSection() {
   const { data: settings } = useSettings();
   const updateSetting = useUpdateSetting();
   const [url, setUrl] = useState("");
+  const [testRes, setTestRes] = useState<SettingTestResponse | null>(null);
+  const [testing, setTesting] = useState(false);
 
   const current = settings?.gemini_base_url ?? "";
 
@@ -112,6 +216,28 @@ function BaseUrlSection() {
         onError: (err: Error) => toast.error(err.message),
       },
     );
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    try {
+      const baseUrl = url.trim() || current;
+      const payload: Record<string, unknown> = { target: "baseUrl" satisfies SettingTestTarget };
+      if (baseUrl) payload.baseUrl = baseUrl;
+      const res = await apiPost<SettingTestResponse>("/api/settings/test", payload);
+      setTestRes(res);
+      if (res.ok) {
+        toast.success("Base URL OK");
+      } else {
+        toast.error((res.error?.message as string | undefined) || "Base URL test failed");
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(msg);
+      setTestRes({ ok: false, error: { message: msg } });
+    } finally {
+      setTesting(false);
+    }
   }
 
   return (
@@ -149,7 +275,21 @@ function BaseUrlSection() {
           >
             Save
           </Button>
+          <Button
+            variant="outline"
+            onClick={handleTest}
+            disabled={testing}
+          >
+            {testing ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <PlayCircle className="size-4" />
+            )}
+            Test
+          </Button>
         </div>
+
+        <TestResultView res={testRes} />
       </CardContent>
     </Card>
   );
@@ -212,6 +352,43 @@ function ModelInput({ settingKey, label, fallback, desc, current, onSave }: {
   onSave: (key: string, value: string) => void;
 }) {
   const [value, setValue] = useState("");
+  const [testRes, setTestRes] = useState<SettingTestResponse | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  const effectiveModel = (value.trim() || current || fallback).trim();
+
+  const target: SettingTestTarget | null =
+    settingKey === "story_model"
+      ? "storyModel"
+      : settingKey === "general_model"
+        ? "generalModel"
+        : settingKey === "tts_model"
+          ? "ttsModel"
+          : null;
+
+  async function handleTest() {
+    if (!target) return;
+    setTesting(true);
+    try {
+      const res = await apiPost<SettingTestResponse>("/api/settings/test", {
+        target,
+        model: effectiveModel,
+      });
+      setTestRes(res);
+
+      if (res.ok) {
+        toast.success(`${label}: OK`);
+      } else {
+        toast.error((res.error?.message as string | undefined) || `${label}: test failed`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(msg);
+      setTestRes({ ok: false, error: { message: msg } });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   return (
     <div className="space-y-1">
@@ -237,7 +414,22 @@ function ModelInput({ settingKey, label, fallback, desc, current, onSave }: {
         >
           Save
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleTest}
+          disabled={testing || !target}
+        >
+          {testing ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <PlayCircle className="size-4" />
+          )}
+          Test
+        </Button>
       </div>
+
+      <TestResultView res={testRes} />
     </div>
   );
 }
@@ -261,6 +453,11 @@ function TtsSection() {
       value: "browser",
       label: "Browser TTS (Offline)",
       desc: "Uses your browser's built-in speech synthesis",
+    },
+    {
+      value: "edge",
+      label: "Edge TTS (Free)",
+      desc: "Server-side Microsoft Edge Read Aloud voices (English)",
     },
     {
       value: "gemini",
