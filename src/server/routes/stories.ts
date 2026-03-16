@@ -8,6 +8,7 @@ import { stories } from "../db/schema.js";
 import { eq, desc } from "drizzle-orm";
 import { compressImage } from "../services/image.js";
 import { generateStory, generateTTS, translateText } from "../services/gemini.js";
+import { generateEdgeTtsMp3 } from "../services/edgeTts.js";
 import { pcmToWav } from "../services/tts.js";
 import type { Story, GroundingSource } from "../../shared/types.js";
 
@@ -87,6 +88,16 @@ const ttsHandler = async (c: Context) => {
     return c.json({ error: "Story not found", code: "NOT_FOUND" }, 404);
   }
 
+  const provider = (c.req.query("provider") || "gemini").toLowerCase();
+
+  if (provider === "edge") {
+    const mp3Buffer = await generateEdgeTtsMp3(row.story);
+    return new Response(mp3Buffer, {
+      headers: { "Content-Type": "audio/mpeg" },
+    });
+  }
+
+  // Default: Gemini native TTS (PCM → wav)
   const pcmBase64 = await generateTTS(row.story);
   const wavBuffer = pcmToWav(pcmBase64);
 

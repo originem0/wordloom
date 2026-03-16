@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Play, Pause, Square, Volume2 } from "lucide-react";
 import { Button } from "@/client/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/client/components/ui/tabs";
+import { useSettings } from "@/client/hooks/useSettings";
 
 interface TtsPlayerProps {
   storyId: number;
@@ -105,11 +106,7 @@ function BrowserTtsPlayer({ storyText }: { storyText: string }) {
         </Button>
       ) : (
         <>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={paused ? play : pause}
-          >
+          <Button variant="outline" size="sm" onClick={paused ? play : pause}>
             {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
             {paused ? "继续" : "暂停"}
           </Button>
@@ -123,6 +120,22 @@ function BrowserTtsPlayer({ storyText }: { storyText: string }) {
   );
 }
 
+// ---- Edge TTS (server-side, free) ----
+
+function EdgeTtsPlayer({ storyId }: { storyId: number }) {
+  return (
+    <div className="flex items-center gap-2">
+      <Volume2 className="size-4 text-muted-foreground" />
+      <audio
+        src={`/api/stories/${storyId}/tts?provider=edge`}
+        controls
+        preload="none"
+        className="h-8 w-full max-w-xs"
+      />
+    </div>
+  );
+}
+
 // ---- Gemini TTS (server-side audio) ----
 
 function GeminiTtsPlayer({ storyId }: { storyId: number }) {
@@ -130,7 +143,7 @@ function GeminiTtsPlayer({ storyId }: { storyId: number }) {
     <div className="flex items-center gap-2">
       <Volume2 className="size-4 text-muted-foreground" />
       <audio
-        src={`/api/stories/${storyId}/tts`}
+        src={`/api/stories/${storyId}/tts?provider=gemini`}
         controls
         preload="none"
         className="h-8 w-full max-w-xs"
@@ -142,14 +155,24 @@ function GeminiTtsPlayer({ storyId }: { storyId: number }) {
 // ---- Combined player ----
 
 export function TtsPlayer({ storyId, storyText }: TtsPlayerProps) {
+  const { data: settings } = useSettings();
+  const pref = settings?.tts_preference;
+  const preferred =
+    pref === "browser" || pref === "edge" || pref === "gemini" ? pref : "browser";
+
+  // Radix Tabs only respects defaultValue on mount, so we key by preference.
   return (
-    <Tabs defaultValue="browser" className="w-full">
+    <Tabs key={preferred} defaultValue={preferred} className="w-full">
       <TabsList>
         <TabsTrigger value="browser">浏览器朗读</TabsTrigger>
+        <TabsTrigger value="edge">Edge TTS（免费）</TabsTrigger>
         <TabsTrigger value="gemini">Gemini TTS</TabsTrigger>
       </TabsList>
       <TabsContent value="browser" className="pt-2">
         <BrowserTtsPlayer storyText={storyText} />
+      </TabsContent>
+      <TabsContent value="edge" className="pt-2">
+        <EdgeTtsPlayer storyId={storyId} />
       </TabsContent>
       <TabsContent value="gemini" className="pt-2">
         <GeminiTtsPlayer storyId={storyId} />
