@@ -69,18 +69,26 @@ describe("generateCards — Zod validation + partial failure", () => {
   });
 
   it('marks missing words as "Not returned by AI"', async () => {
-    // Request 3 words, only 1 returned
-    const cards = [makeValidCard("apple")];
+    // One valid card + one invalid → triggers per-item validation.
+    // "cherry" is absent entirely → should be marked "Not returned by AI".
+    const cards = [
+      makeValidCard("apple"),
+      { ...makeValidCard("banana"), cefr: "X9" }, // invalid
+      // "cherry" missing
+    ];
     mockGenerateContent.mockResolvedValue({ text: JSON.stringify(cards) });
 
     const result = await generateCards(["apple", "banana", "cherry"]);
 
-    expect(result.success).toHaveLength(1);
-    const missingWords = result.failed.map((f) => f.word).sort();
-    expect(missingWords).toEqual(["banana", "cherry"]);
-    expect(result.failed.every((f) => f.error === "Not returned by AI")).toBe(
-      true,
-    );
+    expect(result.success.map((c) => c.word)).toEqual(["apple"]);
+    expect(result.failed).toContainEqual({
+      word: "banana",
+      error: "Validation failed",
+    });
+    expect(result.failed).toContainEqual({
+      word: "cherry",
+      error: "Not returned by AI",
+    });
   });
 
   it("throws on non-JSON response", async () => {

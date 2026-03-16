@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
 import { authRoutes } from "../../routes/auth.js";
 import { authMiddleware, signToken } from "../../middleware/auth.js";
