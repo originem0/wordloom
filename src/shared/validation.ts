@@ -38,7 +38,8 @@ export const aiCardSchema = z.object({
       z.object({
         level: z.number(),
         sentence: z.string(),
-        context: z.string(),
+        // Some models omit context description; tolerate and default to empty.
+        context: z.string().optional().default(""),
       }),
     )
     .optional()

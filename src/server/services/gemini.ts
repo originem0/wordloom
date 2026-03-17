@@ -94,6 +94,168 @@ function parseJsonLenient(raw: string): unknown {
 }
 
 // ---------------------------------------------------------------------------
+// Normalize AI output — tolerate common schema drift across models/proxies
+// ---------------------------------------------------------------------------
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function coerceNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function coerceStringArray(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    return value.filter((x): x is string => typeof x === "string");
+  }
+  if (typeof value === "string") {
+    const parts = value
+      .split(/[,，;；\n]/g)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return parts.length ? parts : undefined;
+  }
+  return undefined;
+}
+
+function normalizeCefr(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const v = value.trim().toUpperCase();
+  if (/^(A1|A2|B1|B2|C1|C2)$/.test(v)) return v;
+  return value;
+}
+
+function normalizeConfidence(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const v = value.trim().toLowerCase();
+  if (v === "high" || v === "medium" || v === "low") return v;
+  if (v === "med") return "medium";
+  return value;
+}
+
+function normalizeExamples(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+
+  const normalized = value
+    .map((item, idx) => {
+      if (!isRecord(item)) return null;
+
+      const levelRaw = item.level;
+      let level: unknown = levelRaw;
+      if (typeof levelRaw === "number") {
+        level = levelRaw <= 1 ? "basic" : levelRaw === 2 ? "intermediate" : "advanced";
+      } else if (typeof levelRaw === "string") {
+        const l = levelRaw.toLowerCase();
+        if (l === "beginner" || l === "easy" || l === "simple") level = "basic";
+        else if (l === "intermediate" || l === "medium") level = "intermediate";
+        else if (l === "advanced" || l === "hard") level = "advanced";
+      } else if (levelRaw == null) {
+        level = idx === 0 ? "basic" : idx === 1 ? "intermediate" : "advanced";
+      }
+
+      const sentence =
+        (typeof item.sentence === "string" ? item.sentence : undefined) ??
+        (typeof item.en === "string" ? item.en : undefined) ??
+        (typeof item.english === "string" ? item.english : undefined) ??
+        (typeof item.text === "string" ? item.text : undefined) ??
+        (typeof item.example === "string" ? item.example : undefined);
+
+      if (!sentence) return null;
+
+      const translation =
+        (typeof item.translation === "string" ? item.translation : undefined) ??
+        (typeof item.zh === "string" ? item.zh : undefined) ??
+        (typeof item.cn === "string" ? item.cn : undefined) ??
+        (typeof item.chinese === "string" ? item.chinese : undefined) ??
+        "";
+
+      return { level, sentence, translation };
+    })
+    .filter(Boolean);
+
+  return normalized;
+}
+
+function normalizeContextLadder(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+
+  const normalized = value
+    .map((item, idx) => {
+      if (!isRecord(item)) return null;
+
+      const level = coerceNumber(item.level) ?? idx + 1;
+      const sentence =
+        (typeof item.sentence === "string" ? item.sentence : undefined) ??
+        (typeof item.en === "string" ? item.en : undefined) ??
+        (typeof item.text === "string" ? item.text : undefined);
+
+      if (!sentence) return null;
+
+      const context =
+        (typeof item.context === "string" ? item.context : undefined) ??
+        (typeof item.contextDescription === "string" ? item.contextDescription : undefined) ??
+        (typeof (item as any).context_description === "string" ? (item as any).context_description : undefined) ??
+        (typeof item.description === "string" ? item.description : undefined) ??
+        (typeof item.desc === "string" ? item.desc : undefined) ??
+        "";
+
+      return { level, sentence, context };
+    })
+    .filter(Boolean);
+
+  return normalized;
+}
+
+function normalizeCardObject(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const out: Record<string, unknown> = { ...value };
+
+  // Field aliases
+  if (out.partOfSpeech && !out.pos) out.pos = out.partOfSpeech;
+  if (out.meaning && !out.coreMeaning) out.coreMeaning = out.meaning;
+  if (out.definition && !out.coreMeaning) out.coreMeaning = out.definition;
+  if (out.minimalPair && !out.minPair) out.minPair = out.minimalPair;
+
+  out.cefr = normalizeCefr(out.cefr);
+  out.cefrConfidence = normalizeConfidence(out.cefrConfidence);
+
+  const wad = coerceNumber(out.wad);
+  if (wad != null) out.wad = wad;
+  const wap = coerceNumber(out.wap);
+  if (wap != null) out.wap = wap;
+
+  out.collocations = coerceStringArray(out.collocations) ?? out.collocations;
+  out.phrases = coerceStringArray(out.phrases) ?? out.phrases;
+  out.synonyms = coerceStringArray(out.synonyms) ?? out.synonyms;
+  out.antonyms = coerceStringArray(out.antonyms) ?? out.antonyms;
+
+  out.examples = normalizeExamples(out.examples);
+  out.contextLadder = normalizeContextLadder(out.contextLadder);
+
+  return out;
+}
+
+function normalizeCardsPayload(parsed: unknown): unknown {
+  let payload: unknown = parsed;
+
+  // Some models wrap the array in an object.
+  if (isRecord(payload)) {
+    if (Array.isArray(payload.cards)) payload = payload.cards;
+    else if (Array.isArray(payload.data)) payload = payload.data;
+    else if (Array.isArray(payload.items)) payload = payload.items;
+  }
+
+  if (Array.isArray(payload)) return payload.map(normalizeCardObject);
+  return payload;
+}
+
+// ---------------------------------------------------------------------------
 // API Key from DB
 // ---------------------------------------------------------------------------
 
@@ -375,6 +537,8 @@ export async function generateCards(
         throw new Error(`Failed to parse Gemini JSON response: ${msg}`);
       }
 
+      parsed = normalizeCardsPayload(parsed);
+
       const result = aiCardsResponseSchema.safeParse(parsed);
       if (result.success) {
         return { success: result.data as ParsedCard[], failed: [] };
@@ -394,7 +558,10 @@ export async function generateCards(
             typeof item === "object" && item !== null && "word" in item
               ? String((item as { word: unknown }).word)
               : "unknown";
-          failed.push({ word, error: "Validation failed" });
+          const first = single.error.issues?.[0];
+          const path = first?.path?.length ? first.path.join(".") : "";
+          const msg = first?.message ? String(first.message) : "Validation failed";
+          failed.push({ word, error: path ? `${path}: ${msg}` : msg });
         }
       }
 
@@ -457,7 +624,8 @@ For the given word, generate a JSON object with these fields:
    }
    Include the target word and at least one confusable word from familyComparison in the options.
 
-Return as a single JSON object. All Chinese text should use Simplified Chinese.`;
+Return as a single JSON object. All Chinese text should use Simplified Chinese.`;
+
 
 export async function generateDeepLayer(
   word: string,

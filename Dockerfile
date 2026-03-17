@@ -12,7 +12,6 @@ RUN pnpm install --frozen-lockfile
 # Copy source and build
 COPY . .
 RUN pnpm build
-RUN pnpm db:generate
 
 # Production stage
 FROM node:20-slim
