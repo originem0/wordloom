@@ -5,6 +5,7 @@ import { BookOpen, Layers, Settings, Sun, Moon } from "lucide-react";
 import { apiFetch } from "@/client/lib/api";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
+import { TaskPanel } from "./TaskPanel";
 
 const navItems = [
   { to: "/", icon: BookOpen, label: "Story" },
@@ -93,6 +94,9 @@ export function Shell() {
       <main className="md:ml-56 pb-16 md:pb-0 min-h-screen">
         <Outlet />
       </main>
+
+      {/* Global task queue panel */}
+      <TaskPanel />
 
       {/* Mobile bottom nav */}
       <nav className="fixed bottom-0 left-0 right-0 h-16 bg-background border-t flex items-center justify-around md:hidden">

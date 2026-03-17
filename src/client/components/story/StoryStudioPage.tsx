@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { Loader2, Trash2, Clock } from "lucide-react";
 import { Button } from "@/client/components/ui/button";
 import { Input } from "@/client/components/ui/input";
@@ -7,10 +7,15 @@ import { ModuleErrorBoundary } from "@/client/components/layout/ErrorBoundary";
 import { ImageUploader } from "./ImageUploader";
 import { StoryView } from "./StoryView";
 import { useStories } from "@/client/hooks/useStories";
+import { useTaskStore } from "@/client/store/tasks";
 import type { Story } from "@/shared/types";
 
 function StoryStudioInner() {
-  const { storiesQuery, generateMutation, deleteMutation } = useStories();
+  const { storiesQuery, deleteMutation } = useStories();
+  const submitStory = useTaskStore((s) => s.submitStory);
+  const runningStoryTasks = useTaskStore((s) =>
+    s.tasks.filter((t) => t.type === "story" && t.status === "running"),
+  );
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -19,31 +24,25 @@ function StoryStudioInner() {
 
   const handleImageSelect = useCallback((file: File) => {
     setImageFile(file);
-    // Revoke previous blob URL to avoid memory leak
     setImagePreview((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return URL.createObjectURL(file);
     });
   }, []);
 
-  const generatingRef = useRef(false);
-
-  const handleGenerate = async () => {
-    if (!imageFile || generatingRef.current) return;
-    generatingRef.current = true;
-    try {
-      const result = await generateMutation.mutateAsync({
-        image: imageFile,
-        prompt,
-      });
-      setActiveStory(result);
-    } finally {
-      generatingRef.current = false;
-    }
+  const handleGenerate = () => {
+    if (!imageFile) return;
+    submitStory(imageFile, prompt);
+    // Clear form so user can queue another
+    setImageFile(null);
+    setImagePreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setPrompt("");
   };
 
   const handleWordClick = useCallback((word: string) => {
-    // For now, log to console. Word Forge integration will come later.
     console.log("Word clicked:", word);
   }, []);
 
@@ -54,7 +53,6 @@ function StoryStudioInner() {
 
   const stories = storiesQuery.data ?? [];
 
-  // Format relative time in Chinese
   const timeAgo = useMemo(
     () => (ts: number) => {
       const diff = Date.now() - ts;
@@ -95,18 +93,15 @@ function StoryStudioInner() {
           <Button
             type="button"
             onClick={handleGenerate}
-            disabled={!imageFile || generateMutation.isPending}
+            disabled={!imageFile}
             className="w-full md:w-auto"
           >
-            {generateMutation.isPending && (
-              <Loader2 className="size-4 animate-spin" />
-            )}
-            {generateMutation.isPending ? "生成中..." : "生成故事"}
+            生成故事
           </Button>
 
-          {generateMutation.isError && (
-            <p className="text-sm text-destructive">
-              {generateMutation.error.message}
+          {runningStoryTasks.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {runningStoryTasks.length} 个故事正在生成中，可在任务队列查看进度
             </p>
           )}
         </div>
@@ -166,7 +161,6 @@ function StoryStudioInner() {
         </section>
       )}
 
-      {/* Loading state for stories list */}
       {storiesQuery.isLoading && (
         <div className="flex justify-center py-8">
           <Loader2 className="size-5 animate-spin text-muted-foreground" />

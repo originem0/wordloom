@@ -4,7 +4,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/client/components/ui
 import { Input } from "@/client/components/ui/input";
 import { Button } from "@/client/components/ui/button";
 import { Badge } from "@/client/components/ui/badge";
-import { useGenerateCards, useExtractWords } from "@/client/hooks/useCards";
+import { useExtractWords } from "@/client/hooks/useCards";
+import { useTaskStore } from "@/client/store/tasks";
 
 const MAX_WORDS = 10;
 
@@ -23,13 +24,14 @@ function parseWords(raw: string): string[] {
 
 function ManualInput() {
   const [input, setInput] = useState("");
-  const generate = useGenerateCards();
+  const submitCards = useTaskStore((s) => s.submitCards);
 
   const words = parseWords(input);
 
   const handleGenerate = () => {
     if (words.length === 0) return;
-    generate.mutate(words);
+    submitCards(words);
+    setInput("");
   };
 
   return (
@@ -52,15 +54,13 @@ function ManualInput() {
         </p>
       )}
       <Button
+        type="button"
         onClick={handleGenerate}
         className="w-full sm:w-auto"
-        disabled={words.length === 0 || generate.isPending}
+        disabled={words.length === 0}
       >
-        {generate.isPending && <Loader2 className="size-4 animate-spin" />}
-        {generate.isPending ? "Generating..." : "Generate Cards"}
+        Generate Cards
       </Button>
-
-      <GenerateResult mutation={generate} />
     </div>
   );
 }
@@ -71,7 +71,7 @@ function ExtractInput() {
   const [text, setText] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const extract = useExtractWords();
-  const generate = useGenerateCards();
+  const submitCards = useTaskStore((s) => s.submitCards);
 
   const handleExtract = () => {
     if (!text.trim()) return;
@@ -94,7 +94,8 @@ function ExtractInput() {
   const handleGenerate = () => {
     const words = [...selected];
     if (words.length === 0) return;
-    generate.mutate(words);
+    submitCards(words);
+    setSelected(new Set());
   };
 
   return (
@@ -106,6 +107,7 @@ function ExtractInput() {
         onChange={(e) => setText(e.target.value)}
       />
       <Button
+        type="button"
         onClick={handleExtract}
         variant="outline"
         className="w-full sm:w-auto"
@@ -134,17 +136,10 @@ function ExtractInput() {
             ))}
           </div>
           {selected.size > 0 && (
-            <Button
-              onClick={handleGenerate}
-              disabled={generate.isPending}
-            >
-              {generate.isPending && <Loader2 className="size-4 animate-spin" />}
-              {generate.isPending
-                ? "Generating..."
-                : `Generate ${selected.size} Card${selected.size > 1 ? "s" : ""}`}
+            <Button type="button" onClick={handleGenerate}>
+              {`Generate ${selected.size} Card${selected.size > 1 ? "s" : ""}`}
             </Button>
           )}
-          <GenerateResult mutation={generate} />
         </div>
       )}
     </div>
@@ -160,44 +155,6 @@ function FromStory() {
       <a href="/" className="text-primary underline-offset-4 hover:underline">
         Go to Story Studio &rarr;
       </a>
-    </div>
-  );
-}
-
-// --- Shared result display ---
-
-function GenerateResult({
-  mutation,
-}: {
-  mutation: ReturnType<typeof useGenerateCards>;
-}) {
-  if (mutation.isError) {
-    return <p className="text-sm text-destructive">{mutation.error.message}</p>;
-  }
-  if (!mutation.data) return null;
-
-  const { success, failed } = mutation.data;
-  return (
-    <div className="space-y-2 text-sm">
-      {success.length > 0 && (
-        <p className="text-emerald-600 dark:text-emerald-400">
-          {success.length} card{success.length > 1 ? "s" : ""} created
-        </p>
-      )}
-      {failed.length > 0 && (
-        <div className="space-y-1">
-          <p className="text-destructive">
-            {failed.length} failed:
-          </p>
-          <ul className="list-inside list-disc text-xs text-muted-foreground">
-            {failed.map((f) => (
-              <li key={f.word}>
-                <span className="font-medium">{f.word}</span> &mdash; {f.error}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }

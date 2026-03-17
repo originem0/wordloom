@@ -10,32 +10,13 @@ export function useStories() {
     queryFn: () => apiFetch<Story[]>("/api/stories"),
   });
 
-  const generateMutation = useMutation({
-    mutationFn: async ({ image, prompt }: { image: File; prompt: string }) => {
-      const form = new FormData();
-      form.append("image", image);
-      form.append("prompt", prompt);
-      const res = await fetch("/api/stories/generate", {
-        method: "POST",
-        body: form,
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Generate failed: ${res.status}`);
-      }
-      return res.json() as Promise<Story>;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["stories"] }),
-  });
-
   const deleteMutation = useMutation({
     mutationFn: (id: number) =>
       apiFetch(`/api/stories/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["stories"] }),
   });
 
-  return { storiesQuery, generateMutation, deleteMutation };
+  return { storiesQuery, deleteMutation };
 }
 
 export function useTranslate() {
