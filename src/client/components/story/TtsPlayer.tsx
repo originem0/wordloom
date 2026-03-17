@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Play, Pause, Square, Volume2 } from "lucide-react";
+import { Play, Pause, Square, Volume2, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/client/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/client/components/ui/tabs";
 import { useSettings } from "@/client/hooks/useSettings";
@@ -18,7 +18,6 @@ function BrowserTtsPlayer({ storyText }: { storyText: string }) {
 
   const supported = typeof window !== "undefined" && "speechSynthesis" in window;
 
-  // Load voices eagerly -- some browsers populate the list async
   useEffect(() => {
     if (!supported) return;
     window.speechSynthesis.getVoices();
@@ -43,14 +42,12 @@ function BrowserTtsPlayer({ storyText }: { storyText: string }) {
       return;
     }
 
-    // Fresh playback
     window.speechSynthesis.cancel();
 
     const utt = new SpeechSynthesisUtterance(storyText);
     utt.rate = 0.9;
     utt.lang = "en-US";
 
-    // Pick best English voice
     const voices = window.speechSynthesis.getVoices();
     const preferred = voices.find(
       (v) =>
@@ -86,7 +83,6 @@ function BrowserTtsPlayer({ storyText }: { storyText: string }) {
     setPaused(true);
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       window.speechSynthesis.cancel();
@@ -120,34 +116,109 @@ function BrowserTtsPlayer({ storyText }: { storyText: string }) {
   );
 }
 
-// ---- Edge TTS (server-side, free) ----
+// ---- Server TTS (Edge / Gemini) with loading & error states ----
 
-function EdgeTtsPlayer({ storyId }: { storyId: number }) {
+function ServerTtsPlayer({
+  storyId,
+  provider,
+}: {
+  storyId: number;
+  provider: "edge" | "gemini";
+}) {
+  const [state, setState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  // Clean up blob URL on unmount or re-generate
+  useEffect(() => {
+    return () => {
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+    };
+  }, [audioUrl]);
+
+  const generate = useCallback(async () => {
+    setState("loading");
+    setErrorMsg("");
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl(null);
+    }
+
+    try {
+      const res = await fetch(`/api/stories/${storyId}/tts?provider=${provider}`);
+      if (!res.ok) {
+        let msg = `Server error ${res.status}`;
+        try {
+          const json = await res.json();
+          if (json.error) msg = json.error;
+        } catch {
+          /* not JSON */
+        }
+        throw new Error(msg);
+      }
+
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.startsWith("audio/")) {
+        throw new Error("Server returned non-audio response");
+      }
+
+      const blob = await res.blob();
+      if (blob.size === 0) throw new Error("Empty audio response");
+
+      const url = URL.createObjectURL(blob);
+      setAudioUrl(url);
+      setState("ready");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Unknown error");
+      setState("error");
+    }
+  }, [storyId, provider, audioUrl]);
+
+  if (state === "idle") {
+    return (
+      <Button variant="outline" size="sm" onClick={generate}>
+        <Play className="size-3.5" />
+        生成语音
+      </Button>
+    );
+  }
+
+  if (state === "loading") {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+        正在生成语音…
+      </div>
+    );
+  }
+
+  if (state === "error") {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-sm text-destructive">
+          <AlertCircle className="size-4" />
+          {errorMsg}
+        </div>
+        <Button variant="outline" size="sm" onClick={generate}>
+          重试
+        </Button>
+      </div>
+    );
+  }
+
+  // state === "ready"
   return (
     <div className="flex items-center gap-2">
       <Volume2 className="size-4 text-muted-foreground" />
       <audio
-        src={`/api/stories/${storyId}/tts?provider=edge`}
+        src={audioUrl!}
         controls
-        preload="none"
+        autoPlay
         className="h-8 w-full max-w-xs"
       />
-    </div>
-  );
-}
-
-// ---- Gemini TTS (server-side audio) ----
-
-function GeminiTtsPlayer({ storyId }: { storyId: number }) {
-  return (
-    <div className="flex items-center gap-2">
-      <Volume2 className="size-4 text-muted-foreground" />
-      <audio
-        src={`/api/stories/${storyId}/tts?provider=gemini`}
-        controls
-        preload="none"
-        className="h-8 w-full max-w-xs"
-      />
+      <Button variant="ghost" size="sm" onClick={generate} title="重新生成">
+        ↻
+      </Button>
     </div>
   );
 }
@@ -158,9 +229,8 @@ export function TtsPlayer({ storyId, storyText }: TtsPlayerProps) {
   const { data: settings } = useSettings();
   const pref = settings?.tts_preference;
   const preferred =
-    pref === "browser" || pref === "edge" || pref === "gemini" ? pref : "browser";
+    pref === "browser" || pref === "edge" || pref === "gemini" ? pref : "edge";
 
-  // Radix Tabs only respects defaultValue on mount, so we key by preference.
   return (
     <Tabs key={preferred} defaultValue={preferred} className="w-full">
       <TabsList>
@@ -172,10 +242,10 @@ export function TtsPlayer({ storyId, storyText }: TtsPlayerProps) {
         <BrowserTtsPlayer storyText={storyText} />
       </TabsContent>
       <TabsContent value="edge" className="pt-2">
-        <EdgeTtsPlayer storyId={storyId} />
+        <ServerTtsPlayer storyId={storyId} provider="edge" />
       </TabsContent>
       <TabsContent value="gemini" className="pt-2">
-        <GeminiTtsPlayer storyId={storyId} />
+        <ServerTtsPlayer storyId={storyId} provider="gemini" />
       </TabsContent>
     </Tabs>
   );

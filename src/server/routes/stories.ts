@@ -88,7 +88,7 @@ const ttsHandler = async (c: Context) => {
     return c.json({ error: "Story not found", code: "NOT_FOUND" }, 404);
   }
 
-  const provider = (c.req.query("provider") || "gemini").toLowerCase();
+  const provider = (c.req.query("provider") || "edge").toLowerCase();
 
   if (provider === "edge") {
     const mp3Buffer = await generateEdgeTtsMp3(row.story);
