@@ -62,6 +62,11 @@ export class ModuleErrorBoundary extends Component<Props, State> {
       return (
         <div className="flex flex-col items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-4">
           <p className="text-sm text-destructive">模块加载出错</p>
+          {this.state.error && (
+            <p className="text-xs text-muted-foreground max-w-md text-center break-all">
+              {this.state.error.message}
+            </p>
+          )}
           <button
             className="text-xs underline"
             onClick={() => this.setState({ hasError: false, error: null })}
