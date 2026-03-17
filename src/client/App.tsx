@@ -14,7 +14,11 @@ import { applyTheme } from "./lib/theme";
 const WordForgePage = lazy(() =>
   import("./components/cards/WordForgePage").then((m) => ({
     default: m.WordForgePage,
-  })),
+  })).catch(() => {
+    // After a deploy, old chunk filenames are gone. Reload to get fresh HTML.
+    window.location.reload();
+    return { default: () => null };
+  }),
 );
 
 function AppContent() {
