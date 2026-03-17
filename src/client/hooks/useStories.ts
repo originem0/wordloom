@@ -2,12 +2,17 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiPost } from "@/client/lib/api";
 import type { Story } from "@/shared/types";
 
-export function useStories() {
+export function useStories(params?: { page?: number; limit?: number }) {
   const qc = useQueryClient();
 
   const storiesQuery = useQuery({
-    queryKey: ["stories"],
-    queryFn: () => apiFetch<Story[]>("/api/stories"),
+    queryKey: ["stories", params],
+    queryFn: () => {
+      const sp = new URLSearchParams();
+      if (params?.page) sp.set("page", String(params.page));
+      if (params?.limit) sp.set("limit", String(params.limit));
+      return apiFetch<{ stories: Story[]; total: number; page: number; limit: number }>(`/api/stories?${sp}`);
+    },
   });
 
   const deleteMutation = useMutation({

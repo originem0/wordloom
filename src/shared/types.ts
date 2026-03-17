@@ -60,18 +60,39 @@ export interface FamilyEntry {
 
 export interface SchemaAnalysis {
   coreSchema: string;
+  coreImageText?: string;
   metaphoricalExtensions: string[];
   registerVariation: string;
+  etymologyChain?: string[];
+  sceneActivation?: SceneFrame[];
+}
+
+export interface SceneFrame {
+  title: string;
+  description: string;
+  example: string;
+  associatedWords: string[];
+}
+
+export interface BoundaryTestOption {
+  verdict: "yes" | "no" | "maybe";
+  word: string;
+  reason: string;
 }
 
 export interface BoundaryTest {
-  scenario: string;
-  answer: string;
-  explanation: string;
+  /** New format: fill-in-blank sentence */
+  sentence?: string;
+  options?: BoundaryTestOption[];
+  /** Legacy format fields (backward compat) */
+  scenario?: string;
+  answer?: string;
+  explanation?: string;
 }
 
 export interface CardDeep {
   familyComparison: FamilyEntry[] | null;
+  familyBoundaryNote?: string | null;
   schemaAnalysis: SchemaAnalysis | null;
   boundaryTests: BoundaryTest[] | null;
 }

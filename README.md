@@ -112,12 +112,12 @@ pnpm start          # 启动生产服务器（端口 3001）
 ```bash
 # 方式一：通过 GitHub
 git push origin main
-ssh user@your-server "cd ~/wordloom && git pull && docker compose up -d --build"
+ssh user@your-server "cd ~/wordloom && git pull && pnpm db:migrate && docker compose up -d --build"
 
 # 方式二：直接同步
 rsync -avz --exclude node_modules --exclude dist --exclude 'data/*.db' \
   ./wordloom/ user@your-server:~/wordloom/
-ssh user@your-server "cd ~/wordloom && docker compose up -d --build"
+ssh user@your-server "cd ~/wordloom && pnpm db:migrate && docker compose up -d --build"
 ```
 
 ## 环境变量
@@ -126,6 +126,8 @@ ssh user@your-server "cd ~/wordloom && docker compose up -d --build"
 |---|---|---|
 | `AUTH_TOKEN` | 登录密码（打开网页时输入） | 生产环境必填 |
 | `AUTH_SECRET` | Cookie 签名密钥（随机字符串） | 生产环境必填 |
+| `ALLOWED_ORIGINS` | 允许的前端域名（逗号分隔） | 生产环境建议设置 |
+| `DATABASE_URL` | SQLite 连接字符串 | 否（默认 `file:data/app.db`） |
 | `PORT` | 服务端口 | 否（默认 3001） |
 
 开发环境不设置 `AUTH_TOKEN` 则跳过认证。

@@ -11,8 +11,11 @@ import { useTaskStore } from "@/client/store/tasks";
 import type { Story } from "@/shared/types";
 
 function StoryStudioInner() {
-  const { storiesQuery, deleteMutation } = useStories();
+  const [page, setPage] = useState(1);
+  const limit = 10;
+  const { storiesQuery, deleteMutation } = useStories({ page, limit });
   const submitStory = useTaskStore((s) => s.submitStory);
+  const submitCards = useTaskStore((s) => s.submitCards);
   const runningStoryTasks = useTaskStore((s) =>
     s.tasks.filter((t) => t.type === "story" && t.status === "running"),
   );
@@ -42,16 +45,23 @@ function StoryStudioInner() {
     setPrompt("");
   };
 
-  const handleWordClick = useCallback((word: string) => {
-    console.log("Word clicked:", word);
-  }, []);
+  const handleWordClick = useCallback(
+    (word: string) => {
+      const cleaned = word.replace(/[^a-zA-Z'-]/g, "").trim();
+      if (!cleaned) return;
+      submitCards([cleaned]);
+    },
+    [submitCards],
+  );
 
   const handleDelete = async (id: number) => {
     await deleteMutation.mutateAsync(id);
     if (activeStory?.id === id) setActiveStory(null);
   };
 
-  const stories = storiesQuery.data ?? [];
+  const stories = storiesQuery.data?.stories ?? [];
+  const total = storiesQuery.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
 
   const timeAgo = useMemo(
     () => (ts: number) => {
@@ -157,6 +167,29 @@ function StoryStudioInner() {
                 </CardContent>
               </Card>
             ))}
+          </div>
+          <div className="flex items-center justify-between pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1 || storiesQuery.isFetching}
+            >
+              上一页
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              第 {page} / {totalPages} 页 · 共 {total} 条
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => p + 1)}
+              disabled={storiesQuery.isFetching || page >= totalPages}
+            >
+              下一页
+            </Button>
           </div>
         </section>
       )}

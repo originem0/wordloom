@@ -243,15 +243,19 @@ settingRoutes.post("/test", async (c) => {
     msg: string,
     extra: Record<string, unknown> = {},
   ) {
+    const isProd = process.env.NODE_ENV === "production";
+    const safeExtra = isProd
+      ? Object.fromEntries(Object.entries(extra).filter(([k]) => k !== "upstream" && k !== "rawText"))
+      : extra;
     return c.json({
       ok: false,
       ...baseRequest,
       latencyMs: Date.now() - started,
-      ...extra,
+      ...safeExtra,
       error: {
         message: msg,
         hint: buildHint(msg, warnings, target),
-        ...(extra["upstream"] ? { upstream: extra["upstream"] } : {}),
+        ...(isProd ? {} : extra["upstream"] ? { upstream: extra["upstream"] } : {}),
       },
     });
   }
@@ -267,19 +271,21 @@ settingRoutes.post("/test", async (c) => {
 
       // Treat 200/401/403 as "reachable". 401/403 usually means "API key required".
       if (res.status === 200 || res.status === 401 || res.status === 403) {
+        const isProd = process.env.NODE_ENV === "production";
+        const result: Record<string, unknown> = {
+          status: res.status,
+          note:
+            res.status === 200
+              ? "Base URL reachable."
+              : "Base URL reachable (auth required).",
+        };
+        if (!isProd) result.upstream = upstream;
         return c.json({
           ok: true,
           ...baseRequest,
           latencyMs: Date.now() - started,
           requestUrl: url,
-          result: {
-            status: res.status,
-            upstream,
-            note:
-              res.status === 200
-                ? "Base URL reachable."
-                : "Base URL reachable (auth required).",
-          },
+          result,
         });
       }
 
@@ -340,16 +346,16 @@ settingRoutes.post("/test", async (c) => {
 
       const list = target === "listModels" ? names : names.slice(0, 20);
 
+      const isProd = process.env.NODE_ENV === "production";
+      const result = isProd
+        ? { modelCount: names.length }
+        : { modelCount: names.length, models: list, truncated: list.length !== names.length };
       return c.json({
         ok: true,
         ...baseRequest,
         latencyMs: Date.now() - started,
         requestUrl: url,
-        result: {
-          modelCount: names.length,
-          models: list,
-          truncated: list.length !== names.length,
-        },
+        result,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -420,17 +426,18 @@ settingRoutes.post("/test", async (c) => {
         });
       }
 
+      const isProd = process.env.NODE_ENV === "production";
+      const parsedType = Array.isArray(parsedJson) ? "array" : typeof parsedJson;
+      const result = isProd
+        ? { parsedType }
+        : { rawText: text.slice(0, 220), parsedType, parsedJson };
       return c.json({
         ok: true,
         ...baseRequest,
         latencyMs: Date.now() - started,
         requestUrl: url,
         model,
-        result: {
-          rawText: text.slice(0, 220),
-          parsedType: Array.isArray(parsedJson) ? "array" : typeof parsedJson,
-          parsedJson,
-        },
+        result,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -492,15 +499,15 @@ settingRoutes.post("/test", async (c) => {
         });
       }
 
+      const isProd = process.env.NODE_ENV === "production";
+      const result = isProd ? { ok: true } : { text: text.slice(0, 220) };
       return c.json({
         ok: true,
         ...baseRequest,
         latencyMs: Date.now() - started,
         requestUrl: url,
         model,
-        result: {
-          text: text.slice(0, 220),
-        },
+        result,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -570,16 +577,17 @@ settingRoutes.post("/test", async (c) => {
 
       const mimeType = typeof inline?.mimeType === "string" ? inline.mimeType : "";
 
+      const isProd = process.env.NODE_ENV === "production";
+      const result = isProd
+        ? { mimeType }
+        : { mimeType, audioBase64Length: data.length };
       return c.json({
         ok: true,
         ...baseRequest,
         latencyMs: Date.now() - started,
         requestUrl: url,
         model,
-        result: {
-          mimeType,
-          audioBase64Length: data.length,
-        },
+        result,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

@@ -1,21 +1,24 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { randomUUID } from "crypto";
-import { mkdir, readFile, unlink, writeFile } from "fs/promises";
+import { randomUUID, createHash } from "crypto";
+import { mkdir, readFile, readdir, unlink, writeFile } from "fs/promises";
 import { join } from "path";
 import { db } from "../db/index.js";
 import { stories } from "../db/schema.js";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import { compressImage } from "../services/image.js";
 import { generateStory, generateTTS, translateText } from "../services/gemini.js";
 import { generateEdgeTtsMp3 } from "../services/edgeTts.js";
 import { pcmToWav } from "../services/tts.js";
 import type { Story, GroundingSource } from "../../shared/types.js";
+import { rateLimit } from "../middleware/rateLimit.js";
 
 const IMAGE_DIR = join(process.cwd(), "data", "images");
+const TTS_CACHE_DIR = join(process.cwd(), "data", "tts");
 
 // Ensure image directory exists at module load
 await mkdir(IMAGE_DIR, { recursive: true });
+await mkdir(TTS_CACHE_DIR, { recursive: true });
 
 export const storyRoutes = new Hono();
 
@@ -41,6 +44,12 @@ function toStory(row: typeof stories.$inferSelect): Story {
 
 // POST /generate — upload image + optional prompt, get a story back
 storyRoutes.post("/generate", async (c) => {
+  const limited = rateLimit(c, {
+    key: "stories-generate",
+    windowMs: 60_000,
+    max: 10,
+  });
+  if (limited) return limited;
   const body = await c.req.parseBody();
   const file = body["image"];
   const prompt = typeof body["prompt"] === "string" ? body["prompt"] : "";
@@ -55,15 +64,39 @@ storyRoutes.post("/generate", async (c) => {
   }
 
   const rawBuffer = Buffer.from(await file.arrayBuffer());
-  const { buffer: compressedBuffer, mimeType } = await compressImage(rawBuffer, file.type);
+  if (!file.type.startsWith("image/")) {
+    return c.json({ error: "Invalid image type", code: "INVALID_IMAGE" }, 400);
+  }
+  let compressedBuffer: Buffer;
+  let mimeType: string;
+  try {
+    const result = await compressImage(rawBuffer, file.type);
+    compressedBuffer = result.buffer;
+    mimeType = result.mimeType;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Invalid image";
+    return c.json({ error: msg, code: "INVALID_IMAGE" }, 400);
+  }
 
-  // Save image
+  // Generate story via Gemini
+  let story: string;
+  let sources: GroundingSource[];
+  try {
+    const result = await generateStory(compressedBuffer, mimeType, prompt);
+    story = result.story;
+    sources = result.sources;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Story generation failed";
+    if (msg === "GEMINI_BUSY") {
+      return c.json({ error: "Story generator busy", code: "GEMINI_BUSY" }, 429);
+    }
+    return c.json({ error: "Story generation failed", code: "STORY_FAILED" }, 500);
+  }
+
+  // Save image only after successful generation
   const filename = `${randomUUID()}.jpg`;
   const imagePath = `data/images/${filename}`;
   await writeFile(join(IMAGE_DIR, filename), compressedBuffer);
-
-  // Generate story via Gemini
-  const { story, sources } = await generateStory(compressedBuffer, mimeType, prompt);
 
   const now = Date.now();
   const inserted = await db
@@ -82,6 +115,12 @@ storyRoutes.post("/generate", async (c) => {
 
 // GET /:id/tts — generate TTS audio for a story (audio tag-friendly)
 const ttsHandler = async (c: Context) => {
+  const limited = rateLimit(c, {
+    key: "stories-tts",
+    windowMs: 60_000,
+    max: 30,
+  });
+  if (limited) return limited;
   const id = Number(c.req.param("id"));
   const row = await db.select().from(stories).where(eq(stories.id, id)).get();
   if (!row) {
@@ -89,17 +128,50 @@ const ttsHandler = async (c: Context) => {
   }
 
   const provider = (c.req.query("provider") || "edge").toLowerCase();
+  if (provider !== "edge" && provider !== "gemini") {
+    return c.json({ error: "Invalid provider", code: "INVALID_PROVIDER" }, 400);
+  }
+  const hash = createHash("sha256").update(`${provider}:${row.story}`).digest("hex");
+  const cachePath = join(TTS_CACHE_DIR, `${row.id}-${hash}.${provider === "edge" ? "mp3" : "wav"}`);
+
+  try {
+    const cached = await readFile(cachePath);
+    return new Response(cached, {
+      headers: { "Content-Type": provider === "edge" ? "audio/mpeg" : "audio/wav" },
+    });
+  } catch {
+    // cache miss, continue
+  }
 
   if (provider === "edge") {
-    const mp3Buffer = await generateEdgeTtsMp3(row.story);
-    return new Response(mp3Buffer, {
-      headers: { "Content-Type": "audio/mpeg" },
-    });
+    try {
+      const mp3Buffer = await generateEdgeTtsMp3(row.story);
+      await writeFile(cachePath, mp3Buffer);
+      return new Response(mp3Buffer, {
+        headers: { "Content-Type": "audio/mpeg" },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "TTS failed";
+      if (msg === "TTS_BUSY") {
+        return c.json({ error: "TTS busy", code: "TTS_BUSY" }, 429);
+      }
+      return c.json({ error: "TTS failed", code: "TTS_FAILED" }, 500);
+    }
   }
 
   // Default: Gemini native TTS (PCM → wav)
-  const pcmBase64 = await generateTTS(row.story);
+  let pcmBase64: string;
+  try {
+    pcmBase64 = await generateTTS(row.story);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "TTS failed";
+    if (msg === "GEMINI_BUSY") {
+      return c.json({ error: "TTS busy", code: "TTS_BUSY" }, 429);
+    }
+    return c.json({ error: "TTS failed", code: "TTS_FAILED" }, 500);
+  }
   const wavBuffer = pcmToWav(pcmBase64);
+  await writeFile(cachePath, wavBuffer);
 
   return new Response(wavBuffer, {
     headers: { "Content-Type": "audio/wav" },
@@ -118,8 +190,16 @@ storyRoutes.post("/:id/translate", async (c) => {
     return c.json({ error: "Story not found", code: "NOT_FOUND" }, 404);
   }
 
-  const translation = await translateText(row.story);
-  return c.json({ translation });
+  try {
+    const translation = await translateText(row.story);
+    return c.json({ translation });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Translation failed";
+    if (msg === "GEMINI_BUSY") {
+      return c.json({ error: "Translator busy", code: "GEMINI_BUSY" }, 429);
+    }
+    return c.json({ error: "Translation failed", code: "TRANSLATION_FAILED" }, 500);
+  }
 });
 
 // GET /:id/image — serve the story's image file
@@ -146,12 +226,23 @@ storyRoutes.get("/:id/image", async (c) => {
 
 // GET / — list all stories, newest first
 storyRoutes.get("/", async (c) => {
+  const page = Math.max(1, Number(c.req.query("page") || "1"));
+  const limit = Math.min(50, Math.max(1, Number(c.req.query("limit") || "10")));
+  const offset = (page - 1) * limit;
+
   const rows = await db
     .select()
     .from(stories)
     .orderBy(desc(stories.createdAt))
+    .limit(limit)
+    .offset(offset)
     .all();
-  return c.json(rows.map(toStory));
+  const countRow = await db
+    .select({ total: sql<number>`count(*)` })
+    .from(stories)
+    .get();
+  const total = Number(countRow?.total ?? 0);
+  return c.json({ stories: rows.map(toStory), total, page, limit });
 });
 
 // DELETE /:id — delete a story and its image
@@ -169,6 +260,19 @@ storyRoutes.delete("/:id", async (c) => {
     await unlink(join(process.cwd(), row.imagePath));
   } catch {
     /* image may already be gone */
+  }
+
+  // Best-effort TTS cache cleanup
+  try {
+    const files = await readdir(TTS_CACHE_DIR);
+    const prefix = `${id}-`;
+    await Promise.all(
+      files
+        .filter((name) => name.startsWith(prefix))
+        .map((name) => unlink(join(TTS_CACHE_DIR, name))),
+    );
+  } catch {
+    /* ignore cache cleanup errors */
   }
 
   return c.json({ ok: true });

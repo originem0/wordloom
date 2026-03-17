@@ -150,7 +150,14 @@ export async function generateStory(
   mimeType: string,
   prompt: string,
 ): Promise<{ story: string; sources: GroundingSource[] }> {
-  await geminiSemaphore.acquire();
+  try {
+    await geminiSemaphore.acquire();
+  } catch (err) {
+    if (err instanceof Error && (err.message === "QUEUE_FULL" || err.message === "QUEUE_TIMEOUT")) {
+      throw new Error("GEMINI_BUSY");
+    }
+    throw err;
+  }
   try {
     return await retryWithBackoff(async () => {
       const ai = await getClient();
@@ -214,7 +221,14 @@ export async function generateStory(
 // ---------------------------------------------------------------------------
 
 export async function generateTTS(text: string): Promise<string> {
-  await geminiSemaphore.acquire();
+  try {
+    await geminiSemaphore.acquire();
+  } catch (err) {
+    if (err instanceof Error && (err.message === "QUEUE_FULL" || err.message === "QUEUE_TIMEOUT")) {
+      throw new Error("GEMINI_BUSY");
+    }
+    throw err;
+  }
   try {
     return await retryWithBackoff(async () => {
       const ai = await getClient();
@@ -258,7 +272,14 @@ export async function generateTTS(text: string): Promise<string> {
 // ---------------------------------------------------------------------------
 
 export async function translateText(text: string): Promise<string> {
-  await geminiSemaphore.acquire();
+  try {
+    await geminiSemaphore.acquire();
+  } catch (err) {
+    if (err instanceof Error && (err.message === "QUEUE_FULL" || err.message === "QUEUE_TIMEOUT")) {
+      throw new Error("GEMINI_BUSY");
+    }
+    throw err;
+  }
   try {
     return await retryWithBackoff(async () => {
       const ai = await getClient();
@@ -324,7 +345,14 @@ interface ParsedCard {
 export async function generateCards(
   words: string[],
 ): Promise<{ success: ParsedCard[]; failed: { word: string; error: string }[] }> {
-  await geminiSemaphore.acquire();
+  try {
+    await geminiSemaphore.acquire();
+  } catch (err) {
+    if (err instanceof Error && (err.message === "QUEUE_FULL" || err.message === "QUEUE_TIMEOUT")) {
+      throw new Error("GEMINI_BUSY");
+    }
+    throw err;
+  }
   try {
     return await retryWithBackoff(async () => {
       const ai = await getClient();
@@ -393,29 +421,60 @@ export async function generateCards(
 // generateDeepLayer
 // ---------------------------------------------------------------------------
 
-const DEEP_PROMPT = `You are a vocabulary deep-analysis engine.
+const DEEP_PROMPT = `You are a vocabulary deep-analysis engine for English learners.
 
-For the given word, generate:
+For the given word, generate a JSON object with these fields:
 
-1. familyComparison: An array of related/similar words (word family + common confusables).
-   Each entry: { word, pos, distinction, register, typicalScene }
+1. familyComparison: Array of related/similar words (word family + common confusables).
+   Each entry: { word, pos, distinction (核心区别 in Chinese), register (情感/语域 in Chinese), typicalScene (典型场景 in Chinese) }
+   Include the target word itself as the first entry (highlighted).
+   Include 3-5 comparison words.
 
-2. schemaAnalysis: Cognitive schema analysis.
-   { coreSchema: string, metaphoricalExtensions: string[], registerVariation: string }
+2. familyBoundaryNote: A short paragraph in Chinese comparing 2-3 key pairs from the family (e.g. "X vs Y: X 是…；Y 是…"). Use concrete metaphors.
 
-3. boundaryTests: 3-5 "can you use X here?" scenario tests.
-   Each entry: { scenario, answer ("yes"/"no"/"depends"), explanation }
+3. schemaAnalysis: Cognitive schema analysis.
+   {
+     coreSchema: one of "blockage" | "container" | "path" | "link" | "balance" | "scale" | "force" | "cycle",
+     coreImageText: A paragraph in Chinese (2-3 sentences) describing the core cognitive image of the word — what mental picture it evokes, using the metaphor behind the word,
+     metaphoricalExtensions: string[],
+     registerVariation: string,
+     etymologyChain: Array of 2-4 short Chinese labels showing the semantic evolution stages (e.g. ["物理：昏暗/被遮挡", "认知：晦涩难懂", "社会：默默无闻"]),
+     sceneActivation: Array of 2-3 scene frames, each:
+       {
+         title: "Scene N — [domain] ([frame name])" in English,
+         description: A vivid paragraph in English describing a concrete scenario where the word applies,
+         example: An example sentence in English using the word (wrap the target word in double asterisks),
+         associatedWords: 4-6 related English words for this particular usage scene
+       }
+   }
 
-Return as a JSON object.`;
+4. boundaryTests: 3-4 fill-in-the-blank test scenarios.
+   Each entry:
+   {
+     sentence: English sentence with a blank (use "______" for the blank),
+     options: Array of 2-3 candidate words, each:
+       { verdict: "yes" | "no" | "maybe", word: the candidate word, reason: short explanation in Chinese }
+   }
+   Include the target word and at least one confusable word from familyComparison in the options.
+
+Return as a single JSON object. All Chinese text should use Simplified Chinese.`;
 
 export async function generateDeepLayer(
   word: string,
 ): Promise<{
   familyComparison: unknown[];
+  familyBoundaryNote?: string;
   schemaAnalysis?: unknown;
   boundaryTests: unknown[];
 }> {
-  await geminiSemaphore.acquire();
+  try {
+    await geminiSemaphore.acquire();
+  } catch (err) {
+    if (err instanceof Error && (err.message === "QUEUE_FULL" || err.message === "QUEUE_TIMEOUT")) {
+      throw new Error("GEMINI_BUSY");
+    }
+    throw err;
+  }
   try {
     return await retryWithBackoff(async () => {
       const ai = await getClient();
@@ -455,7 +514,14 @@ export async function generateDeepLayer(
 // ---------------------------------------------------------------------------
 
 export async function extractWords(text: string): Promise<string[]> {
-  await geminiSemaphore.acquire();
+  try {
+    await geminiSemaphore.acquire();
+  } catch (err) {
+    if (err instanceof Error && (err.message === "QUEUE_FULL" || err.message === "QUEUE_TIMEOUT")) {
+      throw new Error("GEMINI_BUSY");
+    }
+    throw err;
+  }
   try {
     return await retryWithBackoff(async () => {
       const ai = await getClient();

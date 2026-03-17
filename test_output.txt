@@ -1,0 +1,42 @@
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mD:/Development/Apps/wordloom[39m
+
+ [31m鉂?[39m src/client/components/cards/__tests__/WordCard.test.tsx [2m([22m[2m3 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 6[2mms[22m[39m
+     [32m鉁?[39m normalizeBoundaryTests adapter seamlessly converts old format to new layout[32m 1[2mms[22m[39m
+[31m     [31m脳[31m WordCard component renders legacy tests without crashing[39m[32m 2[2mms[22m[39m
+[31m     [31m脳[31m does not crash and degrades gracefully when deep data is missing or incomplete[39m[32m 0[2mms[22m[39m
+
+鈳幆鈳幆鈳幆鈳?[39m Failed Tests 2 鈳幆鈳幆鈳幆鈳?[39m
+
+ FAIL  src/client/components/cards/__tests__/WordCard.test.tsx > Scenario 2: Legacy Card Backward Compatibility > WordCard component renders legacy tests without crashing
+ReferenceError: document is not defined
+ 鉂?[22m Proxy.render node_modules/.pnpm/@testing-library+react@16.3_893f466751a7d66081fd06e9edb9241a/node_modules/@testing-library/react/dist/pure.js:256:5
+ 鉂?[22m renderWithProviders src/client/components/cards/__tests__/WordCard.test.tsx:21:10
+     19|
+     20| function renderWithProviders(ui: React.ReactElement) {
+     21|   return render(
+       |          ^
+     22|     <QueryClientProvider client={queryClient}>{ui}</QueryClientProvide鈥?     23|   );
+ 鉂?[22m src/client/components/cards/__tests__/WordCard.test.tsx:83:5
+
+鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆[1/2]鈳?[22m
+
+ FAIL  src/client/components/cards/__tests__/WordCard.test.tsx > Scenario 5: UI Graceful Degradation > does not crash and degrades gracefully when deep data is missing or incomplete
+ReferenceError: document is not defined
+ 鉂?[22m Proxy.render node_modules/.pnpm/@testing-library+react@16.3_893f466751a7d66081fd06e9edb9241a/node_modules/@testing-library/react/dist/pure.js:256:5
+ 鉂?[22m renderWithProviders src/client/components/cards/__tests__/WordCard.test.tsx:21:10
+     19|
+     20| function renderWithProviders(ui: React.ReactElement) {
+     21|   return render(
+       |          ^
+     22|     <QueryClientProvider client={queryClient}>{ui}</QueryClientProvide鈥?     23|   );
+ 鉂?[22m src/client/components/cards/__tests__/WordCard.test.tsx:125:27
+
+鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆鈳幆[2/2]鈳?[22m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (3)[39m
+[2m   Start at [22m 20:42:03
+[2m   Duration [22m 449ms[2m (transform 55ms, setup 0ms, import 290ms, tests 6ms, environment 0ms)[22m
+

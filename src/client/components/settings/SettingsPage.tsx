@@ -69,12 +69,14 @@ function TestResultView({ res }: { res: SettingTestResponse | null }) {
       </div>
       <div className="text-foreground/90">{message}</div>
       {hint && <div className="text-muted-foreground">Hint: {hint}</div>}
-      <details className="pt-1">
-        <summary className="cursor-pointer text-muted-foreground">details</summary>
-        <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2">
-          {JSON.stringify(res, null, 2)}
-        </pre>
-      </details>
+      {import.meta.env.MODE !== "production" && (
+        <details className="pt-1">
+          <summary className="cursor-pointer text-muted-foreground">details</summary>
+          <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2">
+            {JSON.stringify(res, null, 2)}
+          </pre>
+        </details>
+      )}
     </div>
   );
 }

@@ -15,14 +15,26 @@ export async function apiFetch<T = unknown>(
   });
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const err = new Error(body.error ?? `Request failed: ${res.status}`);
+    const text = await res.text().catch(() => "");
+    let body: any = {};
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      body = {};
+    }
+    const err = new Error(body.error ?? text ?? `Request failed: ${res.status}`);
     (err as any).status = res.status;
     (err as any).code = body.code;
     throw err;
   }
 
-  return res.json();
+  const text = await res.text();
+  if (!text) return {} as T;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {} as T;
+  }
 }
 
 /** POST JSON helper */

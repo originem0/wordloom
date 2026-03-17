@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { cards } from "../db/schema.js";
-import { eq, desc, like, inArray, or, sql, count } from "drizzle-orm";
+import { eq, desc, like, or, sql, count } from "drizzle-orm";
 import {
   generateCards,
   generateDeepLayer,
   extractWords,
 } from "../services/gemini.js";
+import { rateLimit } from "../middleware/rateLimit.js";
 import {
   generateCardsRequestSchema,
   extractWordsRequestSchema,
@@ -48,6 +49,12 @@ export function toCard(row: typeof cards.$inferSelect): Card {
 
 // POST /generate — generate cards for a list of words
 cardRoutes.post("/generate", async (c) => {
+  const limited = rateLimit(c, {
+    key: "cards-generate",
+    windowMs: 60_000,
+    max: 20,
+  });
+  if (limited) return limited;
   const body = await c.req.json();
   const parsed = generateCardsRequestSchema.safeParse(body);
   if (!parsed.success) {
@@ -56,54 +63,83 @@ cardRoutes.post("/generate", async (c) => {
 
   const { words } = parsed.data;
 
-  // Find which words already exist
-  const existing = await db
-    .select({ word: cards.word })
-    .from(cards)
-    .where(inArray(cards.word, words))
-    .all();
-  const existingWords = new Set(existing.map((r) => r.word.toLowerCase()));
-  const newWords = words.filter((w) => !existingWords.has(w.toLowerCase()));
-
-  if (newWords.length === 0) {
-    return c.json({ success: [], failed: [], message: "All words already exist" });
+  const normalized = words
+    .map((w) => w.trim())
+    .filter(Boolean)
+    .filter((w, i, arr) => arr.findIndex((x) => x.toLowerCase() === w.toLowerCase()) === i);
+  if (normalized.length === 0) {
+    return c.json({ error: "No valid words", code: "VALIDATION_ERROR" }, 400);
   }
 
   // Generate via Gemini
-  const { success, failed } = await generateCards(newWords);
-
-  // Insert successful cards into DB
-  const now = Date.now();
-  const insertedCards: Card[] = [];
-
-  for (const card of success) {
-    const inserted = await db
-      .insert(cards)
-      .values({
-        word: card.word,
-        ipa: card.ipa ?? null,
-        pos: card.pos ?? null,
-        cefr: card.cefr ?? null,
-        cefrConfidence: card.cefrConfidence ?? null,
-        coreMeaning: card.coreMeaning ?? null,
-        wad: card.wad ?? null,
-        wap: card.wap ?? null,
-        etymology: card.etymology ?? null,
-        collocations: JSON.stringify(card.collocations ?? []),
-        examples: JSON.stringify(card.examples ?? []),
-        contextLadder: JSON.stringify(card.contextLadder ?? []),
-        phrases: JSON.stringify(card.phrases ?? []),
-        synonyms: JSON.stringify(card.synonyms ?? []),
-        antonyms: JSON.stringify(card.antonyms ?? []),
-        minPair: card.minPair ?? null,
-        usageCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning();
-
-    insertedCards.push(toCard(inserted[0]));
+  let success: Awaited<ReturnType<typeof generateCards>>["success"];
+  let failed: Awaited<ReturnType<typeof generateCards>>["failed"];
+  try {
+    const result = await generateCards(normalized);
+    success = result.success;
+    failed = result.failed;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Generation failed";
+    if (msg === "GEMINI_BUSY") {
+      return c.json({ error: "Generator busy", code: "GEMINI_BUSY" }, 429);
+    }
+    return c.json({ error: "Generation failed", code: "GENERATION_FAILED" }, 500);
   }
+
+  const now = Date.now();
+
+  const insertedCards = await db.transaction(async (tx) => {
+    const rows: Card[] = [];
+    for (const card of success) {
+      const inserted = await tx
+        .insert(cards)
+        .values({
+          word: card.word,
+          ipa: card.ipa ?? null,
+          pos: card.pos ?? null,
+          cefr: card.cefr ?? null,
+          cefrConfidence: card.cefrConfidence ?? null,
+          coreMeaning: card.coreMeaning ?? null,
+          wad: card.wad ?? null,
+          wap: card.wap ?? null,
+          etymology: card.etymology ?? null,
+          collocations: JSON.stringify(card.collocations ?? []),
+          examples: JSON.stringify(card.examples ?? []),
+          contextLadder: JSON.stringify(card.contextLadder ?? []),
+          phrases: JSON.stringify(card.phrases ?? []),
+          synonyms: JSON.stringify(card.synonyms ?? []),
+          antonyms: JSON.stringify(card.antonyms ?? []),
+          minPair: card.minPair ?? null,
+          usageCount: 0,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: cards.word,
+          set: {
+            ipa: card.ipa ?? null,
+            pos: card.pos ?? null,
+            cefr: card.cefr ?? null,
+            cefrConfidence: card.cefrConfidence ?? null,
+            coreMeaning: card.coreMeaning ?? null,
+            wad: card.wad ?? null,
+            wap: card.wap ?? null,
+            etymology: card.etymology ?? null,
+            collocations: JSON.stringify(card.collocations ?? []),
+            examples: JSON.stringify(card.examples ?? []),
+            contextLadder: JSON.stringify(card.contextLadder ?? []),
+            phrases: JSON.stringify(card.phrases ?? []),
+            synonyms: JSON.stringify(card.synonyms ?? []),
+            antonyms: JSON.stringify(card.antonyms ?? []),
+            minPair: card.minPair ?? null,
+            updatedAt: now,
+          },
+        })
+        .returning();
+      rows.push(toCard(inserted[0]));
+    }
+    return rows;
+  });
 
   return c.json({ success: insertedCards, failed });
 });
@@ -116,8 +152,16 @@ cardRoutes.post("/extract", async (c) => {
     return c.json({ error: "Invalid request", code: "VALIDATION_ERROR" }, 400);
   }
 
-  const words = await extractWords(parsed.data.text);
-  return c.json({ words });
+  try {
+    const words = await extractWords(parsed.data.text);
+    return c.json({ words });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Extraction failed";
+    if (msg === "GEMINI_BUSY") {
+      return c.json({ error: "Generator busy", code: "GEMINI_BUSY" }, 429);
+    }
+    return c.json({ error: "Extraction failed", code: "EXTRACTION_FAILED" }, 500);
+  }
 });
 
 // POST /:id/deep — generate deep layer for a card (lazy)
@@ -133,13 +177,32 @@ cardRoutes.post("/:id/deep", async (c) => {
     return c.json(toCard(row));
   }
 
-  const deep = await generateDeepLayer(row.word);
+  let deep: Awaited<ReturnType<typeof generateDeepLayer>>;
+  try {
+    deep = await generateDeepLayer(row.word);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Deep generation failed";
+    if (msg === "GEMINI_BUSY") {
+      return c.json({ error: "Generator busy", code: "GEMINI_BUSY" }, 429);
+    }
+    return c.json({ error: "Deep generation failed", code: "GENERATION_FAILED" }, 500);
+  }
+
+  // Merge familyBoundaryNote into schemaAnalysis blob (no new DB column)
+  const schemaBlob = {
+    ...(typeof deep.schemaAnalysis === "object" && deep.schemaAnalysis
+      ? deep.schemaAnalysis
+      : {}),
+    ...(deep.familyBoundaryNote
+      ? { familyBoundaryNote: deep.familyBoundaryNote }
+      : {}),
+  };
 
   await db
     .update(cards)
     .set({
       familyComparison: JSON.stringify(deep.familyComparison),
-      schemaAnalysis: JSON.stringify(deep.schemaAnalysis),
+      schemaAnalysis: JSON.stringify(schemaBlob),
       boundaryTests: JSON.stringify(deep.boundaryTests),
       updatedAt: Date.now(),
     })
@@ -181,7 +244,7 @@ cardRoutes.get("/", async (c) => {
   const countResult = where
     ? await db.select({ total: count() }).from(cards).where(where).get()
     : await db.select({ total: count() }).from(cards).get();
-  const total = countResult?.total ?? 0;
+  const total = Number(countResult?.total ?? 0);
 
   // Fetch page
   const query = db
@@ -196,6 +259,8 @@ cardRoutes.get("/", async (c) => {
   return c.json({
     cards: rows.map(toCard),
     total,
+    page,
+    limit,
   });
 });
 

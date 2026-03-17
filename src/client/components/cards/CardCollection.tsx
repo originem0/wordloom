@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from "@/client/components/ui/dialog";
 import { useCards, useDeleteCard } from "@/client/hooks/useCards";
-import { ActivationCard } from "./ActivationCard";
+import { WordCard } from "./WordCard";
 import type { Card } from "@/shared/types";
 
 const CEFR_LEVELS = ["All", "A1", "A2", "B1", "B2", "C1", "C2"] as const;
@@ -27,9 +27,17 @@ export function CardCollection() {
     return () => clearTimeout(timer);
   }, [search]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, cefr]);
+
+  const [page, setPage] = useState(1);
+  const limit = 20;
   const { data, isLoading } = useCards({
     search: debouncedSearch || undefined,
     cefr: cefr === "All" ? undefined : cefr,
+    page,
+    limit,
   });
 
   const deleteCard = useDeleteCard();
@@ -47,6 +55,8 @@ export function CardCollection() {
   );
 
   const cards = data?.cards ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
 
   return (
     <div className="space-y-4">
@@ -135,6 +145,32 @@ export function CardCollection() {
         </div>
       )}
 
+      {total > 0 && (
+        <div className="flex items-center justify-between pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1 || isLoading}
+          >
+            上一页
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            第 {page} / {totalPages} 页 · 共 {total} 条
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={isLoading || page >= totalPages}
+          >
+            下一页
+          </Button>
+        </div>
+      )}
+
       {/* Detail dialog */}
       <Dialog
         open={selectedCard !== null}
@@ -146,7 +182,7 @@ export function CardCollection() {
           <DialogHeader>
             <DialogTitle>{selectedCard?.word}</DialogTitle>
           </DialogHeader>
-          {selectedCard && <ActivationCard card={selectedCard} />}
+          {selectedCard && <WordCard card={selectedCard} />}
         </DialogContent>
       </Dialog>
     </div>

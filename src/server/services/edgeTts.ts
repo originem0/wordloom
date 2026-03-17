@@ -41,7 +41,14 @@ function normalizeEnglishVoice(raw: string): string {
 }
 
 export async function generateEdgeTtsMp3(text: string): Promise<Buffer> {
-  await edgeSemaphore.acquire();
+  try {
+    await edgeSemaphore.acquire();
+  } catch (err) {
+    if (err instanceof Error && (err.message === "QUEUE_FULL" || err.message === "QUEUE_TIMEOUT")) {
+      throw new Error("TTS_BUSY");
+    }
+    throw err;
+  }
   try {
     const voice = normalizeEnglishVoice(await getSetting("edge_tts_voice"));
     const clean = sanitizeTtsText(text);

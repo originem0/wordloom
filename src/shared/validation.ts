@@ -64,19 +64,43 @@ export const aiDeepLayerSchema = z.object({
     )
     .optional()
     .default([]),
+  familyBoundaryNote: z.string().optional(),
   schemaAnalysis: z
     .object({
       coreSchema: z.string(),
+      coreImageText: z.string().optional(),
       metaphoricalExtensions: z.array(z.string()),
       registerVariation: z.string(),
+      etymologyChain: z.array(z.string()).optional(),
+      sceneActivation: z
+        .array(
+          z.object({
+            title: z.string(),
+            description: z.string(),
+            example: z.string(),
+            associatedWords: z.array(z.string()),
+          }),
+        )
+        .optional(),
     })
     .optional(),
   boundaryTests: z
     .array(
       z.object({
-        scenario: z.string(),
-        answer: z.string(),
-        explanation: z.string(),
+        sentence: z.string().optional(),
+        options: z
+          .array(
+            z.object({
+              verdict: z.enum(["yes", "no", "maybe"]),
+              word: z.string(),
+              reason: z.string(),
+            }),
+          )
+          .optional(),
+        // Legacy fields kept for backward compat
+        scenario: z.string().optional(),
+        answer: z.string().optional(),
+        explanation: z.string().optional(),
       }),
     )
     .optional()

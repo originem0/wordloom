@@ -98,7 +98,10 @@ export const useTaskStore = create<{
     const ac = new AbortController();
     controllers.set(id, ac);
 
-    const label = `生成 ${words.length} 张单词卡`;
+    const unique = Array.from(
+      new Map(words.map((w) => [w.toLowerCase(), w])).values(),
+    );
+    const label = `生成 ${unique.length} 张单词卡`;
 
     set((s) => ({
       tasks: [
@@ -116,7 +119,7 @@ export const useTaskStore = create<{
     fetch("/api/cards/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ words }),
+      body: JSON.stringify({ words: unique }),
       credentials: "include",
       signal: ac.signal,
     })

@@ -2,14 +2,16 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiPost } from "@/client/lib/api";
 import type { Card, CardGenerateResult } from "@/shared/types";
 
-export function useCards(params: { search?: string; cefr?: string }) {
+export function useCards(params: { search?: string; cefr?: string; page?: number; limit?: number }) {
   return useQuery({
     queryKey: ["cards", params],
     queryFn: () => {
       const sp = new URLSearchParams();
       if (params.search) sp.set("search", params.search);
       if (params.cefr) sp.set("cefr", params.cefr);
-      return apiFetch<{ cards: Card[]; total: number }>(`/api/cards?${sp}`);
+      if (params.page) sp.set("page", String(params.page));
+      if (params.limit) sp.set("limit", String(params.limit));
+      return apiFetch<{ cards: Card[]; total: number; page: number; limit: number }>(`/api/cards?${sp}`);
     },
   });
 }
