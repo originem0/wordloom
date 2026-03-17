@@ -168,19 +168,21 @@ export function PrototypeWordCard({ card }: { card: Card }) {
             {schemaType === "balance" && <SchemaBalanceSvgProto />}
 
             {coreImageText && <p>{coreImageText}</p>}
-
-            {generateDeep.isPending && (
-              <p style={{ marginTop: 10, fontStyle: "normal", color: "var(--muted)" }}>
-                正在生成深度分析…
-              </p>
-            )}
-
-            {generateDeep.isError && (
-              <p style={{ marginTop: 10, fontStyle: "normal", color: "#dc322f" }}>
-                {generateDeep.error.message}
-              </p>
-            )}
           </section>
+        )}
+
+        {/* Deep layer loading / error — top-level so it's always visible */}
+        {generateDeep.isPending && (
+          <div className="deep-loading">
+            <span className="deep-spinner" />
+            正在生成深度分析…
+          </div>
+        )}
+
+        {generateDeep.isError && (
+          <div className="deep-error">
+            深度分析生成失败：{generateDeep.error.message}
+          </div>
         )}
 
         {/* 3. Etymology */}

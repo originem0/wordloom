@@ -461,6 +461,41 @@
   color: var(--fg);
 }
 
+/* --- Deep loading / error states --- */
+.proto-page .deep-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.proto-page .deep-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: proto-spin 0.6s linear infinite;
+}
+
+@keyframes proto-spin {
+  to { transform: rotate(360deg); }
+}
+
+.proto-page .deep-error {
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: rgba(220, 50, 47, 0.08);
+  border-left: 3px solid #dc322f;
+  color: #dc322f;
+  font-size: 14px;
+}
+
 /* --- Responsive --- */
 @media (max-width: 640px) {
   .proto-page .card {
@@ -626,6 +661,9 @@
   .proto-page .proto-path,
   .proto-page .proto-link--dash,
   .proto-page .proto-beam {
+    animation: none !important;
+  }
+  .proto-page .deep-spinner {
     animation: none !important;
   }
   .proto-page .cloud { opacity: 0.3; }

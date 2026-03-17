@@ -6,6 +6,7 @@ import { Button } from "@/client/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogTitle,
 } from "@/client/components/ui/dialog";
 import { useCards, useDeleteCard } from "@/client/hooks/useCards";
 import { PrototypeWordCard } from "./PrototypeWordCard";
@@ -176,7 +177,11 @@ export function CardCollection() {
           if (!open) setSelectedCard(null);
         }}
       >
-        <DialogContent className="max-h-[100dvh] overflow-y-auto max-w-full h-full rounded-none p-0 bg-transparent sm:max-h-[85vh] sm:max-w-[900px] sm:h-auto sm:rounded-lg">
+        <DialogContent
+          className="max-h-[100dvh] overflow-y-auto max-w-full h-full rounded-none p-0 border-0 bg-transparent shadow-none sm:max-h-[85vh] sm:max-w-[900px] sm:h-auto sm:rounded-lg sm:shadow-lg"
+          showCloseButton={false}
+        >
+          <DialogTitle className="sr-only">{selectedCard?.word}</DialogTitle>
           {selectedCard && <PrototypeWordCard card={selectedCard} />}
         </DialogContent>
       </Dialog>
