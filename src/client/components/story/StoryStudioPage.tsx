@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { Loader2, Trash2, Clock } from "lucide-react";
 import { Button } from "@/client/components/ui/button";
 import { Input } from "@/client/components/ui/input";
@@ -26,13 +26,20 @@ function StoryStudioInner() {
     });
   }, []);
 
+  const generatingRef = useRef(false);
+
   const handleGenerate = async () => {
-    if (!imageFile) return;
-    const result = await generateMutation.mutateAsync({
-      image: imageFile,
-      prompt,
-    });
-    setActiveStory(result);
+    if (!imageFile || generatingRef.current) return;
+    generatingRef.current = true;
+    try {
+      const result = await generateMutation.mutateAsync({
+        image: imageFile,
+        prompt,
+      });
+      setActiveStory(result);
+    } finally {
+      generatingRef.current = false;
+    }
   };
 
   const handleWordClick = useCallback((word: string) => {
@@ -86,6 +93,7 @@ function StoryStudioInner() {
             }}
           />
           <Button
+            type="button"
             onClick={handleGenerate}
             disabled={!imageFile || generateMutation.isPending}
             className="w-full md:w-auto"
