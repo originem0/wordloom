@@ -18,13 +18,17 @@ async function getSetting(key: string): Promise<string> {
 }
 
 function sanitizeTtsText(text: string): string {
-  // Story output may contain markdown emphasis like **phrase**.
-  // Edge TTS tends to read punctuation symbols literally, so strip common markers.
+  // Strip any Markdown artifacts that would sound wrong when read aloud.
   return text
-    .replace(/\*\*/g, "")
-    .replace(/__+/g, "")
-    .replace(/`+/g, "")
-    .replace(/\s+/g, " ")
+    .replace(/^#{1,6}\s+/gm, "")   // headings: ### Title
+    .replace(/^[-*]\s+/gm, "")     // bullet points
+    .replace(/^\d+\.\s+/gm, "")    // numbered lists
+    .replace(/^---+$/gm, "")       // horizontal rules
+    .replace(/\*\*/g, "")          // bold **word**
+    .replace(/__+/g, "")           // bold __word__
+    .replace(/`+/g, "")            // code `word`
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1") // links [text](url) → text
+    .replace(/\n{3,}/g, "\n\n")    // collapse excess newlines
     .trim();
 }
 

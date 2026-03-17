@@ -127,26 +127,19 @@ async function getModel(settingKey: string, fallback: string): Promise<string> {
 
 const STORY_SYSTEM_PROMPT = `You are creating a SHORT model essay (150-250 words) for English learners practicing "picture description" (看图说话).
 
-**STRUCTURE (keep each section brief):**
+Write 2-3 flowing paragraphs of plain prose. Start by describing the key visible elements with precise vocabulary, then convey the mood or feeling, and weave in a short narrative.
 
-1. **What I See** (2-3 sentences)
-   Describe the key visible elements with precise vocabulary. Avoid generic words like "beautiful" or "nice."
+RULES:
+- 150-250 words total. Do NOT exceed.
+- Wrap 2-3 useful expressions or collocations in **double asterisks** so learners can study them (e.g. **catch someone's eye**). This is the ONLY Markdown allowed.
+- Do NOT use any other Markdown: no headings (#), no horizontal rules (---), no bullet points, no numbered lists, no code blocks.
+- Do NOT add section titles like "What I See" or "Mini Story". Just write natural paragraphs.
+- Use varied sentence structures (short + long).
+- Natural, conversational tone — not overly literary.
+- Only describe what is clearly visible; use "someone" if identity is unclear.
+- Use search tool for recognizable people, places, or events.
 
-2. **What I Feel** (2-3 sentences)
-   What mood or story does this image convey? Connect visuals to meaning.
-
-3. **Mini Story** (3-5 sentences)
-   A short, engaging narrative woven from your observations.
-
-**RULES:**
-- Total length: 150-250 words (DO NOT exceed)
-- **Bold** 2-3 useful expressions/collocations for learners to study
-- Use varied sentence structures (short + long)
-- Natural, conversational tone — not overly literary
-- Only describe what's clearly visible; use "someone" if identity is unclear
-- Use search tool for recognizable people/places/events
-
-Keep it concise and learner-friendly. Quality over quantity.`;
+The output will be read aloud by TTS, so it must sound natural as spoken English.`;
 
 // ---------------------------------------------------------------------------
 // generateStory
