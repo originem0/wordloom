@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useGenerateDeep } from "@/client/hooks/useCards";
 import type { BoundaryTest, BoundaryTestOption, Card } from "@/shared/types";
 import { SchemaBlockageSvgProto } from "./SchemaBlockageSvgProto";
+import { SchemaBalanceSvgProto } from "./SchemaBalanceSvgProto";
+import { SchemaContainerSvgProto } from "./SchemaContainerSvgProto";
+import { SchemaLinkSvgProto } from "./SchemaLinkSvgProto";
+import { SchemaPathSvgProto } from "./SchemaPathSvgProto";
 import "./prototype-word-card.css";
 
 // ---------------------------------------------------------------------------
@@ -158,6 +162,10 @@ export function PrototypeWordCard({ card }: { card: Card }) {
             <h2>核心意象 Core image</h2>
 
             {schemaType === "blockage" && <SchemaBlockageSvgProto />}
+            {schemaType === "container" && <SchemaContainerSvgProto />}
+            {schemaType === "path" && <SchemaPathSvgProto />}
+            {schemaType === "link" && <SchemaLinkSvgProto />}
+            {schemaType === "balance" && <SchemaBalanceSvgProto />}
 
             {coreImageText && <p>{coreImageText}</p>}
 
