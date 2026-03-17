@@ -601,7 +601,11 @@ For the given word, generate a JSON object with these fields:
 
 3. schemaAnalysis: Cognitive schema analysis.
    {
-     coreSchema: one of "blockage" | "container" | "path" | "link" | "balance" | "scale" | "force" | "cycle",
+     // IMPORTANT: to guarantee a matching animated template in the UI,
+     // coreSchema MUST be exactly one of: "blockage" | "container" | "path" | "link" | "balance".
+     // If you think the best abstract schema would be something else (e.g. scale/force/cycle),
+     // choose the closest from the allowed list (fallback to "blockage" if unsure).
+     coreSchema: one of "blockage" | "container" | "path" | "link" | "balance",
      coreImageText: A paragraph in Chinese (2-3 sentences) describing the core cognitive image of the word — what mental picture it evokes, using the metaphor behind the word,
      metaphoricalExtensions: string[],
      registerVariation: string,
@@ -624,7 +628,13 @@ For the given word, generate a JSON object with these fields:
    }
    Include the target word and at least one confusable word from familyComparison in the options.
 
-Return as a single JSON object. All Chinese text should use Simplified Chinese.`;
+Return as a single JSON object.
+
+Hard requirements:
+- schemaAnalysis MUST be present.
+- schemaAnalysis.coreSchema MUST be one of: blockage, container, path, link, balance.
+
+All Chinese text should use Simplified Chinese.`;
 
 
 export async function generateDeepLayer(
@@ -670,7 +680,50 @@ export async function generateDeepLayer(
         throw new Error(`Deep layer validation failed for "${word}"`);
       }
 
-      return result.data;
+      // Post-process to guarantee animated schema compatibility.
+      const ALLOWED = ["blockage", "container", "path", "link", "balance"] as const;
+      type CoreSchema = (typeof ALLOWED)[number];
+      const normalizeCoreSchema = (raw: unknown): CoreSchema => {
+        if (typeof raw !== "string") return "blockage";
+        const v = raw.trim().toLowerCase();
+        if ((ALLOWED as readonly string[]).includes(v)) return v as CoreSchema;
+
+        // Common near-misses and aliases
+        if (["scale", "weigh", "weighing", "tradeoff", "trade-off", "equilibrium"].includes(v)) {
+          return "balance";
+        }
+        if (["force", "pressure", "push", "pull"].includes(v)) return "blockage";
+        if (["cycle", "loop", "repeat", "repetition"].includes(v)) return "path";
+        if (v.includes("contain") || v.includes("inside") || v.includes("outside") || v.includes("boundary") || v === "box") {
+          return "container";
+        }
+        if (v.includes("journey") || v.includes("route") || v.includes("progress") || v.includes("path")) {
+          return "path";
+        }
+        if (v.includes("connect") || v.includes("relation") || v.includes("association") || v.includes("link")) {
+          return "link";
+        }
+        if (v.includes("balance") || v.includes("equilib") || v.includes("weigh")) {
+          return "balance";
+        }
+        return "blockage";
+      };
+
+      const out = result.data;
+      if (!out.schemaAnalysis) {
+        out.schemaAnalysis = {
+          coreSchema: "blockage",
+          coreImageText: "",
+          metaphoricalExtensions: [],
+          registerVariation: "",
+          etymologyChain: [],
+          sceneActivation: [],
+        };
+      } else {
+        out.schemaAnalysis.coreSchema = normalizeCoreSchema(out.schemaAnalysis.coreSchema);
+      }
+
+      return out;
     });
   } finally {
     geminiSemaphore.release();
