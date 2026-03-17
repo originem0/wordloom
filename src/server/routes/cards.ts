@@ -24,26 +24,40 @@ const JSON_FIELDS = [
   "phrases",
   "synonyms",
   "antonyms",
+  // Deep layer (nullable; lazy-loaded)
   "familyComparison",
   "schemaAnalysis",
   "boundaryTests",
 ] as const;
 
+const DEEP_JSON_FIELDS = new Set([
+  "familyComparison",
+  "schemaAnalysis",
+  "boundaryTests",
+] as const);
+
 /** Parse a card DB row into the API shape (JSON-decode text fields). */
 export function toCard(row: typeof cards.$inferSelect): Card {
   const card: Record<string, unknown> = { ...row };
+
   for (const field of JSON_FIELDS) {
     const raw = card[field];
+    const isDeep = DEEP_JSON_FIELDS.has(field);
+
     if (typeof raw === "string") {
       try {
         card[field] = JSON.parse(raw);
       } catch {
-        card[field] = field === "schemaAnalysis" ? null : [];
+        // If parsing fails, treat deep layer as absent (null), and shallow arrays as empty.
+        card[field] = isDeep ? null : [];
       }
     } else {
-      card[field] = field === "schemaAnalysis" ? null : raw ?? [];
+      // For deep layer fields, absence should stay null so the client can trigger generation.
+      // For other JSON arrays, default to [] for convenience.
+      card[field] = isDeep ? (raw ?? null) : (raw ?? []);
     }
   }
+
   return card as unknown as Card;
 }
 
