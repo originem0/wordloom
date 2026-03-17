@@ -16,8 +16,12 @@ function StoryStudioInner() {
   const { storiesQuery, deleteMutation } = useStories({ page, limit });
   const submitStory = useTaskStore((s) => s.submitStory);
   const submitCards = useTaskStore((s) => s.submitCards);
-  const runningStoryTasks = useTaskStore((s) =>
-    s.tasks.filter((t) => t.type === "story" && t.status === "running"),
+
+  // Avoid returning a new array from the store selector (React 19 + useSyncExternalStore).
+  const tasks = useTaskStore((s) => s.tasks);
+  const runningStoryTasks = useMemo(
+    () => tasks.filter((t) => t.type === "story" && t.status === "running"),
+    [tasks],
   );
 
   const [imageFile, setImageFile] = useState<File | null>(null);
