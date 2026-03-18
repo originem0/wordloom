@@ -131,14 +131,7 @@ export function Shell() {
             {label}
           </NavLink>
         ))}
-        <button
-          onClick={handleLogout}
-          className="flex flex-col items-center justify-center gap-1 min-h-11 min-w-11 px-2 text-[11px] text-muted-foreground"
-          title="退出登录"
-        >
-          <LogOut className="size-5" />
-          退出
-        </button>
+
       </nav>
     </div>
   );
