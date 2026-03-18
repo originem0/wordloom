@@ -72,8 +72,13 @@ app.use("/sw.js", serveStatic({ root: "./dist/client" }));
 app.use("/workbox-*", serveStatic({ root: "./dist/client" }));
 app.use("/manifest.json", serveStatic({ root: "./dist/client" }));
 app.use("/manifest.webmanifest", serveStatic({ root: "./dist/client" }));
-app.use("/icon*", serveStatic({ root: "./dist/client" }));
-app.use("/favicon*", serveStatic({ root: "./dist/client" }));
+app.use("/icon.svg", serveStatic({ root: "./dist/client" }));
+app.use("/icons.svg", serveStatic({ root: "./dist/client" }));
+app.use("/icon-192.png", serveStatic({ root: "./dist/client" }));
+app.use("/icon-512.png", serveStatic({ root: "./dist/client" }));
+app.use("/favicon.svg", serveStatic({ root: "./dist/client" }));
+app.use("/favicon.ico", serveStatic({ root: "./dist/client" }));
+app.use("/favicon-32x32.png", serveStatic({ root: "./dist/client" }));
 app.use("/registerSW.js", serveStatic({ root: "./dist/client" }));
 
 // SPA fallback: any non-API route returns index.html
