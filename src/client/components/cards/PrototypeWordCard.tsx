@@ -9,10 +9,25 @@ import { SchemaPathSvgProto } from "./SchemaPathSvgProto";
 import "./prototype-word-card.css";
 
 // ---------------------------------------------------------------------------
-// Backward-compat adapter for BoundaryTest
-// Old format: { scenario, answer, explanation }
-// New format: { sentence, options: [{ verdict, word, reason }] }
+// Sanitize AI-generated SVG: strip dangerous elements/attributes
 // ---------------------------------------------------------------------------
+function sanitizeSvg(raw: string): string | null {
+  if (!raw || !raw.includes("<svg")) return null;
+  // Remove <script>, <foreignObject>, event handlers, <image> with external href
+  let svg = raw
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, "")
+    .replace(/<image[^>]*>/gi, "")
+    .replace(/\bon\w+\s*=\s*["'][^"']*["']/gi, "")
+    .replace(/javascript\s*:/gi, "");
+  // Ensure it starts with <svg and ends with </svg>
+  const start = svg.indexOf("<svg");
+  const end = svg.lastIndexOf("</svg>");
+  if (start === -1 || end === -1) return null;
+  svg = svg.slice(start, end + 6);
+  return svg;
+}
+
 
 interface NormalizedBoundaryTest {
   sentence: string;
@@ -95,7 +110,7 @@ function BoundaryTestItem({ test }: { test: NormalizedBoundaryTest }) {
   );
 }
 
-export function PrototypeWordCard({ card }: { card: Card }) {
+export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () => void }) {
   const generateDeep = useGenerateDeep();
 
   const deepCard = generateDeep.data ? { ...card, ...generateDeep.data } : card;
@@ -117,6 +132,10 @@ export function PrototypeWordCard({ card }: { card: Card }) {
   const schemaType = deepCard.schemaAnalysis?.coreSchema?.toLowerCase();
   const coreImageText =
     deepCard.schemaAnalysis?.coreImageText || deepCard.schemaAnalysis?.coreSchema;
+  const customSvg = useMemo(
+    () => sanitizeSvg(deepCard.schemaAnalysis?.coreSvg ?? ""),
+    [deepCard.schemaAnalysis?.coreSvg],
+  );
 
   const evolutionChain = deepCard.schemaAnalysis?.etymologyChain;
 
@@ -136,6 +155,17 @@ export function PrototypeWordCard({ card }: { card: Card }) {
   return (
     <div className="proto-page">
       <div className="card">
+        {/* Close button */}
+        {onClose && (
+          <button
+            type="button"
+            className="close-btn"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        )}
         {/* 1. Word header — single line */}
         <header className="word-header">
           <h1>{deepCard.word}</h1>
@@ -156,16 +186,25 @@ export function PrototypeWordCard({ card }: { card: Card }) {
           </div>
         </header>
 
-        {/* 2. Core image — animated schema */}
+        {/* 2. Core image — custom SVG or fallback template */}
         {deepCard.schemaAnalysis && (
           <section className="core-image">
             <h2>核心意象 Core image</h2>
 
-            {schemaType === "blockage" && <SchemaBlockageSvgProto />}
-            {schemaType === "container" && <SchemaContainerSvgProto />}
-            {schemaType === "path" && <SchemaPathSvgProto />}
-            {schemaType === "link" && <SchemaLinkSvgProto />}
-            {schemaType === "balance" && <SchemaBalanceSvgProto />}
+            {customSvg ? (
+              <div
+                className="custom-schema-svg"
+                dangerouslySetInnerHTML={{ __html: customSvg }}
+              />
+            ) : (
+              <>
+                {schemaType === "blockage" && <SchemaBlockageSvgProto />}
+                {schemaType === "container" && <SchemaContainerSvgProto />}
+                {schemaType === "path" && <SchemaPathSvgProto />}
+                {schemaType === "link" && <SchemaLinkSvgProto />}
+                {schemaType === "balance" && <SchemaBalanceSvgProto />}
+              </>
+            )}
 
             {coreImageText && <p>{coreImageText}</p>}
           </section>
@@ -203,75 +242,83 @@ export function PrototypeWordCard({ card }: { card: Card }) {
           </section>
         )}
 
-        {/* 4. Scene activation */}
+        {/* 4. Scene activation — collapsible */}
         {scenes.length > 0 && (
-          <section>
-            <h2>场景激活 Frame activation</h2>
-            {scenes.map((scene, i) => (
-              <div key={i} className="scene">
-                <h3>{scene.title}</h3>
-                <p>{scene.description}</p>
-                <p
-                  className="scene-example"
-                  dangerouslySetInnerHTML={{
-                    __html: scene.example.replace(
-                      /\*\*(.*?)\*\*/g,
-                      "<strong>$1</strong>",
-                    ),
-                  }}
-                />
-                {scene.associatedWords.length > 0 && (
-                  <div className="associated-words">
-                    {scene.associatedWords.map((w) => (
-                      <span key={w}>{w}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </section>
+          <details className="tests-toggle">
+            <summary className="tests-summary">
+              <span className="chevron">&#9654;</span> 场景激活 Frame activation
+            </summary>
+            <div className="tests-body">
+              {scenes.map((scene, i) => (
+                <div key={i} className="scene">
+                  <h3>{scene.title}</h3>
+                  <p>{scene.description}</p>
+                  <p
+                    className="scene-example"
+                    dangerouslySetInnerHTML={{
+                      __html: scene.example.replace(
+                        /\*\*(.*?)\*\*/g,
+                        "<strong>$1</strong>",
+                      ),
+                    }}
+                  />
+                  {scene.associatedWords.length > 0 && (
+                    <div className="associated-words">
+                      {scene.associatedWords.map((w) => (
+                        <span key={w}>{w}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </details>
         )}
 
-        {/* 5. Family comparison */}
+        {/* 5. Family comparison — collapsible */}
         {family.length > 0 && (
-          <section>
-            <h2>家族对比 Family comparison</h2>
-            <div className="table-scroll">
-              <table className="family-table">
-                <thead>
-                  <tr>
-                    <th>词</th>
-                    <th>核心区别</th>
-                    <th>情感 / 语域</th>
-                    <th>典型场景</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {family.map((entry) => (
-                    <tr
-                      key={entry.word}
-                      className={
-                        entry.word.toLowerCase() === deepCard.word.toLowerCase()
-                          ? "highlight"
-                          : ""
-                      }
-                    >
-                      <td className="word-col">{entry.word}</td>
-                      <td>{entry.distinction}</td>
-                      <td>{entry.register}</td>
-                      <td>{entry.typicalScene}</td>
+          <details className="tests-toggle">
+            <summary className="tests-summary">
+              <span className="chevron">&#9654;</span> 家族对比 Family comparison
+            </summary>
+            <div className="tests-body">
+              <div className="table-scroll">
+                <table className="family-table">
+                  <thead>
+                    <tr>
+                      <th>词</th>
+                      <th>核心区别</th>
+                      <th>情感 / 语域</th>
+                      <th>典型场景</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {family.map((entry) => (
+                      <tr
+                        key={entry.word}
+                        className={
+                          entry.word.toLowerCase() === deepCard.word.toLowerCase()
+                            ? "highlight"
+                            : ""
+                        }
+                      >
+                        <td className="word-col">{entry.word}</td>
+                        <td>{entry.distinction}</td>
+                        <td>{entry.register}</td>
+                        <td>{entry.typicalScene}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {boundaryNote && (
+                <div
+                  className="boundary-note"
+                  dangerouslySetInnerHTML={{ __html: boundaryNote.replace(/\n/g, "<br>") }}
+                />
+              )}
             </div>
-            {boundaryNote && (
-              <div
-                className="boundary-note"
-                dangerouslySetInnerHTML={{ __html: boundaryNote.replace(/\n/g, "<br>") }}
-              />
-            )}
-          </section>
+          </details>
         )}
 
         {/* 6. Boundary tests (collapsed, answers hidden) */}

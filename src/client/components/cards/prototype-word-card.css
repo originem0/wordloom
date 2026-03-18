@@ -24,6 +24,7 @@
   justify-content: center;
   padding: 24px 16px;
   min-height: 100%;
+  overflow-x: hidden;
 }
 
 :is(.dark) .proto-page {
@@ -55,6 +56,41 @@
   display: flex;
   flex-direction: column;
   gap: 18px;
+  overflow-x: hidden;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  position: relative;
+}
+
+/* --- Close button --- */
+.proto-page .close-btn {
+  position: sticky;
+  top: 0;
+  align-self: flex-end;
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-top: -4px;
+  margin-bottom: -12px;
+}
+.proto-page .close-btn:hover {
+  color: var(--heading);
+  border-color: var(--heading);
+}
+.proto-page .close-btn:active {
+  transform: scale(0.92);
 }
 
 /* --- Header --- */
@@ -111,7 +147,7 @@
   background: linear-gradient(135deg, var(--surface) 0%, #fdf6e3 100%);
   border-radius: 10px;
   padding: 14px;
-  overflow: hidden;
+  overflow: visible;
 }
 :is(.dark) .proto-page .core-image {
   background: linear-gradient(135deg, var(--surface) 0%, var(--card) 100%);
@@ -127,7 +163,23 @@
 
 .proto-page .schema-svg {
   width: 100%;
-  height: 170px;
+  height: auto;
+  aspect-ratio: 600 / 180;
+  display: block;
+  max-height: 170px;
+}
+
+/* Custom AI-generated SVG */
+.proto-page .custom-schema-svg {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.proto-page .custom-schema-svg svg {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 600 / 180;
+  max-height: 170px;
   display: block;
 }
 
@@ -376,6 +428,11 @@
   font: 700 1.2em/1.3 "Lora", serif;
   color: var(--heading);
   padding: 14px 16px;
+  background: var(--surface);
+  transition: background 0.15s;
+}
+.proto-page .tests-summary:active {
+  background: var(--border);
 }
 .proto-page .tests-toggle > summary .chevron {
   transition: transform 0.2s;
@@ -498,22 +555,111 @@
 
 /* --- Responsive --- */
 @media (max-width: 640px) {
+  .proto-page {
+    padding: 0;
+    font-size: 14px;
+  }
   .proto-page .card {
-    padding: 20px;
-    gap: 20px;
+    padding: 14px;
+    gap: 10px;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+  .proto-page .word-header {
+    gap: 8px;
   }
   .proto-page .word-header h1 {
-    font-size: 1.8em;
+    font-size: 1.6em;
+  }
+  .proto-page h2 {
+    font-size: 1em;
+    margin-bottom: 4px;
+    padding-bottom: 2px;
+  }
+  .proto-page h3 {
+    font-size: 0.85em;
+  }
+  .proto-page .core-image {
+    padding: 10px;
+  }
+  .proto-page .core-image p {
+    font-size: 12px;
+    line-height: 1.5;
+    margin-top: 6px;
+    color: var(--muted);
+  }
+  .proto-page .schema-svg {
+    max-height: 120px;
+  }
+  .proto-page .etymology {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .proto-page .evolution-chain {
+    font-size: 12px;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .proto-page .evolution-chain .stage {
+    padding: 2px 8px;
+  }
+  .proto-page .tests-toggle {
+    border-radius: 8px;
+  }
+  .proto-page .tests-summary {
+    font-size: 0.95em;
+    padding: 10px 12px;
+    background: var(--surface);
+  }
+  .proto-page .tests-body {
+    padding: 10px 12px;
+    gap: 10px;
+  }
+  .proto-page .scene {
+    padding: 8px 10px;
+    margin-bottom: 6px;
+  }
+  .proto-page .scene p {
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .proto-page .scene h3 {
+    font-size: 0.8em;
+    margin-bottom: 4px;
   }
   .proto-page .family-table {
-    font-size: 13px;
+    font-size: 12px;
   }
   .proto-page .family-table th,
   .proto-page .family-table td {
-    padding: 6px 6px;
+    padding: 5px 5px;
   }
-  .proto-page .schema-svg {
-    height: 160px;
+  .proto-page .table-scroll {
+    -webkit-overflow-scrolling: touch;
+  }
+  .proto-page .close-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+    margin-top: -2px;
+    margin-bottom: -8px;
+  }
+  .proto-page .deep-loading {
+    padding: 16px 12px;
+    font-size: 13px;
+  }
+  .proto-page .test-blank {
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 6px;
+  }
+  .proto-page .test-options {
+    font-size: 12px;
+  }
+  .proto-page .boundary-note {
+    font-size: 12px;
+    padding: 8px 10px;
   }
 }
 

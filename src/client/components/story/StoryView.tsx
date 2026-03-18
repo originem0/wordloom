@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Languages, ExternalLink, Loader2 } from "lucide-react";
+import { useState, useCallback } from "react";
+import { Languages, ExternalLink, Loader2, Copy, Check } from "lucide-react";
 import { Button } from "@/client/components/ui/button";
 import { Badge } from "@/client/components/ui/badge";
 import { InteractiveStory } from "./InteractiveStory";
@@ -15,7 +15,16 @@ interface StoryViewProps {
 export function StoryView({ story, onWordClick }: StoryViewProps) {
   const [translation, setTranslation] = useState<string | null>(null);
   const [showTranslation, setShowTranslation] = useState(false);
+  const [copied, setCopied] = useState(false);
   const translateMutation = useTranslate();
+
+  const handleCopy = useCallback(() => {
+    const plain = story.story.replace(/\*\*/g, "");
+    navigator.clipboard.writeText(plain).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [story.story]);
 
   const handleTranslate = async () => {
     if (translation) {
@@ -39,8 +48,18 @@ export function StoryView({ story, onWordClick }: StoryViewProps) {
         />
       </div>
 
-      {/* Story text -- clickable words */}
-      <InteractiveStory story={story.story} onWordClick={onWordClick} />
+      {/* Story text -- clickable words + copy */}
+      <div className="group relative rounded-lg border bg-card p-4">
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="absolute top-2 right-2 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+          title="复制文本"
+        >
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        </button>
+        <InteractiveStory story={story.story} onWordClick={onWordClick} />
+      </div>
 
       {/* Translation toggle */}
       <div className="space-y-2">

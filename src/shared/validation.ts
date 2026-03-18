@@ -70,6 +70,7 @@ export const aiDeepLayerSchema = z.object({
     .object({
       coreSchema: z.string(),
       coreImageText: z.string().optional(),
+      coreSvg: z.string().optional(),
       metaphoricalExtensions: z.array(z.string()),
       registerVariation: z.string(),
       etymologyChain: z.array(z.string()).optional(),

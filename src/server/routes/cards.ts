@@ -85,11 +85,32 @@ cardRoutes.post("/generate", async (c) => {
     return c.json({ error: "No valid words", code: "VALIDATION_ERROR" }, 400);
   }
 
-  // Generate via Gemini
+  // Check which words already exist in DB — skip re-generation for those
+  const existing: Card[] = [];
+  const toGenerate: string[] = [];
+  for (const word of normalized) {
+    const row = await db
+      .select()
+      .from(cards)
+      .where(sql`lower(${cards.word}) = ${word.toLowerCase()}`)
+      .get();
+    if (row) {
+      existing.push(toCard(row));
+    } else {
+      toGenerate.push(word);
+    }
+  }
+
+  // If all words already exist, return them directly (no generation needed)
+  if (toGenerate.length === 0) {
+    return c.json({ success: existing, failed: [], existing: existing });
+  }
+
+  // Generate via Gemini (only new words)
   let success: Awaited<ReturnType<typeof generateCards>>["success"];
   let failed: Awaited<ReturnType<typeof generateCards>>["failed"];
   try {
-    const result = await generateCards(normalized);
+    const result = await generateCards(toGenerate);
     success = result.success;
     failed = result.failed;
   } catch (err) {
@@ -155,7 +176,7 @@ cardRoutes.post("/generate", async (c) => {
     return rows;
   });
 
-  return c.json({ success: insertedCards, failed });
+  return c.json({ success: [...existing, ...insertedCards], failed, existing });
 });
 
 // POST /extract — extract words from text

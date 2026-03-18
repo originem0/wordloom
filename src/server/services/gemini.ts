@@ -34,7 +34,7 @@ async function retryWithBackoff<T>(
         error instanceof Error ? error.message : String(error);
       // Only retry on transient errors
       const shouldRetry =
-        /503|overloaded|429|rate.limit|UNAVAILABLE|network|timeout|fetch|ECONNRESET|socket|SSL|TLS|eof|getoxsrf/i.test(
+        /502|503|overloaded|429|rate.limit|UNAVAILABLE|network|timeout|fetch|ECONNRESET|socket|SSL|TLS|eof|getoxsrf/i.test(
           msg,
         );
       if (!shouldRetry || attempt === maxRetries - 1) throw error;
@@ -287,21 +287,15 @@ async function getModel(settingKey: string, fallback: string): Promise<string> {
 // System prompt for story generation (picture description)
 // ---------------------------------------------------------------------------
 
-const STORY_SYSTEM_PROMPT = `You are creating a SHORT model essay (150-250 words) for English learners practicing "picture description" (看图说话).
+const STORY_SYSTEM_PROMPT = `Write a compact, essay-style paragraph (100-180 words) inspired by the image.
 
-Write 2-3 flowing paragraphs of plain prose. Start by describing the key visible elements with precise vocabulary, then convey the mood or feeling, and weave in a short narrative.
+Style: tight prose like a good blog post or short essay — no filler, every sentence earns its place. Vary rhythm (mix short punchy sentences with longer ones). Show, don't tell.
 
-RULES:
-- 150-250 words total. Do NOT exceed.
-- Wrap 2-3 useful expressions or collocations in **double asterisks** so learners can study them (e.g. **catch someone's eye**). This is the ONLY Markdown allowed.
-- Do NOT use any other Markdown: no headings (#), no horizontal rules (---), no bullet points, no numbered lists, no code blocks.
-- Do NOT add section titles like "What I See" or "Mini Story". Just write natural paragraphs.
-- Use varied sentence structures (short + long).
-- Natural, conversational tone — not overly literary.
-- Only describe what is clearly visible; use "someone" if identity is unclear.
-- Use search tool for recognizable people, places, or events.
+Mark 2-3 useful expressions in **double asterisks** (e.g. **catch someone's eye**). No other Markdown — no headings, lists, or rules.
 
-The output will be read aloud by TTS, so it must sound natural as spoken English.`;
+Only describe what's visible; use "someone" if identity is unclear. Use search for recognizable people/places.
+
+Output must sound natural read aloud (TTS).`;
 
 // ---------------------------------------------------------------------------
 // generateStory
@@ -474,7 +468,7 @@ For each word provided, generate a comprehensive card with these fields:
 - coreMeaning: a concise core meaning in Chinese (一句话核心释义)
 - wad: word acquisition difficulty (1-5, where 5 is hardest)
 - wap: word academic prevalence (1-5, where 5 is most academic)
-- etymology: brief etymology (origin language + meaning evolution)
+- etymology: brief etymology in Chinese (用中文解释词源，包括来源语言和语义演变，例如"源自拉丁语 per-（贯穿）+ severus（严格），原义'严格坚持到底'，后演变为'坚持不懈'")
 - collocations: 3-5 common collocations as strings
 - examples: 3 example sentences at basic/intermediate/advanced levels, each with Chinese translation
 - contextLadder: 3 progressive context levels (1=simple, 2=moderate, 3=complex), each with a sentence and context description
@@ -601,12 +595,21 @@ For the given word, generate a JSON object with these fields:
 
 3. schemaAnalysis: Cognitive schema analysis.
    {
-     // IMPORTANT: to guarantee a matching animated template in the UI,
-     // coreSchema MUST be exactly one of: "blockage" | "container" | "path" | "link" | "balance".
-     // If you think the best abstract schema would be something else (e.g. scale/force/cycle),
-     // choose the closest from the allowed list (fallback to "blockage" if unsure).
-     coreSchema: one of "blockage" | "container" | "path" | "link" | "balance",
+     coreSchema: one of "blockage" | "container" | "path" | "link" | "balance" (pick the closest),
      coreImageText: A paragraph in Chinese (2-3 sentences) describing the core cognitive image of the word — what mental picture it evokes, using the metaphor behind the word,
+     coreSvg: A COMPLETE inline SVG string that vividly illustrates THIS SPECIFIC WORD's core meaning.
+       SVG REQUIREMENTS:
+       - Must start with <svg viewBox="0 0 600 180" xmlns="http://www.w3.org/2000/svg"> and end with </svg>
+       - Use an inline <style> block for CSS @keyframes animations (NO SMIL attributes like <animate>)
+       - The visual must be a METAPHORICAL ILLUSTRATION specific to this word, not a generic diagram
+       - For example: "perseverance" → a figure climbing a steep mountain with falling rocks, still moving up;
+         "diverge" → a single path splitting into multiple colorful branches going different directions;
+         "obscure" → a clear shape gradually being covered by fog/clouds
+       - Use soft colors: teal (#2aa198), gold (#b58900), dark (#073642), muted gray (#93a1a1), cream (#eee8d5)
+       - Add 2-3 subtle CSS animations (floating, pulsing, dashing, moving) to make it feel alive
+       - Add short Chinese labels (1-3) at key positions using <text> elements, font-size 11-12px
+       - Keep the SVG under 2KB — simple shapes, no complex paths
+       - DO NOT use <image>, <foreignObject>, or external resources
      metaphoricalExtensions: string[],
      registerVariation: string,
      etymologyChain: Array of 2-4 short Chinese labels showing the semantic evolution stages (e.g. ["物理：昏暗/被遮挡", "认知：晦涩难懂", "社会：默默无闻"]),

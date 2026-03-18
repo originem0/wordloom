@@ -1,14 +1,16 @@
 import { useState, useCallback, useMemo } from "react";
 import { Loader2, Trash2, Clock } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/client/components/ui/button";
-import { Input } from "@/client/components/ui/input";
 import { Card, CardContent } from "@/client/components/ui/card";
 import { ModuleErrorBoundary } from "@/client/components/layout/ErrorBoundary";
 import { ImageUploader } from "./ImageUploader";
 import { StoryView } from "./StoryView";
 import { useStories } from "@/client/hooks/useStories";
 import { useTaskStore } from "@/client/store/tasks";
-import type { Story } from "@/shared/types";
+import { apiFetch } from "@/client/lib/api";
+import { toast } from "sonner";
+import type { Story, Card as CardType } from "@/shared/types";
 
 function StoryStudioInner() {
   const [page, setPage] = useState(1);
@@ -16,6 +18,7 @@ function StoryStudioInner() {
   const { storiesQuery, deleteMutation } = useStories({ page, limit });
   const submitStory = useTaskStore((s) => s.submitStory);
   const submitCards = useTaskStore((s) => s.submitCards);
+  const navigate = useNavigate();
 
   // Avoid returning a new array from the store selector (React 19 + useSyncExternalStore).
   const tasks = useTaskStore((s) => s.tasks);
@@ -26,6 +29,7 @@ function StoryStudioInner() {
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [promptOpen, setPromptOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [activeStory, setActiveStory] = useState<Story | null>(null);
 
@@ -50,12 +54,28 @@ function StoryStudioInner() {
   };
 
   const handleWordClick = useCallback(
-    (word: string) => {
+    async (word: string) => {
       const cleaned = word.replace(/[^a-zA-Z'-]/g, "").trim();
       if (!cleaned) return;
+      // Check if card already exists
+      try {
+        const res = await apiFetch<{ cards: CardType[]; total: number }>(
+          `/api/cards?search=${encodeURIComponent(cleaned)}&limit=1`,
+        );
+        const match = res.cards.find(
+          (c) => c.word.toLowerCase() === cleaned.toLowerCase(),
+        );
+        if (match) {
+          toast.info(`"${match.word}" 已有卡片，跳转中…`);
+          navigate("/cards");
+          return;
+        }
+      } catch {
+        // Network error — fall through to generate
+      }
       submitCards([cleaned]);
     },
-    [submitCards],
+    [submitCards, navigate],
   );
 
   const handleDelete = async (id: number) => {
@@ -90,20 +110,23 @@ function StoryStudioInner() {
           imagePreview={imagePreview}
         />
         <div className="flex flex-col gap-3">
-          <label className="text-sm font-medium">
-            描述 / 指令 (可选)
-          </label>
-          <Input
-            placeholder="例：Write a story about this place for a B1 English learner..."
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleGenerate();
-              }
-            }}
-          />
+          <button
+            type="button"
+            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors text-left"
+            onClick={() => setPromptOpen((v) => !v)}
+          >
+            <span className={`inline-block transition-transform text-xs ${promptOpen ? "rotate-90" : ""}`}>▶</span>
+            自定义指令 (可选)
+            {prompt && !promptOpen && <span className="text-xs text-primary ml-1">已填写</span>}
+          </button>
+          {promptOpen && (
+            <textarea
+              className="min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none dark:bg-input/30 resize-y"
+              placeholder="例：用简洁有力的散文风格，像 essay 不像作文。150词以内…"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+          )}
           <Button
             type="button"
             onClick={handleGenerate}

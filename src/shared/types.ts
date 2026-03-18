@@ -61,6 +61,7 @@ export interface FamilyEntry {
 export interface SchemaAnalysis {
   coreSchema: string;
   coreImageText?: string;
+  coreSvg?: string;
   metaphoricalExtensions: string[];
   registerVariation: string;
   etymologyChain?: string[];
@@ -109,4 +110,5 @@ export interface Card extends CardSurface, CardMiddle, CardDeep {
 export interface CardGenerateResult {
   success: Card[];
   failed: { word: string; error: string }[];
+  existing?: Card[];
 }

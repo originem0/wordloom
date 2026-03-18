@@ -82,7 +82,7 @@ export function InteractiveStory({ story, onWordClick }: InteractiveStoryProps) 
   const tokens = useMemo(() => tokenize(story), [story]);
 
   return (
-    <div className="leading-8 text-base md:text-lg">
+    <div className="leading-6 text-sm md:text-base md:leading-7">
       {tokens.map((token, i) => {
         if (!token.isWord) {
           // Preserve newlines as <br>
@@ -109,7 +109,7 @@ export function InteractiveStory({ story, onWordClick }: InteractiveStoryProps) 
             className={`cursor-pointer rounded px-0.5 hover:bg-yellow-100 dark:hover:bg-yellow-900/30 ${
               token.bold ? "font-semibold" : ""
             }`}
-            onClick={() => onWordClick(token.text)}
+            onDoubleClick={() => onWordClick(token.text)}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();

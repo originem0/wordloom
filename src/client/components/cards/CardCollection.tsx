@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { Search, Trash2, Loader2 } from "lucide-react";
 import { Input } from "@/client/components/ui/input";
 import { Badge } from "@/client/components/ui/badge";
@@ -12,6 +13,20 @@ import { useCards, useDeleteCard } from "@/client/hooks/useCards";
 import { PrototypeWordCard } from "./PrototypeWordCard";
 import type { Card } from "@/shared/types";
 
+/** Simple hook: true when viewport ≤ 640px */
+function useIsMobile() {
+  const [mobile, setMobile] = useState(
+    () => typeof window !== "undefined" && window.innerWidth <= 640,
+  );
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 640px)");
+    const handler = (e: MediaQueryListEvent) => setMobile(e.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
+  return mobile;
+}
+
 const CEFR_LEVELS = ["All", "A1", "A2", "B1", "B2", "C1", "C2"] as const;
 
 export function CardCollection() {
@@ -19,6 +34,15 @@ export function CardCollection() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [cefr, setCefr] = useState<string>("All");
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
+  const isMobile = useIsMobile();
+
+  // Lock body scroll when mobile overlay is open
+  useEffect(() => {
+    if (selectedCard && isMobile) {
+      document.body.style.overflow = "hidden";
+      return () => { document.body.style.overflow = ""; };
+    }
+  }, [selectedCard, isMobile]);
 
   // 300ms debounce for search
   useEffect(() => {
@@ -170,21 +194,42 @@ export function CardCollection() {
         </div>
       )}
 
-      {/* Detail dialog */}
-      <Dialog
-        open={selectedCard !== null}
-        onOpenChange={(open) => {
-          if (!open) setSelectedCard(null);
-        }}
-      >
-        <DialogContent
-          className="max-h-[100dvh] overflow-y-auto max-w-full h-full rounded-none p-0 border-0 bg-transparent shadow-none sm:max-h-[85vh] sm:max-w-[900px] sm:h-auto sm:rounded-lg sm:shadow-lg"
-          showCloseButton={false}
+      {/* Detail view — mobile: native fullscreen overlay; desktop: Dialog */}
+      {selectedCard && isMobile &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 overflow-y-auto bg-[var(--bg,#f4f1eb)]"
+            style={{ WebkitOverflowScrolling: "touch" }}
+          >
+            <PrototypeWordCard
+              card={selectedCard}
+              onClose={() => setSelectedCard(null)}
+            />
+          </div>,
+          document.body,
+        )}
+
+      {!isMobile && (
+        <Dialog
+          open={selectedCard !== null}
+          onOpenChange={(open) => {
+            if (!open) setSelectedCard(null);
+          }}
         >
-          <DialogTitle className="sr-only">{selectedCard?.word}</DialogTitle>
-          {selectedCard && <PrototypeWordCard card={selectedCard} />}
-        </DialogContent>
-      </Dialog>
+          <DialogContent
+            className="max-h-[85vh] overflow-y-auto max-w-[900px] h-auto rounded-lg p-0 border-0 bg-transparent shadow-lg"
+            showCloseButton={false}
+          >
+            <DialogTitle className="sr-only">{selectedCard?.word}</DialogTitle>
+            {selectedCard && (
+              <PrototypeWordCard
+                card={selectedCard}
+                onClose={() => setSelectedCard(null)}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

@@ -133,11 +133,23 @@ export const useTaskStore = create<{
       .then((result) => {
         const ok = result.success.length;
         const fail = result.failed.length;
-        const doneLabel =
-          fail > 0 ? `${ok} 张已创建, ${fail} 张失败` : `${ok} 张单词卡已创建`;
+        const existingCount = result.existing?.length ?? 0;
+        const newCount = ok - existingCount;
+        let doneLabel: string;
+        if (existingCount > 0 && newCount === 0) {
+          doneLabel = `${existingCount} 个词已存在`;
+        } else if (existingCount > 0) {
+          doneLabel = `${newCount} 张新卡已创建, ${existingCount} 个词已存在`;
+        } else if (fail > 0) {
+          doneLabel = `${ok} 张已创建, ${fail} 张失败`;
+        } else {
+          doneLabel = `${ok} 张单词卡已创建`;
+        }
         updateTask(id, { status: "done", result, label: doneLabel });
         queryClient.invalidateQueries({ queryKey: ["cards"] });
-        if (fail > 0) {
+        if (existingCount > 0 && newCount === 0) {
+          toast.info(doneLabel);
+        } else if (fail > 0) {
           toast.warning(doneLabel);
         } else {
           toast.success(doneLabel);
