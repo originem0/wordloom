@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
 import { authRoutes } from "../../routes/auth.js";
-import { authMiddleware, signToken } from "../../middleware/auth.js";
+import { authMiddleware, hashSessionId } from "../../middleware/auth.js";
+import { db } from "../../db/index.js";
+import { sessions } from "../../db/schema.js";
 
 function buildApp() {
   const app = new Hono();
@@ -14,11 +16,12 @@ function buildApp() {
 describe("auth middleware", () => {
   const originalEnv = { ...process.env };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Clean slate per test
     delete process.env.AUTH_TOKEN;
     delete process.env.AUTH_SECRET;
     delete process.env.NODE_ENV;
+    await db.delete(sessions);
   });
 
   afterEach(() => {
@@ -41,10 +44,19 @@ describe("auth middleware", () => {
 
   it("returns 200 with a valid session cookie", async () => {
     process.env.AUTH_TOKEN = "secret-token";
-    const signed = signToken("secret-token");
+
+    const rawSession = "test-session-id";
+    const now = Date.now();
+    await db.insert(sessions).values({
+      sessionId: hashSessionId(rawSession),
+      createdAt: now,
+      expiresAt: now + 60_000,
+      revokedAt: null,
+    });
+
     const app = buildApp();
     const res = await app.request("/api/protected", {
-      headers: { Cookie: `session=${signed}` },
+      headers: { Cookie: `session=${rawSession}` },
     });
     expect(res.status).toBe(200);
   });

@@ -9,7 +9,6 @@ import { storyRoutes } from "./routes/stories.js";
 import { cardRoutes } from "./routes/cards.js";
 import { settingRoutes } from "./routes/settings.js";
 import { jobRoutes } from "./routes/jobs.js";
-import { jobRoutes } from "./routes/jobs.js";
 import { readFileSync, existsSync } from "fs";
 
 if (process.env.NODE_ENV === "production") {
