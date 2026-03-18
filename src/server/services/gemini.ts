@@ -647,10 +647,7 @@ export async function generateCards(
               typeof item === "object" && item !== null && "word" in item
                 ? String((item as { word: unknown }).word)
                 : "unknown";
-            const first = single.error.issues?.[0];
-            const path = first?.path?.length ? first.path.join(".") : "";
-            const msg = first?.message ? String(first.message) : "Validation failed";
-            failed.push({ word, error: path ? `${path}: ${msg}` : msg });
+            failed.push({ word, error: "Validation failed" });
           }
         }
 

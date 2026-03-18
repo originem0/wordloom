@@ -13,6 +13,8 @@ import {
   extractWordsRequestSchema,
 } from "../../shared/validation.js";
 import type { Card, CardGenerateResult } from "../../shared/types.js";
+
+type CardGeneratePayload = CardGenerateResult & { message?: string };
 import {
   createJob,
   isJobCancelled,
@@ -100,11 +102,11 @@ async function splitExistingCards(normalized: string[]): Promise<{ existing: Car
   return { existing, toGenerate };
 }
 
-async function generateCardsPayload(normalized: string[]): Promise<CardGenerateResult> {
+async function generateCardsPayload(normalized: string[]): Promise<CardGeneratePayload> {
   const { existing, toGenerate } = await splitExistingCards(normalized);
 
   if (toGenerate.length === 0) {
-    return { success: existing, failed: [], existing };
+    return { success: existing, failed: [], existing, message: "All words already exist" };
   }
 
   const generated = await generateCards(toGenerate);
