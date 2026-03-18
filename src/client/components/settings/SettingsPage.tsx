@@ -207,37 +207,6 @@ export function SettingsPage() {
   const TEST_TTL_MS = 5 * 60 * 1000; // resume test-all if navigated away recently
   const hasHydrated = useRef(false);
 
-  // Hydrate cached health + models from session storage (survive route changes)
-  useEffect(() => {
-    try {
-      const cachedHealth = sessionStorage.getItem(HEALTH_CACHE_KEY);
-      if (cachedHealth) setHealth(JSON.parse(cachedHealth) as HealthMap);
-      const cachedModels = sessionStorage.getItem(MODELS_CACHE_KEY);
-      if (cachedModels) setDetectedModels(JSON.parse(cachedModels) as string[]);
-    } catch {
-      // ignore
-    } finally {
-      hasHydrated.current = true;
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!hasHydrated.current) return;
-    try {
-      sessionStorage.setItem(HEALTH_CACHE_KEY, JSON.stringify(health));
-    } catch {
-      // ignore
-    }
-  }, [health]);
-
-  useEffect(() => {
-    if (!hasHydrated.current) return;
-    try {
-      sessionStorage.setItem(MODELS_CACHE_KEY, JSON.stringify(detectedModels));
-    } catch {
-      // ignore
-    }
-  }, [detectedModels]);
 
   useEffect(() => {
     if (!settings || initialized) return;
@@ -270,6 +239,18 @@ export function SettingsPage() {
   }, [settings, initialized]);
 
   const hasSavedApiKey = settings?.gemini_api_key === "configured";
+
+  const connectionSignature = useMemo(() => {
+    const base = (drafts.gemini_base_url || settings?.gemini_base_url || "").trim().toLowerCase() || "official";
+    const keyTag = drafts.gemini_api_key.trim()
+      ? `draft:${drafts.gemini_api_key.trim().slice(0, 8)}`
+      : hasSavedApiKey
+        ? "saved"
+        : "none";
+    return `${base}|${keyTag}`;
+  }, [drafts.gemini_api_key, drafts.gemini_base_url, hasSavedApiKey, settings?.gemini_base_url]);
+
+  const scopedKey = useCallback((baseKey: string) => `${baseKey}:${connectionSignature}`, [connectionSignature]);
 
   const savedValue = useCallback(
     (key: string) => {
@@ -311,6 +292,13 @@ export function SettingsPage() {
       .filter((key) => draftValue(key) !== savedValue(key))
       .concat(drafts.gemini_api_key.trim() ? ["gemini_api_key"] : []);
   }, [draftValue, drafts.gemini_api_key, initialized, savedValue]);
+
+  useEffect(() => {
+    hasHydrated.current = false;
+    hasAutoTested.current = false;
+    setHealth({});
+    setDetectedModels([]);
+  }, [connectionSignature]);
 
   const buildTestPayload = useCallback(
     (target: SettingTestTarget, model?: string) => {
@@ -359,7 +347,7 @@ export function SettingsPage() {
         };
         setHealth((prev) => {
           const next = { ...prev, [key]: compact };
-          writeCache(HEALTH_CACHE_KEY, { health: next });
+          writeCache(scopedKey(HEALTH_CACHE_KEY), { health: next });
           return next;
         });
         return res;
@@ -368,13 +356,13 @@ export function SettingsPage() {
         const fail: SettingTestResponse = { ok: false, target, error: { message: msg } };
         setHealth((prev) => {
           const next = { ...prev, [key]: fail };
-          writeCache(HEALTH_CACHE_KEY, { health: next });
+          writeCache(scopedKey(HEALTH_CACHE_KEY), { health: next });
           return next;
         });
         throw e;
       }
     },
-    [buildTestPayload, writeCache],
+    [buildTestPayload, writeCache, scopedKey],
   );
 
   const detectModels = useCallback(async () => {
@@ -389,14 +377,14 @@ export function SettingsPage() {
         ? (((res.result as { models?: string[] }).models ?? []).map((m) => String(m)))
         : [];
       setDetectedModels(models);
-      writeCache(MODELS_CACHE_KEY, { models });
+      writeCache(scopedKey(MODELS_CACHE_KEY), { models });
       toast.success(models.length > 0 ? `Detected ${models.length} models` : "Connected, but no model list returned");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setDetectingModels(false);
     }
-  }, [buildTestPayload, writeCache]);
+  }, [buildTestPayload, writeCache, scopedKey]);
 
   /* Per-route test */
   const testRoute = useCallback(
@@ -418,7 +406,7 @@ export function SettingsPage() {
 
   const testAll = useCallback(async () => {
     setTestingAll(true);
-    writeCache(TEST_ALL_KEY, { inProgress: true });
+    writeCache(scopedKey(TEST_ALL_KEY), { inProgress: true });
     try {
       await Promise.allSettled([
         runProbe("apiKey", "apiKey"),
@@ -433,9 +421,9 @@ export function SettingsPage() {
       toast.success("Capability matrix refreshed");
     } finally {
       setTestingAll(false);
-      writeCache(TEST_ALL_KEY, { inProgress: false });
+      writeCache(scopedKey(TEST_ALL_KEY), { inProgress: false });
     }
-  }, [resolveRuntimePrimary, runProbe, writeCache]);
+  }, [resolveRuntimePrimary, runProbe, writeCache, scopedKey]);
 
   useEffect(() => {
     if (!initialized) return;
@@ -444,14 +432,14 @@ export function SettingsPage() {
 
     let shouldRun = true;
     try {
-      if (sessionStorage.getItem(AUTO_TEST_KEY) === "1") shouldRun = false;
-      else sessionStorage.setItem(AUTO_TEST_KEY, "1");
+      if (sessionStorage.getItem(scopedKey(AUTO_TEST_KEY)) === "1") shouldRun = false;
+      else sessionStorage.setItem(scopedKey(AUTO_TEST_KEY), "1");
     } catch {
       try {
-        const raw = localStorage.getItem(AUTO_TEST_KEY);
+        const raw = localStorage.getItem(scopedKey(AUTO_TEST_KEY));
         const ts = raw ? Number(raw) : 0;
         if (ts && Date.now() - ts < CACHE_TTL_MS) shouldRun = false;
-        else localStorage.setItem(AUTO_TEST_KEY, String(Date.now()));
+        else localStorage.setItem(scopedKey(AUTO_TEST_KEY), String(Date.now()));
       } catch {
         // ignore
       }
@@ -462,24 +450,24 @@ export function SettingsPage() {
     hasAutoTested.current = true;
     detectModels().catch(() => undefined);
     testAll().catch(() => undefined);
-  }, [initialized]);
+  }, [initialized, connectionSignature]);
 
   // Hydrate cached models + health so results survive navigation
   useEffect(() => {
     if (!initialized || hasHydrated.current) return;
     hasHydrated.current = true;
-    const cachedModels = readCache<{ models: string[] }>(MODELS_CACHE_KEY);
+    const cachedModels = readCache<{ models: string[] }>(scopedKey(MODELS_CACHE_KEY));
     if (cachedModels?.models?.length) setDetectedModels(cachedModels.models);
-    const cachedHealth = readCache<{ health: HealthMap }>(HEALTH_CACHE_KEY);
+    const cachedHealth = readCache<{ health: HealthMap }>(scopedKey(HEALTH_CACHE_KEY));
     if (cachedHealth?.health) setHealth(cachedHealth.health);
-  }, [initialized]);
+  }, [initialized, connectionSignature]);
 
   // If Test All was running and user navigated away, resume when coming back
   useEffect(() => {
     if (!initialized || testingAll) return;
-    const cached = readCache<{ inProgress?: boolean }>(TEST_ALL_KEY, TEST_TTL_MS);
+    const cached = readCache<{ inProgress?: boolean }>(scopedKey(TEST_ALL_KEY), TEST_TTL_MS);
     if (cached?.inProgress) testAll().catch(() => undefined);
-  }, [initialized, testingAll]);
+  }, [initialized, testingAll, connectionSignature]);
 
   const savePairs = useCallback(
     async (label: string, pairs: Array<{ key: string; value: string; skipEmpty?: boolean }>) => {

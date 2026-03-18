@@ -15,6 +15,13 @@
       "when": 1773751844963,
       "tag": "0002_smiling_miss_america",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1773835200000,
+      "tag": "0003_curious_job_queue",
+      "breakpoints": true
     }
   ]
 }

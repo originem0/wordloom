@@ -8,6 +8,8 @@ import { authRoutes } from "./routes/auth.js";
 import { storyRoutes } from "./routes/stories.js";
 import { cardRoutes } from "./routes/cards.js";
 import { settingRoutes } from "./routes/settings.js";
+import { jobRoutes } from "./routes/jobs.js";
+import { jobRoutes } from "./routes/jobs.js";
 import { readFileSync, existsSync } from "fs";
 
 if (process.env.NODE_ENV === "production") {
@@ -61,7 +63,8 @@ app.use("/api/*", authMiddleware);
 const apiRoutes = app
   .route("/api/stories", storyRoutes)
   .route("/api/cards", cardRoutes)
-  .route("/api/settings", settingRoutes);
+  .route("/api/settings", settingRoutes)
+  .route("/api/jobs", jobRoutes);
 
 // --- Static file serving (production) ---
 // Serve built client assets

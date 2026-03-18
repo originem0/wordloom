@@ -12,7 +12,15 @@ import {
   generateCardsRequestSchema,
   extractWordsRequestSchema,
 } from "../../shared/validation.js";
-import type { Card } from "../../shared/types.js";
+import type { Card, CardGenerateResult } from "../../shared/types.js";
+import {
+  createJob,
+  isJobCancelled,
+  setJobCancelled,
+  setJobDone,
+  setJobFailed,
+  setJobRunning,
+} from "../services/jobs.js";
 
 export const cardRoutes = new Hono();
 
@@ -61,71 +69,50 @@ export function toCard(row: typeof cards.$inferSelect): Card {
   return card as unknown as Card;
 }
 
-// POST /generate — generate cards for a list of words
-cardRoutes.post("/generate", async (c) => {
-  const limited = rateLimit(c, {
-    key: "cards-generate",
-    windowMs: 60_000,
-    max: 20,
-  });
-  if (limited) return limited;
-  const body = await c.req.json();
-  const parsed = generateCardsRequestSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: "Invalid request", code: "VALIDATION_ERROR" }, 400);
-  }
-
-  const { words } = parsed.data;
-
-  const normalized = words
+function normalizeWords(words: string[]): string[] {
+  return words
     .map((w) => w.trim())
     .filter(Boolean)
     .filter((w, i, arr) => arr.findIndex((x) => x.toLowerCase() === w.toLowerCase()) === i);
-  if (normalized.length === 0) {
-    return c.json({ error: "No valid words", code: "VALIDATION_ERROR" }, 400);
-  }
+}
 
-  // Check which words already exist in DB — skip re-generation for those
+async function splitExistingCards(normalized: string[]): Promise<{ existing: Card[]; toGenerate: string[] }> {
+  if (normalized.length === 0) return { existing: [], toGenerate: [] };
+
+  const lowered = normalized.map((w) => w.toLowerCase());
+  const quoted = lowered.map((w) => sql`${w}`);
+  const rows = await db
+    .select()
+    .from(cards)
+    .where(sql`lower(${cards.word}) in (${sql.join(quoted, sql`,`)})`)
+    .all();
+
+  const existingMap = new Map(rows.map((row) => [row.word.toLowerCase(), row]));
   const existing: Card[] = [];
   const toGenerate: string[] = [];
+
   for (const word of normalized) {
-    const row = await db
-      .select()
-      .from(cards)
-      .where(sql`lower(${cards.word}) = ${word.toLowerCase()}`)
-      .get();
-    if (row) {
-      existing.push(toCard(row));
-    } else {
-      toGenerate.push(word);
-    }
+    const match = existingMap.get(word.toLowerCase());
+    if (match) existing.push(toCard(match));
+    else toGenerate.push(word);
   }
 
-  // If all words already exist, return them directly (no generation needed)
+  return { existing, toGenerate };
+}
+
+async function generateCardsPayload(normalized: string[]): Promise<CardGenerateResult> {
+  const { existing, toGenerate } = await splitExistingCards(normalized);
+
   if (toGenerate.length === 0) {
-    return c.json({ success: existing, failed: [], existing: existing });
+    return { success: existing, failed: [], existing };
   }
 
-  // Generate via Gemini (only new words)
-  let success: Awaited<ReturnType<typeof generateCards>>["success"];
-  let failed: Awaited<ReturnType<typeof generateCards>>["failed"];
-  try {
-    const result = await generateCards(toGenerate);
-    success = result.success;
-    failed = result.failed;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Generation failed";
-    if (msg === "GEMINI_BUSY") {
-      return c.json({ error: "Generator busy", code: "GEMINI_BUSY" }, 429);
-    }
-    return c.json({ error: "Generation failed", code: "GENERATION_FAILED" }, 500);
-  }
-
+  const generated = await generateCards(toGenerate);
   const now = Date.now();
 
   const insertedCards = await db.transaction(async (tx) => {
     const rows: Card[] = [];
-    for (const card of success) {
+    for (const card of generated.success) {
       const inserted = await tx
         .insert(cards)
         .values({
@@ -176,7 +163,72 @@ cardRoutes.post("/generate", async (c) => {
     return rows;
   });
 
-  return c.json({ success: [...existing, ...insertedCards], failed, existing });
+  return { success: [...existing, ...insertedCards], failed: generated.failed, existing };
+}
+
+async function runCardsJob(jobId: string, normalized: string[]) {
+  await setJobRunning(jobId);
+  try {
+    if (await isJobCancelled(jobId)) {
+      await setJobCancelled(jobId);
+      return;
+    }
+
+    const result = await generateCardsPayload(normalized);
+
+    if (await isJobCancelled(jobId)) {
+      await setJobCancelled(jobId);
+      return;
+    }
+
+    await setJobDone(jobId, result);
+  } catch (err) {
+    if (await isJobCancelled(jobId)) {
+      await setJobCancelled(jobId);
+      return;
+    }
+    const msg = err instanceof Error ? err.message : "Generation failed";
+    await setJobFailed(jobId, msg);
+  }
+}
+
+// POST /generate — generate cards for a list of words
+cardRoutes.post("/generate", async (c) => {
+  const limited = rateLimit(c, {
+    key: "cards-generate",
+    windowMs: 60_000,
+    max: 20,
+  });
+  if (limited) return limited;
+  const body = await c.req.json();
+  const parsed = generateCardsRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "Invalid request", code: "VALIDATION_ERROR" }, 400);
+  }
+
+  const { words } = parsed.data;
+  const normalized = normalizeWords(words);
+  if (normalized.length === 0) {
+    return c.json({ error: "No valid words", code: "VALIDATION_ERROR" }, 400);
+  }
+
+  const useAsync = c.req.query("async") === "1";
+  if (useAsync) {
+    const jobId = await createJob("cards", { words: normalized });
+    void runCardsJob(jobId, normalized);
+    return c.json({ jobId, status: "queued" }, 202);
+  }
+
+  try {
+    const result = await generateCardsPayload(normalized);
+    return c.json(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Generation failed";
+    if (msg === "GEMINI_BUSY") {
+      return c.json({ error: "Generator busy", code: "GEMINI_BUSY" }, 429);
+    }
+    return c.json({ error: "Generation failed", code: "GENERATION_FAILED" }, 500);
+  }
 });
 
 // POST /extract — extract words from text

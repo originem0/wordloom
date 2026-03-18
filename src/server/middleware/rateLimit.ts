@@ -12,16 +12,32 @@ type Bucket = {
 };
 
 const buckets = new Map<string, Bucket>();
+let lastCleanupAt = 0;
+const CLEANUP_INTERVAL_MS = 60_000;
 
 function getClientKey(c: Context): string {
   const fwd = c.req.header("x-forwarded-for");
   if (fwd) return fwd.split(",")[0]?.trim() || "unknown";
+
+  const realIp = c.req.header("x-real-ip");
+  if (realIp) return realIp.trim() || "unknown";
+
   return c.req.header("cf-connecting-ip") || "unknown";
+}
+
+function cleanupExpired(now: number) {
+  if (now - lastCleanupAt < CLEANUP_INTERVAL_MS) return;
+  lastCleanupAt = now;
+  for (const [key, bucket] of buckets.entries()) {
+    if (bucket.resetAt <= now) buckets.delete(key);
+  }
 }
 
 export function rateLimit(c: Context, opts: RateLimitOptions) {
   const ip = getClientKey(c);
   const now = Date.now();
+  cleanupExpired(now);
+
   const key = `${opts.key}:${ip}`;
   const bucket = buckets.get(key);
 

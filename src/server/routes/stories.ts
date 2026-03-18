@@ -12,6 +12,14 @@ import { generateEdgeTtsMp3 } from "../services/edgeTts.js";
 import { pcmToWav } from "../services/tts.js";
 import type { Story, GroundingSource } from "../../shared/types.js";
 import { rateLimit } from "../middleware/rateLimit.js";
+import {
+  createJob,
+  isJobCancelled,
+  setJobCancelled,
+  setJobDone,
+  setJobFailed,
+  setJobRunning,
+} from "../services/jobs.js";
 
 const IMAGE_DIR = join(process.cwd(), "data", "images");
 const TTS_CACHE_DIR = join(process.cwd(), "data", "tts");
@@ -42,6 +50,63 @@ function toStory(row: typeof stories.$inferSelect): Story {
   };
 }
 
+type StoryJobInput = {
+  prompt: string;
+  mimeType: string;
+  imageBuffer: Buffer;
+};
+
+async function createStoryRecord(input: StoryJobInput): Promise<Story> {
+  const { prompt, mimeType, imageBuffer } = input;
+
+  const result = await compressImage(imageBuffer, mimeType);
+  const generated = await generateStory(result.buffer, result.mimeType, prompt);
+
+  const filename = `${randomUUID()}.jpg`;
+  const imagePath = `data/images/${filename}`;
+  await writeFile(join(IMAGE_DIR, filename), result.buffer);
+
+  const now = Date.now();
+  const inserted = await db
+    .insert(stories)
+    .values({
+      imagePath,
+      prompt,
+      story: generated.story,
+      sources: JSON.stringify(generated.sources),
+      createdAt: now,
+    })
+    .returning();
+
+  return toStory(inserted[0]);
+}
+
+async function runStoryJob(jobId: string, input: StoryJobInput) {
+  await setJobRunning(jobId);
+  try {
+    if (await isJobCancelled(jobId)) {
+      await setJobCancelled(jobId);
+      return;
+    }
+
+    const story = await createStoryRecord(input);
+
+    if (await isJobCancelled(jobId)) {
+      await setJobCancelled(jobId);
+      return;
+    }
+
+    await setJobDone(jobId, story as unknown as Record<string, unknown>);
+  } catch (err) {
+    if (await isJobCancelled(jobId)) {
+      await setJobCancelled(jobId);
+      return;
+    }
+    const msg = err instanceof Error ? err.message : "Story generation failed";
+    await setJobFailed(jobId, msg);
+  }
+}
+
 // POST /generate — upload image + optional prompt, get a story back
 storyRoutes.post("/generate", async (c) => {
   const limited = rateLimit(c, {
@@ -63,54 +128,46 @@ storyRoutes.post("/generate", async (c) => {
     return c.json({ error: "Image too large (max 10 MB)", code: "IMAGE_TOO_LARGE" }, 400);
   }
 
-  const rawBuffer = Buffer.from(await file.arrayBuffer());
   if (!file.type.startsWith("image/")) {
     return c.json({ error: "Invalid image type", code: "INVALID_IMAGE" }, 400);
   }
-  let compressedBuffer: Buffer;
-  let mimeType: string;
-  try {
-    const result = await compressImage(rawBuffer, file.type);
-    compressedBuffer = result.buffer;
-    mimeType = result.mimeType;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Invalid image";
-    return c.json({ error: msg, code: "INVALID_IMAGE" }, 400);
+
+  const imageBuffer = Buffer.from(await file.arrayBuffer());
+  const useAsync = c.req.query("async") === "1";
+
+  if (useAsync) {
+    const jobId = await createJob("story", {
+      prompt,
+      mimeType: file.type,
+      imageSize: file.size,
+    });
+
+    void runStoryJob(jobId, {
+      prompt,
+      mimeType: file.type,
+      imageBuffer,
+    });
+
+    return c.json({ jobId, status: "queued" }, 202);
   }
 
-  // Generate story via Gemini
-  let story: string;
-  let sources: GroundingSource[];
   try {
-    const result = await generateStory(compressedBuffer, mimeType, prompt);
-    story = result.story;
-    sources = result.sources;
+    const story = await createStoryRecord({
+      prompt,
+      mimeType: file.type,
+      imageBuffer,
+    });
+    return c.json(story);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Story generation failed";
     if (msg === "GEMINI_BUSY") {
       return c.json({ error: "Story generator busy", code: "GEMINI_BUSY" }, 429);
     }
+    if (msg.toLowerCase().includes("invalid image")) {
+      return c.json({ error: msg, code: "INVALID_IMAGE" }, 400);
+    }
     return c.json({ error: "Story generation failed", code: "STORY_FAILED" }, 500);
   }
-
-  // Save image only after successful generation
-  const filename = `${randomUUID()}.jpg`;
-  const imagePath = `data/images/${filename}`;
-  await writeFile(join(IMAGE_DIR, filename), compressedBuffer);
-
-  const now = Date.now();
-  const inserted = await db
-    .insert(stories)
-    .values({
-      imagePath,
-      prompt,
-      story,
-      sources: JSON.stringify(sources),
-      createdAt: now,
-    })
-    .returning();
-
-  return c.json(toStory(inserted[0]));
 });
 
 // GET /:id/tts — generate TTS audio for a story (audio tag-friendly)

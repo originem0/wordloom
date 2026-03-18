@@ -25,8 +25,6 @@ function StatusBadge({ status }: { status: Task["status"] }) {
   switch (status) {
     case "running":
       return <Loader2 className="size-3.5 shrink-0 animate-spin text-blue-500" />;
-    case "verifying":
-      return <Loader2 className="size-3.5 shrink-0 animate-spin text-amber-500" />;
     case "done":
       return <CheckCircle2 className="size-3.5 shrink-0 text-green-500" />;
     case "failed":
@@ -46,9 +44,6 @@ function TaskItem({ task }: { task: Task }) {
       <StatusBadge status={task.status} />
       <span className="min-w-0 flex-1 truncate">
         {task.label}
-        {task.status === "verifying" && (
-          <span className="ml-1 text-xs text-amber-600">— 结果确认中</span>
-        )}
         {task.status === "failed" && task.error && (
           <span className="ml-1 text-xs text-destructive">— {task.error}</span>
         )}
@@ -56,14 +51,14 @@ function TaskItem({ task }: { task: Task }) {
           <span className="ml-1 text-xs text-muted-foreground">— 已取消</span>
         )}
       </span>
-      {task.status === "running" || task.status === "verifying" ? (
+      {task.status === "running" ? (
         <Button
           type="button"
           variant="ghost"
           size="icon-xs"
           className="shrink-0"
           onClick={() => cancelTask(task.id)}
-          title={task.status === "verifying" ? "取消确认" : "取消"}
+          title="取消"
         >
           <X className="size-3" />
         </Button>
@@ -90,8 +85,8 @@ export function TaskPanel() {
 
   if (tasks.length === 0) return null;
 
-  const running = tasks.filter((t) => t.status === "running" || t.status === "verifying").length;
-  const finished = tasks.filter((t) => t.status !== "running" && t.status !== "verifying").length;
+  const running = tasks.filter((t) => t.status === "running").length;
+  const finished = tasks.filter((t) => t.status !== "running").length;
 
   return (
     <div className="fixed bottom-20 right-4 z-50 w-80 rounded-lg border bg-background shadow-lg md:bottom-4">

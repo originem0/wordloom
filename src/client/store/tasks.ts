@@ -1,15 +1,20 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import { queryClient } from "../lib/query-client";
-import type { Story, Card, CardGenerateResult } from "../../shared/types";
+import type { Story, CardGenerateResult } from "../../shared/types";
 
-export type TaskStatus = "running" | "verifying" | "done" | "failed" | "cancelled";
+export type TaskStatus = "running" | "done" | "failed" | "cancelled";
 export type TaskType = "story" | "cards";
 
-export interface TaskMeta {
-  prompt?: string;
-  words?: string[];
-}
+type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
+
+type JobResponse = {
+  id: string;
+  type: TaskType;
+  status: JobStatus;
+  result?: unknown;
+  error?: string | null;
+};
 
 export interface Task {
   id: string;
@@ -19,12 +24,11 @@ export interface Task {
   error?: string;
   result?: Story | CardGenerateResult;
   createdAt: number;
-  meta?: TaskMeta;
+  jobId?: string;
 }
 
-// AbortControllers stored outside Zustand (non-serializable)
-const controllers = new Map<string, AbortController>();
-const verifyTimers = new Map<string, number>();
+const submitControllers = new Map<string, AbortController>();
+const pollTimers = new Map<string, number>();
 let seq = 0;
 
 function genId() {
@@ -37,104 +41,116 @@ function updateTask(id: string, patch: Partial<Task>) {
   }));
 }
 
-function clearVerify(id: string) {
-  const t = verifyTimers.get(id);
-  if (t) clearTimeout(t);
-  verifyTimers.delete(id);
+function clearPoll(taskId: string) {
+  const timer = pollTimers.get(taskId);
+  if (timer) clearTimeout(timer);
+  pollTimers.delete(taskId);
 }
 
-function scheduleVerify(id: string, fn: () => void, delay: number) {
-  clearVerify(id);
-  const t = window.setTimeout(() => {
-    verifyTimers.delete(id);
-    fn();
-  }, delay);
-  verifyTimers.set(id, t);
+function cardsDoneLabel(result: CardGenerateResult): string {
+  const ok = result.success.length;
+  const fail = result.failed.length;
+  const existingCount = result.existing?.length ?? 0;
+  const newCount = ok - existingCount;
+
+  if (existingCount > 0 && newCount === 0) {
+    return `${existingCount} 个词已存在`;
+  }
+  if (existingCount > 0) {
+    return `${newCount} 张新卡已创建, ${existingCount} 个词已存在`;
+  }
+  if (fail > 0) {
+    return `${ok} 张已创建, ${fail} 张失败`;
+  }
+  return `${ok} 张单词卡已创建`;
 }
 
-const STORY_VERIFY_DELAYS = [6000, 15000];
-const CARDS_VERIFY_DELAYS = [6000, 15000];
+async function pollJob(taskId: string) {
+  const task = useTaskStore.getState().tasks.find((t) => t.id === taskId);
+  if (!task || task.status !== "running" || !task.jobId) {
+    clearPoll(taskId);
+    return;
+  }
 
-async function recoverStory(id: string, prompt: string, createdAt: number, attempt = 0) {
-  const task = useTaskStore.getState().tasks.find((t) => t.id === id);
-  if (!task || task.status === "cancelled") return;
   try {
-    const res = await fetch(`/api/stories?page=1&limit=6`, { credentials: "include" });
+    const res = await fetch(`/api/jobs/${task.jobId}`, { credentials: "include" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const body = (await res.json()) as { stories: Story[] };
-    const match = body.stories.find(
-      (s) => s.prompt === prompt && s.createdAt >= createdAt - 60_000,
-    );
-    if (match) {
-      clearVerify(id);
-      updateTask(id, { status: "done", result: match, error: undefined, label: "故事生成完成" });
-      queryClient.invalidateQueries({ queryKey: ["stories"] });
-      toast.success("故事生成完成（后台确认）");
+
+    const job = (await res.json()) as JobResponse;
+
+    if (job.status === "queued" || job.status === "running") {
+      const timer = window.setTimeout(() => pollJob(taskId), 1800);
+      pollTimers.set(taskId, timer);
       return;
     }
-  } catch {
-    // ignore, we'll retry below
-  }
 
-  if (attempt < STORY_VERIFY_DELAYS.length) {
-    scheduleVerify(id, () => recoverStory(id, prompt, createdAt, attempt + 1), STORY_VERIFY_DELAYS[attempt]);
-  } else {
-    clearVerify(id);
-    updateTask(id, { status: "failed", error: "未确认生成结果" });
+    clearPoll(taskId);
+
+    if (job.status === "cancelled") {
+      updateTask(taskId, { status: "cancelled" });
+      return;
+    }
+
+    if (job.status === "failed") {
+      updateTask(taskId, {
+        status: "failed",
+        error: job.error || "任务失败",
+      });
+      toast.error(`${task.type === "story" ? "故事" : "单词卡"}生成失败: ${job.error || "未知错误"}`);
+      return;
+    }
+
+    // done
+    if (task.type === "story") {
+      const result = job.result as Story;
+      updateTask(taskId, { status: "done", result, label: "故事生成完成" });
+      queryClient.invalidateQueries({ queryKey: ["stories"] });
+      toast.success("故事生成完成");
+      return;
+    }
+
+    const result = job.result as CardGenerateResult;
+    const doneLabel = cardsDoneLabel(result);
+    updateTask(taskId, { status: "done", result, label: doneLabel });
+    queryClient.invalidateQueries({ queryKey: ["cards"] });
+
+    const existingCount = result.existing?.length ?? 0;
+    const newCount = result.success.length - existingCount;
+    if (existingCount > 0 && newCount === 0) {
+      toast.info(doneLabel);
+    } else if (result.failed.length > 0) {
+      toast.warning(doneLabel);
+    } else {
+      toast.success(doneLabel);
+    }
+  } catch {
+    // transient network error: keep polling while task is still running
+    const timer = window.setTimeout(() => pollJob(taskId), 2500);
+    pollTimers.set(taskId, timer);
   }
 }
 
-async function recoverCards(id: string, words: string[], createdAt: number, attempt = 0) {
-  const task = useTaskStore.getState().tasks.find((t) => t.id === id);
-  if (!task || task.status === "cancelled") return;
-  try {
-    const checks = await Promise.all(
-      words.map(async (word) => {
-        const res = await fetch(`/api/cards?search=${encodeURIComponent(word)}&limit=5`, {
-          credentials: "include",
-        });
-        if (!res.ok) return false;
-        const body = (await res.json()) as { cards: { word: string; createdAt: number }[] };
-        const found = body.cards.find((c) => c.word.toLowerCase() === word.toLowerCase());
-        return Boolean(found && found.createdAt >= createdAt - 60_000);
-      }),
-    );
-
-    if (checks.every(Boolean)) {
-      clearVerify(id);
-      updateTask(id, { status: "done", error: undefined, label: "单词卡生成完成" });
-      queryClient.invalidateQueries({ queryKey: ["cards"] });
-      toast.success("单词卡生成完成（后台确认）");
-      return;
-    }
-  } catch {
-    // ignore
-  }
-
-  if (attempt < CARDS_VERIFY_DELAYS.length) {
-    scheduleVerify(id, () => recoverCards(id, words, createdAt, attempt + 1), CARDS_VERIFY_DELAYS[attempt]);
-  } else {
-    clearVerify(id);
-    updateTask(id, { status: "failed", error: "未确认生成结果" });
-  }
+function startPolling(taskId: string, jobId: string) {
+  updateTask(taskId, { jobId, status: "running" });
+  clearPoll(taskId);
+  const timer = window.setTimeout(() => pollJob(taskId), 800);
+  pollTimers.set(taskId, timer);
 }
 
 export const useTaskStore = create<{
   tasks: Task[];
   submitStory: (image: File, prompt: string) => string;
   submitCards: (words: string[]) => string;
-  cancelTask: (id: string) => void;
+  cancelTask: (id: string) => Promise<void> | void;
   removeTask: (id: string) => void;
   clearDone: () => void;
 }>((set) => ({
-
   tasks: [],
 
   submitStory(image: File, prompt: string) {
     const id = genId();
     const ac = new AbortController();
-    controllers.set(id, ac);
-    const createdAt = Date.now();
+    submitControllers.set(id, ac);
 
     set((s) => ({
       tasks: [
@@ -143,8 +159,7 @@ export const useTaskStore = create<{
           type: "story" as const,
           label: "生成故事",
           status: "running" as const,
-          createdAt,
-          meta: { prompt },
+          createdAt: Date.now(),
         },
         ...s.tasks,
       ],
@@ -154,7 +169,7 @@ export const useTaskStore = create<{
     form.append("image", image);
     form.append("prompt", prompt);
 
-    fetch("/api/stories/generate", {
+    fetch("/api/stories/generate?async=1", {
       method: "POST",
       body: form,
       credentials: "include",
@@ -165,10 +180,15 @@ export const useTaskStore = create<{
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || `HTTP ${res.status}`);
         }
-        return res.json() as Promise<Story>;
-      })
-      .then((result) => {
-        updateTask(id, { status: "done", result });
+
+        const body = (await res.json()) as { jobId?: string; status?: string } | Story;
+        if ("jobId" in body && body.jobId) {
+          startPolling(id, body.jobId);
+          return;
+        }
+
+        // fallback for any unexpected sync response
+        updateTask(id, { status: "done", result: body as Story, label: "故事生成完成" });
         queryClient.invalidateQueries({ queryKey: ["stories"] });
         toast.success("故事生成完成");
       })
@@ -176,12 +196,11 @@ export const useTaskStore = create<{
         if (err.name === "AbortError") {
           updateTask(id, { status: "cancelled" });
         } else {
-          updateTask(id, { status: "verifying", error: undefined, label: "生成失败，确认中" });
-          toast.warning("故事生成失败，正在确认后台结果…");
-          recoverStory(id, prompt, createdAt, 0);
+          updateTask(id, { status: "failed", error: err.message });
+          toast.error(`故事生成失败: ${err.message}`);
         }
       })
-      .finally(() => controllers.delete(id));
+      .finally(() => submitControllers.delete(id));
 
     return id;
   },
@@ -189,30 +208,24 @@ export const useTaskStore = create<{
   submitCards(words: string[]) {
     const id = genId();
     const ac = new AbortController();
-    controllers.set(id, ac);
+    submitControllers.set(id, ac);
 
-    const unique = Array.from(
-      new Map(words.map((w) => [w.toLowerCase(), w])).values(),
-    );
-    const label = `生成 ${unique.length} 张单词卡`;
-
-    const createdAt = Date.now();
+    const unique = Array.from(new Map(words.map((w) => [w.toLowerCase(), w])).values());
 
     set((s) => ({
       tasks: [
         {
           id,
           type: "cards" as const,
-          label,
+          label: `生成 ${unique.length} 张单词卡`,
           status: "running" as const,
-          createdAt,
-          meta: { words: unique },
+          createdAt: Date.now(),
         },
         ...s.tasks,
       ],
     }));
 
-    fetch("/api/cards/generate", {
+    fetch("/api/cards/generate?async=1", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ words: unique }),
@@ -224,69 +237,66 @@ export const useTaskStore = create<{
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || `HTTP ${res.status}`);
         }
-        return res.json() as Promise<CardGenerateResult>;
-      })
-      .then((result) => {
-        const ok = result.success.length;
-        const fail = result.failed.length;
-        const existingCount = result.existing?.length ?? 0;
-        const newCount = ok - existingCount;
-        let doneLabel: string;
-        if (existingCount > 0 && newCount === 0) {
-          doneLabel = `${existingCount} 个词已存在`;
-        } else if (existingCount > 0) {
-          doneLabel = `${newCount} 张新卡已创建, ${existingCount} 个词已存在`;
-        } else if (fail > 0) {
-          doneLabel = `${ok} 张已创建, ${fail} 张失败`;
-        } else {
-          doneLabel = `${ok} 张单词卡已创建`;
+
+        const body = (await res.json()) as { jobId?: string; status?: string } | CardGenerateResult;
+        if ("jobId" in body && body.jobId) {
+          startPolling(id, body.jobId);
+          return;
         }
-        updateTask(id, { status: "done", result, label: doneLabel });
+
+        // fallback for unexpected sync response
+        const doneLabel = cardsDoneLabel(body as CardGenerateResult);
+        updateTask(id, { status: "done", result: body as CardGenerateResult, label: doneLabel });
         queryClient.invalidateQueries({ queryKey: ["cards"] });
-        if (existingCount > 0 && newCount === 0) {
-          toast.info(doneLabel);
-        } else if (fail > 0) {
-          toast.warning(doneLabel);
-        } else {
-          toast.success(doneLabel);
-        }
+        toast.success(doneLabel);
       })
       .catch((err) => {
         if (err.name === "AbortError") {
           updateTask(id, { status: "cancelled" });
         } else {
-          updateTask(id, { status: "verifying", error: undefined, label: "生成失败，确认中" });
-          toast.warning("单词卡生成失败，正在确认后台结果…");
-          recoverCards(id, unique, createdAt, 0);
+          updateTask(id, { status: "failed", error: err.message });
+          toast.error(`单词卡生成失败: ${err.message}`);
         }
       })
-      .finally(() => controllers.delete(id));
+      .finally(() => submitControllers.delete(id));
 
     return id;
   },
 
-  cancelTask(id: string) {
+  async cancelTask(id: string) {
     const task = useTaskStore.getState().tasks.find((t) => t.id === id);
-    if (task?.status === "verifying") {
-      clearVerify(id);
-      updateTask(id, { status: "cancelled" });
-      return;
+    if (!task) return;
+
+    clearPoll(id);
+
+    const submitController = submitControllers.get(id);
+    if (submitController) submitController.abort();
+
+    if (task.jobId) {
+      try {
+        await fetch(`/api/jobs/${task.jobId}/cancel`, {
+          method: "POST",
+          credentials: "include",
+        });
+      } catch {
+        // ignore best-effort cancel
+      }
     }
-    const ac = controllers.get(id);
-    if (ac) ac.abort();
+
+    updateTask(id, { status: "cancelled" });
   },
 
   removeTask(id: string) {
-    clearVerify(id);
-    const ac = controllers.get(id);
-    if (ac) ac.abort();
-    controllers.delete(id);
+    clearPoll(id);
+    const submitController = submitControllers.get(id);
+    if (submitController) submitController.abort();
+    submitControllers.delete(id);
     set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) }));
   },
 
   clearDone() {
     set((s) => ({
-      tasks: s.tasks.filter((t) => t.status === "running" || t.status === "verifying"),
+      tasks: s.tasks.filter((t) => t.status === "running"),
     }));
   },
 }));

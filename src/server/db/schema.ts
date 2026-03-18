@@ -51,3 +51,14 @@ export const sessions = sqliteTable("sessions", {
   expiresAt: integer("expires_at").notNull(),
   revokedAt: integer("revoked_at"),
 });
+
+export const jobs = sqliteTable("jobs", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(), // story | cards
+  status: text("status").notNull(), // queued | running | done | failed | cancelled
+  input: text("input").notNull(), // JSON payload
+  result: text("result"), // JSON payload
+  error: text("error"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});

@@ -3,12 +3,20 @@ import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import { randomBytes } from "crypto";
 import { db } from "../db/index.js";
 import { sessions } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import { hashSessionId } from "../middleware/auth.js";
+import { rateLimit } from "../middleware/rateLimit.js";
 
 export const authRoutes = new Hono();
 
 authRoutes.post("/login", async (c) => {
+  const limited = rateLimit(c, {
+    key: "auth-login",
+    windowMs: 60_000,
+    max: 20,
+  });
+  if (limited) return limited;
+
   const body = await c.req.json<{ token: string }>();
   const expected = process.env.AUTH_TOKEN;
 
@@ -26,6 +34,11 @@ authRoutes.post("/login", async (c) => {
   const expiresAt = now + 30 * 24 * 60 * 60 * 1000;
   const sessionId = randomBytes(32).toString("hex");
   const hashed = hashSessionId(sessionId);
+
+  // Best-effort cleanup of expired sessions to limit unbounded growth.
+  await db
+    .delete(sessions)
+    .where(lt(sessions.expiresAt, now));
 
   await db.insert(sessions).values({
     sessionId: hashed,
