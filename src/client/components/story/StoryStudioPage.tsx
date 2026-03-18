@@ -102,7 +102,12 @@ function StoryStudioInner() {
   );
 
   return (
-    <div className="mx-auto max-w-4xl space-y-8 p-4 md:p-6">
+    <div className="mx-auto max-w-4xl space-y-6 p-4 md:space-y-8 md:p-6">
+      <section className="space-y-1">
+        <h2 className="text-2xl font-semibold">Story Studio</h2>
+        <p className="text-sm text-muted-foreground">上传图片生成故事，双击单词直接进词卡闭环。</p>
+      </section>
+
       {/* ---- Generation section ---- */}
       <section className="grid gap-4 md:grid-cols-2">
         <ImageUploader
@@ -195,7 +200,7 @@ function StoryStudioInner() {
               </Card>
             ))}
           </div>
-          <div className="flex items-center justify-between pt-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
             <Button
               type="button"
               variant="outline"

@@ -53,7 +53,7 @@ export function StoryView({ story, onWordClick }: StoryViewProps) {
         <button
           type="button"
           onClick={handleCopy}
-          className="absolute top-2 right-2 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+          className="absolute top-2 right-2 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
           title="复制文本"
         >
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}

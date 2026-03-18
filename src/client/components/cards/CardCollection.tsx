@@ -94,12 +94,12 @@ export function CardCollection() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
           {CEFR_LEVELS.map((level) => (
             <Badge
               key={level}
               variant={cefr === level ? "default" : "outline"}
-              className="cursor-pointer select-none min-h-8 px-3"
+              className="cursor-pointer select-none min-h-8 px-3 shrink-0"
               onClick={() => setCefr(level)}
             >
               {level}
@@ -169,7 +169,7 @@ export function CardCollection() {
       )}
 
       {total > 0 && (
-        <div className="flex items-center justify-between pt-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
           <Button
             type="button"
             variant="outline"
