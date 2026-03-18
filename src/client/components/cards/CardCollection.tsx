@@ -68,6 +68,7 @@ export function CardCollection() {
   const handleDelete = useCallback(
     (e: React.MouseEvent, cardId: number) => {
       e.stopPropagation();
+      if (!window.confirm("确定删除这张词卡吗？")) return;
       deleteCard.mutate(cardId, {
         onSuccess: () => {
           if (selectedCard?.id === cardId) setSelectedCard(null);

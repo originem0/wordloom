@@ -79,6 +79,7 @@ function StoryStudioInner() {
   );
 
   const handleDelete = async (id: number) => {
+    if (!window.confirm("确定删除这条故事吗？对应图片和 TTS 缓存也会被清理。")) return;
     await deleteMutation.mutateAsync(id);
     if (activeStory?.id === id) setActiveStory(null);
   };

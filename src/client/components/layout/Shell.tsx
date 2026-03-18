@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Layers, Settings, Sun, Moon } from "lucide-react";
-import { apiFetch } from "@/client/lib/api";
+import { BookOpen, Layers, Settings, Sun, Moon, LogOut } from "lucide-react";
+import { apiFetch, apiPost } from "@/client/lib/api";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
 import { TaskPanel } from "./TaskPanel";
@@ -37,6 +37,14 @@ function ThemeToggle() {
 
 export function Shell() {
   const navigate = useNavigate();
+
+  async function handleLogout() {
+    try {
+      await apiPost("/api/auth/logout", {});
+    } finally {
+      navigate("/login", { replace: true });
+    }
+  }
 
   // Auth guard: probe a protected endpoint
   const { error, isLoading } = useQuery({
@@ -85,8 +93,16 @@ export function Shell() {
             </NavLink>
           ))}
         </nav>
-        <div className="border-t p-3">
+        <div className="border-t p-3 space-y-2">
           <ThemeToggle />
+          <button
+            onClick={handleLogout}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            title="退出登录"
+          >
+            <LogOut className="size-4" />
+            退出登录
+          </button>
         </div>
       </aside>
 

@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/client/components/ui/tabs";
 import { Input } from "@/client/components/ui/input";
@@ -37,7 +38,7 @@ function ManualInput() {
   return (
     <div className="space-y-3">
       <Input
-        placeholder="Enter words (comma or space separated)"
+        placeholder="输入单词（逗号或空格分隔）"
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => {
@@ -49,8 +50,8 @@ function ManualInput() {
       />
       {words.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          {words.length} word{words.length > 1 ? "s" : ""} detected
-          {words.length >= MAX_WORDS && " (max 10)"}
+          已识别 {words.length} 个词
+          {words.length >= MAX_WORDS && "（最多 10 个）"}
         </p>
       )}
       <Button
@@ -59,7 +60,7 @@ function ManualInput() {
         className="w-full sm:w-auto"
         disabled={words.length === 0}
       >
-        Generate Cards
+        生成词卡
       </Button>
     </div>
   );
@@ -102,7 +103,7 @@ function ExtractInput() {
     <div className="space-y-3">
       <textarea
         className="min-h-[120px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none dark:bg-input/30"
-        placeholder="Paste English text here..."
+        placeholder="粘贴英文文本，自动抽取候选单词…"
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
@@ -114,7 +115,7 @@ function ExtractInput() {
         disabled={!text.trim() || extract.isPending}
       >
         {extract.isPending && <Loader2 className="size-4 animate-spin" />}
-        {extract.isPending ? "Extracting..." : "Extract Words"}
+        {extract.isPending ? "抽取中…" : "抽取单词"}
       </Button>
 
       {extract.isError && (
@@ -137,7 +138,7 @@ function ExtractInput() {
           </div>
           {selected.size > 0 && (
             <Button type="button" onClick={handleGenerate}>
-              {`Generate ${selected.size} Card${selected.size > 1 ? "s" : ""}`}
+              {`生成 ${selected.size} 张词卡`}
             </Button>
           )}
         </div>
@@ -151,10 +152,10 @@ function ExtractInput() {
 function FromStory() {
   return (
     <div className="space-y-2 py-4 text-sm text-muted-foreground">
-      <p>Tap any word in your story to create a card.</p>
-      <a href="/" className="text-primary underline-offset-4 hover:underline">
-        Go to Story Studio &rarr;
-      </a>
+      <p>在故事页面双击任意单词即可生成词卡。</p>
+      <Link to="/" className="text-primary underline-offset-4 hover:underline">
+        前往 Story Studio &rarr;
+      </Link>
     </div>
   );
 }
@@ -165,9 +166,9 @@ export function WordInput() {
   return (
     <Tabs defaultValue="manual">
       <TabsList className="w-full overflow-x-auto sm:w-fit">
-        <TabsTrigger value="manual">Manual Input</TabsTrigger>
-        <TabsTrigger value="extract">Extract from Text</TabsTrigger>
-        <TabsTrigger value="story">From Story</TabsTrigger>
+        <TabsTrigger value="manual">手动输入</TabsTrigger>
+        <TabsTrigger value="extract">从文本抽取</TabsTrigger>
+        <TabsTrigger value="story">从故事点词</TabsTrigger>
       </TabsList>
       <TabsContent value="manual" className="pt-4">
         <ManualInput />
