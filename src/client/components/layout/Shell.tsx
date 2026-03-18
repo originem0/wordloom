@@ -107,7 +107,7 @@ export function Shell() {
       </aside>
 
       {/* Main content */}
-      <main className="md:ml-56 pb-16 md:pb-0 min-h-screen">
+      <main className="md:ml-56 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0 min-h-screen">
         <Outlet />
       </main>
 
@@ -115,14 +115,14 @@ export function Shell() {
       <TaskPanel />
 
       {/* Mobile bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-background border-t flex items-center justify-around md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 h-[calc(4rem+env(safe-area-inset-bottom))] pb-[env(safe-area-inset-bottom)] bg-background border-t flex items-center justify-around md:hidden">
         {navItems.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}
             end={to === "/"}
             className={({ isActive }) =>
-              `flex flex-col items-center justify-center gap-1 min-h-11 min-w-11 px-3 text-xs transition-colors ${
+              `flex flex-col items-center justify-center gap-1 min-h-11 min-w-11 px-2 text-[11px] transition-colors ${
                 isActive ? "text-foreground font-medium" : "text-muted-foreground"
               }`
             }
@@ -131,6 +131,14 @@ export function Shell() {
             {label}
           </NavLink>
         ))}
+        <button
+          onClick={handleLogout}
+          className="flex flex-col items-center justify-center gap-1 min-h-11 min-w-11 px-2 text-[11px] text-muted-foreground"
+          title="退出登录"
+        >
+          <LogOut className="size-5" />
+          退出
+        </button>
       </nav>
     </div>
   );

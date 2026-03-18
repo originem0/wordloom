@@ -197,6 +197,8 @@ export function SettingsPage() {
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   // Track which model fields are in manual-input mode
   const [manualInput, setManualInput] = useState<Record<string, boolean>>({});
+  // Track whether each model field should show the full candidate list
+  const [showAllCandidates, setShowAllCandidates] = useState<Record<string, boolean>>({});
   // Ensure auto-detect + auto-test only fires once per session
   const hasAutoTested = useRef(false);
   const AUTO_TEST_KEY = "wordloom:settings-auto-tested";
@@ -595,6 +597,15 @@ export function SettingsPage() {
     const options = [...candidates];
     if (current && !options.includes(current)) options.push(current);
 
+    const showAll = showAllCandidates[key] ?? false;
+    const maxVisible = 6;
+    let visibleOptions = options;
+    if (!showAll && options.length > maxVisible) {
+      visibleOptions = options.slice(0, maxVisible);
+      if (current && !visibleOptions.includes(current)) visibleOptions.push(current);
+    }
+    const hiddenCount = Math.max(0, options.length - visibleOptions.length);
+
     if (!hasDetected || isManual) {
       // Fallback: plain text input
       return (
@@ -624,15 +635,26 @@ export function SettingsPage() {
 
     return (
       <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <div className="text-[13px] font-medium text-foreground">{label}</div>
-          <button
-            type="button"
-            onClick={() => setManualInput((p) => ({ ...p, [key]: true }))}
-            className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground"
-          >
-            type manually
-          </button>
+          <div className="flex items-center gap-2">
+            {hiddenCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowAllCandidates((p) => ({ ...p, [key]: !showAll }))}
+                className="text-[10px] text-sky-500 hover:underline"
+              >
+                {showAll ? "show less" : `show all (+${hiddenCount})`}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setManualInput((p) => ({ ...p, [key]: true }))}
+              className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground"
+            >
+              type manually
+            </button>
+          </div>
         </div>
         <select
           className={`${SELECT_CLASS} font-mono`}
@@ -640,7 +662,7 @@ export function SettingsPage() {
           onChange={(e) => setDrafts((prev) => ({ ...prev, [key]: e.target.value }))}
         >
           {allowEmpty && <option value="">— inherit default —</option>}
-          {options.map((m) => (
+          {visibleOptions.map((m) => (
             <option key={m} value={m}>{m}</option>
           ))}
         </select>

@@ -89,7 +89,7 @@ export function TaskPanel() {
   const finished = tasks.filter((t) => t.status !== "running").length;
 
   return (
-    <div className="fixed bottom-20 left-2 right-2 z-50 mx-auto w-auto max-w-sm rounded-lg border bg-background shadow-lg md:bottom-4 md:left-auto md:right-4 md:w-80">
+    <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom)+0.75rem)] left-2 right-2 z-50 mx-auto w-auto max-w-sm rounded-lg border bg-background shadow-lg md:bottom-4 md:left-auto md:right-4 md:w-80">
       {/* Header */}
       <button
         type="button"
