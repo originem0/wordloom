@@ -1,5 +1,21 @@
-import { useState } from "react";
-import { Key, Volume2, Sun, Moon, Monitor, Info, Loader2, Globe, Cpu, PlayCircle } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Key,
+  Volume2,
+  Sun,
+  Moon,
+  Monitor,
+  Info,
+  Loader2,
+  Globe,
+  Cpu,
+  PlayCircle,
+  ShieldCheck,
+  RefreshCcw,
+  Wrench,
+  Database,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 import { apiPost } from "@/client/lib/api";
 import {
@@ -44,470 +60,76 @@ type SettingTestResponse = {
     hint?: string;
     upstream?: unknown;
   };
-  // passthrough fields for debugging
   [key: string]: unknown;
 };
 
-function TestResultView({ res }: { res: SettingTestResponse | null }) {
-  if (!res) return null;
+type Drafts = Record<string, string>;
+type HealthKey = "apiKey" | "baseUrl" | "storyModel" | "generalModel" | "ttsModel";
+type HealthMap = Partial<Record<HealthKey, SettingTestResponse>>;
 
-  const ok = Boolean(res.ok);
-  const title = ok ? "OK" : "FAIL";
-  const message = ok
-    ? `OK${typeof res.latencyMs === "number" ? ` (${res.latencyMs}ms)` : ""}`
-    : (res.error?.message as string | undefined) || "Test failed";
+const DEFAULTS: Record<string, string> = {
+  gemini_base_url: "",
+  story_model: "gemini-2.5-pro",
+  story_fallback_model: "",
+  general_model: "gemini-2.5-flash",
+  general_fallback_model: "",
+  tts_model: "gemini-2.5-flash-preview-tts",
+  tts_fallback_model: "",
+  tts_preference: "browser",
+  edge_tts_voice: "en-US-EmmaMultilingualNeural",
+  gemini_tts_voice: "Zephyr",
+  analysis_language: "zh-CN",
+  api_timeout_ms: "45000",
+  api_max_retries: "3",
+};
 
-  const hint = !ok ? (res.error?.hint as string | undefined) : undefined;
+const EDGE_VOICES = [
+  "en-US-EmmaMultilingualNeural",
+  "en-US-JennyNeural",
+  "en-US-GuyNeural",
+  "en-GB-SoniaNeural",
+  "en-GB-RyanNeural",
+  "en-AU-NatashaNeural",
+  "en-AU-WilliamNeural",
+] as const;
 
+const GEMINI_VOICES = ["Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Aoede"] as const;
+
+function statusTone(res?: SettingTestResponse) {
+  if (!res) return "secondary" as const;
+  return res.ok ? "default" : "destructive" as const;
+}
+
+function modelCandidatesForRole(models: string[], role: "story" | "general" | "tts") {
+  const unique = [...new Set(models)];
+  if (role === "tts") {
+    return unique.filter((m) => /tts|audio|speech/i.test(m));
+  }
+  if (role === "story") {
+    return unique.filter((m) => !/tts|audio|speech/i.test(m)).sort((a, b) => {
+      const pa = /pro|vision/i.test(a) ? -1 : 0;
+      const pb = /pro|vision/i.test(b) ? -1 : 0;
+      return pa - pb || a.localeCompare(b);
+    });
+  }
+  return unique.filter((m) => !/tts|audio|speech/i.test(m));
+}
+
+function HealthBadge({ label, res }: { label: string; res?: SettingTestResponse }) {
+  const ok = res?.ok;
+  const latency = typeof res?.latencyMs === "number" ? `${res.latencyMs}ms` : null;
+  const text = res ? (ok ? "OK" : "FAIL") : "N/A";
   return (
-    <div className="mt-2 space-y-1 rounded-md border bg-muted/30 p-2 text-xs">
-      <div className="flex items-center justify-between">
-        <span className={ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
-          {title}
-        </span>
-        {res.model && <span className="font-mono text-muted-foreground">{String(res.model)}</span>}
+    <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+      <span>{label}</span>
+      <div className="flex items-center gap-2">
+        {latency && <span className="text-xs text-muted-foreground">{latency}</span>}
+        <Badge variant={statusTone(res)}>{text}</Badge>
       </div>
-      <div className="text-foreground/90">{message}</div>
-      {hint && <div className="text-muted-foreground">Hint: {hint}</div>}
-      {import.meta.env.MODE !== "production" && (
-        <details className="pt-1">
-          <summary className="cursor-pointer text-muted-foreground">details</summary>
-          <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 p-2">
-            {JSON.stringify(res, null, 2)}
-          </pre>
-        </details>
-      )}
     </div>
   );
 }
 
-// ── API Key Section ─────────────────────────────────────────────────
-function ApiKeySection() {
-  const { data: settings } = useSettings();
-  const updateSetting = useUpdateSetting();
-  const [apiKey, setApiKey] = useState("");
-  const [testRes, setTestRes] = useState<SettingTestResponse | null>(null);
-  const [testing, setTesting] = useState(false);
-
-  const isConfigured = settings?.gemini_api_key === "configured";
-
-  function handleSave() {
-    if (!apiKey.trim()) return;
-    updateSetting.mutate(
-      { key: "gemini_api_key", value: apiKey.trim() },
-      {
-        onSuccess: () => {
-          toast.success("API key saved");
-          setApiKey("");
-        },
-        onError: (err: Error) => toast.error(err.message),
-      },
-    );
-  }
-
-  async function handleTest() {
-    setTesting(true);
-    try {
-      const payload: Record<string, unknown> = { target: "apiKey" satisfies SettingTestTarget };
-      if (apiKey.trim()) payload.apiKey = apiKey.trim();
-      const res = await apiPost<SettingTestResponse>("/api/settings/test", payload);
-      setTestRes(res);
-
-      if (res.ok) {
-        const count = (res.result as any)?.modelCount;
-        toast.success(typeof count === "number" ? `API key OK (${count} models)` : "API key OK");
-      } else {
-        toast.error((res.error?.message as string | undefined) || "API key test failed");
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(msg);
-      setTestRes({ ok: false, error: { message: msg } });
-    } finally {
-      setTesting(false);
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Key className="size-4" />
-          Gemini API Key
-        </CardTitle>
-        <CardDescription>
-          Required for AI story generation and Gemini TTS.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {isConfigured && (
-          <Badge
-            variant="outline"
-            className="border-green-500/40 text-green-600 dark:text-green-400"
-          >
-            ✓ Configured
-          </Badge>
-        )}
-
-        <div className="flex gap-2">
-          <Input
-            type="password"
-            placeholder="Enter your Gemini API Key"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSave()}
-          />
-          <Button
-            onClick={handleSave}
-            disabled={!apiKey.trim() || updateSetting.isPending}
-          >
-            {updateSetting.isPending && (
-              <Loader2 className="size-4 animate-spin" />
-            )}
-            Save
-          </Button>
-          <Button
-            variant="outline"
-            onClick={handleTest}
-            disabled={testing || (!apiKey.trim() && !isConfigured)}
-          >
-            {testing ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <PlayCircle className="size-4" />
-            )}
-            Test
-          </Button>
-        </div>
-
-        <TestResultView res={testRes} />
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── API Base URL Section ────────────────────────────────────────────
-function BaseUrlSection() {
-  const { data: settings } = useSettings();
-  const updateSetting = useUpdateSetting();
-  const [url, setUrl] = useState("");
-  const [testRes, setTestRes] = useState<SettingTestResponse | null>(null);
-  const [testing, setTesting] = useState(false);
-
-  const current = settings?.gemini_base_url ?? "";
-
-  function handleSave() {
-    updateSetting.mutate(
-      { key: "gemini_base_url", value: url.trim() },
-      {
-        onSuccess: () => {
-          toast.success("Base URL saved");
-          setUrl("");
-        },
-        onError: (err: Error) => toast.error(err.message),
-      },
-    );
-  }
-
-  function handleClear() {
-    updateSetting.mutate(
-      { key: "gemini_base_url", value: "" },
-      {
-        onSuccess: () => toast.success("Reset to default Google API"),
-        onError: (err: Error) => toast.error(err.message),
-      },
-    );
-  }
-
-  async function handleTest() {
-    setTesting(true);
-    try {
-      const baseUrl = url.trim() || current;
-      const payload: Record<string, unknown> = { target: "baseUrl" satisfies SettingTestTarget };
-      if (baseUrl) payload.baseUrl = baseUrl;
-      const res = await apiPost<SettingTestResponse>("/api/settings/test", payload);
-      setTestRes(res);
-      if (res.ok) {
-        toast.success("Base URL OK");
-      } else {
-        toast.error((res.error?.message as string | undefined) || "Base URL test failed");
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(msg);
-      setTestRes({ ok: false, error: { message: msg } });
-    } finally {
-      setTesting(false);
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Globe className="size-4" />
-          API Base URL
-        </CardTitle>
-        <CardDescription>
-          Leave empty for Google official API. Set a proxy URL if you use a relay service.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {current && (
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="font-mono text-xs">
-              {current}
-            </Badge>
-            <Button variant="ghost" size="sm" onClick={handleClear}>
-              Reset
-            </Button>
-          </div>
-        )}
-        <div className="flex gap-2">
-          <Input
-            placeholder="https://your-proxy.example.com"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSave()}
-          />
-          <Button
-            onClick={handleSave}
-            disabled={!url.trim() || updateSetting.isPending}
-          >
-            Save
-          </Button>
-          <Button
-            variant="outline"
-            onClick={handleTest}
-            disabled={testing}
-          >
-            {testing ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <PlayCircle className="size-4" />
-            )}
-            Test
-          </Button>
-        </div>
-
-        <TestResultView res={testRes} />
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── Model Configuration Section ─────────────────────────────────────
-function ModelSection() {
-  const { data: settings } = useSettings();
-  const updateSetting = useUpdateSetting();
-
-  const models = [
-    { key: "story_model", label: "Story Model", fallback: "gemini-2.5-pro", desc: "Used for image → story generation" },
-    { key: "general_model", label: "General Model", fallback: "gemini-2.5-flash", desc: "Used for cards, translation, extraction" },
-    { key: "tts_model", label: "TTS Model", fallback: "gemini-2.5-flash-preview-tts", desc: "Used for AI voice narration" },
-  ];
-
-  function handleSave(key: string, value: string) {
-    updateSetting.mutate(
-      { key, value: value.trim() },
-      {
-        onSuccess: () => toast.success("Model saved"),
-        onError: (err: Error) => toast.error(err.message),
-      },
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Cpu className="size-4" />
-          Models
-        </CardTitle>
-        <CardDescription>
-          Override model names. Leave empty for defaults.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {models.map(({ key, label, fallback, desc }) => {
-          const current = settings?.[key] ?? "";
-          return (
-            <ModelInput
-              key={key}
-              settingKey={key}
-              label={label}
-              fallback={fallback}
-              desc={desc}
-              current={current}
-              onSave={handleSave}
-            />
-          );
-        })}
-      </CardContent>
-    </Card>
-  );
-}
-
-function ModelInput({ settingKey, label, fallback, desc, current, onSave }: {
-  settingKey: string; label: string; fallback: string; desc: string; current: string;
-  onSave: (key: string, value: string) => void;
-}) {
-  const [value, setValue] = useState("");
-  const [testRes, setTestRes] = useState<SettingTestResponse | null>(null);
-  const [testing, setTesting] = useState(false);
-
-  const effectiveModel = (value.trim() || current || fallback).trim();
-
-  const target: SettingTestTarget | null =
-    settingKey === "story_model"
-      ? "storyModel"
-      : settingKey === "general_model"
-        ? "generalModel"
-        : settingKey === "tts_model"
-          ? "ttsModel"
-          : null;
-
-  async function handleTest() {
-    if (!target) return;
-    setTesting(true);
-    try {
-      const res = await apiPost<SettingTestResponse>("/api/settings/test", {
-        target,
-        model: effectiveModel,
-      });
-      setTestRes(res);
-
-      if (res.ok) {
-        toast.success(`${label}: OK`);
-      } else {
-        toast.error((res.error?.message as string | undefined) || `${label}: test failed`);
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(msg);
-      setTestRes({ ok: false, error: { message: msg } });
-    } finally {
-      setTesting(false);
-    }
-  }
-
-  return (
-    <div className="space-y-1">
-      <div className="flex items-baseline justify-between">
-        <span className="text-sm font-medium">{label}</span>
-        <span className="text-xs text-muted-foreground">
-          {current || fallback}
-        </span>
-      </div>
-      <p className="text-xs text-muted-foreground">{desc}</p>
-      <div className="flex gap-2">
-        <Input
-          placeholder={fallback}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && value.trim() && onSave(settingKey, value)}
-          className="font-mono text-sm"
-        />
-        <Button
-          size="sm"
-          onClick={() => { onSave(settingKey, value); setValue(""); }}
-          disabled={!value.trim()}
-        >
-          Save
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={handleTest}
-          disabled={testing || !target}
-        >
-          {testing ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <PlayCircle className="size-4" />
-          )}
-          Test
-        </Button>
-      </div>
-
-      <TestResultView res={testRes} />
-    </div>
-  );
-}
-
-// ── TTS Preference ──────────────────────────────────────────────────
-function TtsSection() {
-  const { data: settings } = useSettings();
-  const updateSetting = useUpdateSetting();
-
-  const current = settings?.tts_preference ?? "browser";
-
-  function handleChange(value: string) {
-    updateSetting.mutate(
-      { key: "tts_preference", value },
-      { onError: (err) => toast.error(err.message) },
-    );
-  }
-
-  const options = [
-    {
-      value: "browser",
-      label: "Browser TTS (Offline)",
-      desc: "Uses your browser's built-in speech synthesis",
-    },
-    {
-      value: "edge",
-      label: "Edge TTS (Free)",
-      desc: "Server-side Microsoft Edge Read Aloud voices (English)",
-    },
-    {
-      value: "gemini",
-      label: "Gemini TTS (AI Voice)",
-      desc: "Higher quality, requires API key and network",
-    },
-  ] as const;
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Volume2 className="size-4" />
-          TTS Preference
-        </CardTitle>
-        <CardDescription>
-          Choose how stories are read aloud.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {options.map((opt) => (
-          <label
-            key={opt.value}
-            className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
-              current === opt.value
-                ? "border-primary bg-primary/5"
-                : "border-border hover:bg-accent/50"
-            }`}
-          >
-            <input
-              type="radio"
-              name="tts"
-              value={opt.value}
-              checked={current === opt.value}
-              onChange={() => handleChange(opt.value)}
-              className="mt-0.5 accent-primary"
-            />
-            <div>
-              <div className="text-sm font-medium">{opt.label}</div>
-              <div className="text-xs text-muted-foreground">{opt.desc}</div>
-            </div>
-          </label>
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── Theme Section ───────────────────────────────────────────────────
 function ThemeSection() {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
@@ -519,7 +141,7 @@ function ThemeSection() {
 
   const options: { value: Theme; label: string; icon: typeof Sun }[] = [
     { value: "light", label: "Light", icon: Sun },
-    { value: "dark", label: "Dark", icon: Moon },
+    { value: "dark", label: "Dark (Solarized)", icon: Moon },
     { value: "system", label: "System", icon: Monitor },
   ];
 
@@ -531,7 +153,7 @@ function ThemeSection() {
           Theme
         </CardTitle>
         <CardDescription>
-          Stored locally in your browser.
+          Dark mode uses Solarized Dark. Stored locally in your browser.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -554,32 +176,175 @@ function ThemeSection() {
   );
 }
 
-// ── About Section ───────────────────────────────────────────────────
-function AboutSection() {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Info className="size-4" />
-          About
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-1 text-sm text-muted-foreground">
-        <p className="font-medium text-foreground">WordLoom</p>
-        <p>
-          Upload an image, let AI craft a children's story, and hear it read
-          aloud. Build vocabulary with Word Forge flash cards.
-        </p>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── Page ─────────────────────────────────────────────────────────────
 export function SettingsPage() {
-  const { isLoading, error } = useSettings();
+  const settingsQuery = useSettings();
+  const updateSetting = useUpdateSetting();
+  const settings = settingsQuery.data;
 
-  if (isLoading) {
+  const [drafts, setDrafts] = useState<Drafts>({
+    gemini_api_key: "",
+    ...DEFAULTS,
+  });
+  const [initialized, setInitialized] = useState(false);
+  const [detectedModels, setDetectedModels] = useState<string[]>([]);
+  const [detectingModels, setDetectingModels] = useState(false);
+  const [health, setHealth] = useState<HealthMap>({});
+  const [testingAll, setTestingAll] = useState(false);
+  const [savingSection, setSavingSection] = useState<string | null>(null);
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
+
+  useEffect(() => {
+    if (!settings || initialized) return;
+    setDrafts({
+      gemini_api_key: "",
+      gemini_base_url: settings.gemini_base_url ?? DEFAULTS.gemini_base_url,
+      story_model: settings.story_model ?? DEFAULTS.story_model,
+      story_fallback_model: settings.story_fallback_model ?? DEFAULTS.story_fallback_model,
+      general_model: settings.general_model ?? DEFAULTS.general_model,
+      general_fallback_model: settings.general_fallback_model ?? DEFAULTS.general_fallback_model,
+      tts_model: settings.tts_model ?? DEFAULTS.tts_model,
+      tts_fallback_model: settings.tts_fallback_model ?? DEFAULTS.tts_fallback_model,
+      tts_preference: settings.tts_preference ?? DEFAULTS.tts_preference,
+      edge_tts_voice: settings.edge_tts_voice ?? DEFAULTS.edge_tts_voice,
+      gemini_tts_voice: settings.gemini_tts_voice ?? DEFAULTS.gemini_tts_voice,
+      analysis_language: settings.analysis_language ?? DEFAULTS.analysis_language,
+      api_timeout_ms: settings.api_timeout_ms ?? DEFAULTS.api_timeout_ms,
+      api_max_retries: settings.api_max_retries ?? DEFAULTS.api_max_retries,
+    });
+    setInitialized(true);
+  }, [settings, initialized]);
+
+  const hasSavedApiKey = settings?.gemini_api_key === "configured";
+
+  const buildTestPayload = useCallback(
+    (target: SettingTestTarget, model?: string) => {
+      const payload: Record<string, unknown> = {
+        target,
+        baseUrl: drafts.gemini_base_url,
+      };
+      if (drafts.gemini_api_key.trim()) payload.apiKey = drafts.gemini_api_key.trim();
+      if (model) payload.model = model;
+      return payload;
+    },
+    [drafts.gemini_api_key, drafts.gemini_base_url],
+  );
+
+  const runSingleTest = useCallback(
+    async (key: HealthKey, target: SettingTestTarget, model?: string) => {
+      try {
+        const res = await apiPost<SettingTestResponse>("/api/settings/test", buildTestPayload(target, model));
+        setHealth((prev) => ({ ...prev, [key]: res }));
+        return res;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const fail: SettingTestResponse = { ok: false, target, error: { message: msg } };
+        setHealth((prev) => ({ ...prev, [key]: fail }));
+        throw e;
+      }
+    },
+    [buildTestPayload],
+  );
+
+  const handleDetectModels = useCallback(async () => {
+    setDetectingModels(true);
+    try {
+      const res = await apiPost<SettingTestResponse>("/api/settings/test", buildTestPayload("listModels"));
+      if (!res.ok) {
+        toast.error(res.error?.message || "Model detection failed");
+        return;
+      }
+      const models = Array.isArray((res.result as { models?: unknown[] } | undefined)?.models)
+        ? ((res.result as { models?: string[] }).models ?? [])
+        : [];
+      setDetectedModels(models);
+      toast.success(models.length > 0 ? `Detected ${models.length} models` : "Connected, but no model list returned");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDetectingModels(false);
+    }
+  }, [buildTestPayload]);
+
+  const handleTestAll = useCallback(async () => {
+    setTestingAll(true);
+    try {
+      await Promise.allSettled([
+        runSingleTest("apiKey", "apiKey"),
+        runSingleTest("baseUrl", "baseUrl"),
+        runSingleTest("storyModel", "storyModel", drafts.story_model || DEFAULTS.story_model),
+        runSingleTest("generalModel", "generalModel", drafts.general_model || DEFAULTS.general_model),
+        runSingleTest("ttsModel", "ttsModel", drafts.tts_model || DEFAULTS.tts_model),
+      ]);
+      toast.success("Health check finished");
+    } finally {
+      setTestingAll(false);
+    }
+  }, [drafts.general_model, drafts.story_model, drafts.tts_model, runSingleTest]);
+
+  useEffect(() => {
+    if (!initialized) return;
+    if (!hasSavedApiKey && !drafts.gemini_api_key.trim()) return;
+    handleDetectModels().catch(() => undefined);
+    handleTestAll().catch(() => undefined);
+  }, [initialized]);
+
+  const savePairs = useCallback(
+    async (section: string, pairs: Array<{ key: string; value: string; skipEmpty?: boolean }>) => {
+      setSavingSection(section);
+      try {
+        for (const pair of pairs) {
+          if (pair.skipEmpty && !pair.value.trim()) continue;
+          await updateSetting.mutateAsync({ key: pair.key, value: pair.value.trim() });
+        }
+        toast.success(`${section} saved`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      } finally {
+        setSavingSection(null);
+      }
+    },
+    [updateSetting],
+  );
+
+  const clearLocalCache = useCallback(async () => {
+    setMaintenanceBusy(true);
+    try {
+      localStorage.removeItem("app-store");
+      sessionStorage.clear();
+      if ("caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+      toast.success("Local cache cleared. Reloading…");
+      window.location.reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  }, []);
+
+  const refreshPwa = useCallback(async () => {
+    setMaintenanceBusy(true);
+    try {
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.update()));
+      }
+      toast.success("Checking for app update…");
+      window.location.reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  }, []);
+
+  const storyModels = useMemo(() => modelCandidatesForRole(detectedModels, "story"), [detectedModels]);
+  const generalModels = useMemo(() => modelCandidatesForRole(detectedModels, "general"), [detectedModels]);
+  const ttsModels = useMemo(() => modelCandidatesForRole(detectedModels, "tts"), [detectedModels]);
+
+  if (settingsQuery.isLoading && !initialized) {
     return (
       <div className="flex items-center justify-center p-12">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
@@ -587,23 +352,364 @@ export function SettingsPage() {
     );
   }
 
-  if (error) {
-    return (
-      <div className="p-6 text-destructive">
-        Failed to load settings: {error.message}
-      </div>
-    );
+  if (settingsQuery.error) {
+    return <div className="p-6 text-destructive">Failed to load settings: {settingsQuery.error.message}</div>;
   }
 
+  const modelPicker = (
+    key: keyof Drafts,
+    label: string,
+    desc: string,
+    fallbackLabel: string,
+    suggestions: string[],
+  ) => (
+    <div className="space-y-2">
+      <div>
+        <div className="text-sm font-medium">{label}</div>
+        <div className="text-xs text-muted-foreground">{desc}</div>
+      </div>
+      <Input
+        value={drafts[key] ?? ""}
+        onChange={(e) => setDrafts((prev) => ({ ...prev, [key]: e.target.value }))}
+        placeholder={fallbackLabel}
+        className="font-mono text-sm"
+        list={`${String(key)}-models`}
+      />
+      <datalist id={`${String(key)}-models`}>
+        {suggestions.map((m) => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {suggestions.slice(0, 12).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setDrafts((prev) => ({ ...prev, [key]: m }))}
+              className={`rounded-full border px-2 py-0.5 text-xs transition-colors ${drafts[key] === m ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-accent/50"}`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-6">
-      <h2 className="text-2xl font-semibold">Settings</h2>
-      <ApiKeySection />
-      <BaseUrlSection />
-      <ModelSection />
-      <TtsSection />
+    <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
+      <div className="space-y-1">
+        <h2 className="text-2xl font-semibold">Settings</h2>
+        <p className="text-sm text-muted-foreground">
+          草稿会直接显示在输入框里。点击 Test All 时，未保存的草稿也会参与测试。
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="size-4" />
+            Health Overview
+          </CardTitle>
+          <CardDescription>
+            一眼看清连接、模型和 TTS 是否可用。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <HealthBadge label="API Key" res={health.apiKey} />
+            <HealthBadge label="Base URL" res={health.baseUrl} />
+            <HealthBadge label="Story Model" res={health.storyModel} />
+            <HealthBadge label="General Model" res={health.generalModel} />
+            <HealthBadge label="TTS Model" res={health.ttsModel} />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={handleDetectModels} disabled={detectingModels}>
+              {detectingModels ? <Loader2 className="size-4 animate-spin" /> : <Cpu className="size-4" />}
+              Detect / Refresh Models
+            </Button>
+            <Button onClick={handleTestAll} disabled={testingAll}>
+              {testingAll ? <Loader2 className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
+              Test All
+            </Button>
+            {detectedModels.length > 0 && (
+              <Badge variant="outline">{detectedModels.length} detected models</Badge>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Key className="size-4" />
+            Connection
+          </CardTitle>
+          <CardDescription>
+            API key 不回显；留空表示保留已保存的 key。Base URL 可直接测试未保存草稿。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-medium">Gemini API Key</div>
+              {hasSavedApiKey && <Badge variant="outline">saved</Badge>}
+            </div>
+            <Input
+              type="password"
+              placeholder={hasSavedApiKey ? "Saved. Type a new key only if you want to replace it" : "Enter your Gemini / relay API key"}
+              value={drafts.gemini_api_key ?? ""}
+              onChange={(e) => setDrafts((prev) => ({ ...prev, gemini_api_key: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-2">
+            <div className="text-sm font-medium">API Base URL</div>
+            <Input
+              placeholder="Leave empty for Google official API, or set https://x666.me"
+              value={drafts.gemini_base_url ?? ""}
+              onChange={(e) => setDrafts((prev) => ({ ...prev, gemini_base_url: e.target.value }))}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() =>
+                savePairs("Connection", [
+                  { key: "gemini_api_key", value: drafts.gemini_api_key, skipEmpty: true },
+                  { key: "gemini_base_url", value: drafts.gemini_base_url },
+                ])
+              }
+              disabled={savingSection === "Connection"}
+            >
+              {savingSection === "Connection" && <Loader2 className="size-4 animate-spin" />}
+              Save Connection
+            </Button>
+            <Button variant="outline" onClick={() => runSingleTest("baseUrl", "baseUrl").catch((e) => toast.error(e instanceof Error ? e.message : String(e)))}>
+              <Globe className="size-4" />
+              Test Base URL
+            </Button>
+          </div>
+          {health.baseUrl?.warnings?.[0] && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">{health.baseUrl.warnings[0]}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Cpu className="size-4" />
+            Models & Fallbacks
+          </CardTitle>
+          <CardDescription>
+            检测到模型后可直接点选；也保留手动输入。主模型失败后会尝试 fallback。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {modelPicker("story_model", "Story Model", "Image → story generation", DEFAULTS.story_model, storyModels)}
+          {modelPicker("story_fallback_model", "Story Fallback", "Fallback when story model fails after retries", "Optional", storyModels)}
+          {modelPicker("general_model", "General Model", "Cards, extraction, translation, deep analysis", DEFAULTS.general_model, generalModels)}
+          {modelPicker("general_fallback_model", "General Fallback", "Fallback for card/extract/translate/deep failures", "Optional", generalModels)}
+          {modelPicker("tts_model", "Gemini TTS Model", "AI voice narration", DEFAULTS.tts_model, ttsModels)}
+          {modelPicker("tts_fallback_model", "TTS Fallback", "Fallback when Gemini TTS model fails", "Optional", ttsModels)}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() =>
+                savePairs("Models", [
+                  { key: "story_model", value: drafts.story_model },
+                  { key: "story_fallback_model", value: drafts.story_fallback_model },
+                  { key: "general_model", value: drafts.general_model },
+                  { key: "general_fallback_model", value: drafts.general_fallback_model },
+                  { key: "tts_model", value: drafts.tts_model },
+                  { key: "tts_fallback_model", value: drafts.tts_fallback_model },
+                ])
+              }
+              disabled={savingSection === "Models"}
+            >
+              {savingSection === "Models" && <Loader2 className="size-4 animate-spin" />}
+              Save Models
+            </Button>
+            <Button variant="outline" onClick={handleDetectModels} disabled={detectingModels}>
+              <RefreshCcw className="size-4" />
+              Refresh Detected Models
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Volume2 className="size-4" />
+            Voices & Language
+          </CardTitle>
+          <CardDescription>
+            选择默认 TTS 方式、声音，以及解释文字的语言偏好。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="space-y-2">
+            <div className="text-sm font-medium">TTS Preference</div>
+            <div className="grid gap-2 md:grid-cols-3">
+              {[
+                { value: "browser", label: "Browser", desc: "offline, local" },
+                { value: "edge", label: "Edge TTS", desc: "free, server-side" },
+                { value: "gemini", label: "Gemini TTS", desc: "AI voice" },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setDrafts((prev) => ({ ...prev, tts_preference: opt.value }))}
+                  className={`rounded-lg border p-3 text-left transition-colors ${drafts.tts_preference === opt.value ? "border-primary bg-primary/5" : "border-border hover:bg-accent/40"}`}
+                >
+                  <div className="text-sm font-medium">{opt.label}</div>
+                  <div className="text-xs text-muted-foreground">{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Edge TTS Voice</div>
+              <select
+                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                value={drafts.edge_tts_voice}
+                onChange={(e) => setDrafts((prev) => ({ ...prev, edge_tts_voice: e.target.value }))}
+              >
+                {EDGE_VOICES.map((voice) => (
+                  <option key={voice} value={voice}>{voice}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Gemini TTS Voice</div>
+              <select
+                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                value={drafts.gemini_tts_voice}
+                onChange={(e) => setDrafts((prev) => ({ ...prev, gemini_tts_voice: e.target.value }))}
+              >
+                {GEMINI_VOICES.map((voice) => (
+                  <option key={voice} value={voice}>{voice}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Analysis Language</div>
+            <select
+              className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+              value={drafts.analysis_language}
+              onChange={(e) => setDrafts((prev) => ({ ...prev, analysis_language: e.target.value }))}
+            >
+              <option value="zh-CN">简体中文</option>
+              <option value="en">English</option>
+              <option value="bilingual">Bilingual</option>
+            </select>
+            <p className="text-xs text-muted-foreground">影响词义解释、词源、深度分析等说明性文本。</p>
+          </div>
+
+          <Button
+            onClick={() =>
+              savePairs("Voices & Language", [
+                { key: "tts_preference", value: drafts.tts_preference },
+                { key: "edge_tts_voice", value: drafts.edge_tts_voice },
+                { key: "gemini_tts_voice", value: drafts.gemini_tts_voice },
+                { key: "analysis_language", value: drafts.analysis_language },
+              ])
+            }
+            disabled={savingSection === "Voices & Language"}
+          >
+            {savingSection === "Voices & Language" && <Loader2 className="size-4 animate-spin" />}
+            Save Voices & Language
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wrench className="size-4" />
+            Advanced
+          </CardTitle>
+          <CardDescription>
+            控制超时和重试。并发仍固定在服务端 semaphore，不在这里暴露，免得把自己玩死。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <div className="text-sm font-medium">API Timeout (ms)</div>
+            <Input
+              value={drafts.api_timeout_ms}
+              onChange={(e) => setDrafts((prev) => ({ ...prev, api_timeout_ms: e.target.value }))}
+              placeholder={DEFAULTS.api_timeout_ms}
+            />
+          </div>
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Max Retries</div>
+            <Input
+              value={drafts.api_max_retries}
+              onChange={(e) => setDrafts((prev) => ({ ...prev, api_max_retries: e.target.value }))}
+              placeholder={DEFAULTS.api_max_retries}
+            />
+          </div>
+          <div className="md:col-span-2">
+            <Button
+              onClick={() =>
+                savePairs("Advanced", [
+                  { key: "api_timeout_ms", value: drafts.api_timeout_ms },
+                  { key: "api_max_retries", value: drafts.api_max_retries },
+                ])
+              }
+              disabled={savingSection === "Advanced"}
+            >
+              {savingSection === "Advanced" && <Loader2 className="size-4 animate-spin" />}
+              Save Advanced Settings
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       <ThemeSection />
-      <AboutSection />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Database className="size-4" />
+            Local Data & Cache
+          </CardTitle>
+          <CardDescription>
+            浏览器侧维护操作：PWA 更新、缓存清理、强制刷新。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={refreshPwa} disabled={maintenanceBusy}>
+            {maintenanceBusy ? <Loader2 className="size-4 animate-spin" /> : <RefreshCcw className="size-4" />}
+            Force Refresh / Update
+          </Button>
+          <Button variant="outline" onClick={clearLocalCache} disabled={maintenanceBusy}>
+            {maintenanceBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+            Clear Local Cache
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Info className="size-4" />
+            About
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-1 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">WordLoom</p>
+          <p>
+            AI-powered English learning workspace: generate compact image-based stories, listen with TTS,
+            double-click words into cards, and explore deep vocabulary analysis in one loop.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }

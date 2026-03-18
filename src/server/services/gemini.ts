@@ -283,6 +283,80 @@ async function getModel(settingKey: string, fallback: string): Promise<string> {
   return (await getSetting(settingKey)) || fallback;
 }
 
+function parsePositiveInt(raw: string, fallback: number, min: number, max: number): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+async function getRuntimeSettings(): Promise<{ timeoutMs: number; maxRetries: number }> {
+  return {
+    timeoutMs: parsePositiveInt(await getSetting("api_timeout_ms"), 45_000, 5_000, 180_000),
+    maxRetries: parsePositiveInt(await getSetting("api_max_retries"), 3, 1, 6),
+  };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return await Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs);
+    }),
+  ]);
+}
+
+async function runWithRetries<T>(fn: () => Promise<T>): Promise<T> {
+  const { timeoutMs, maxRetries } = await getRuntimeSettings();
+  return await retryWithBackoff(() => withTimeout(fn(), timeoutMs), maxRetries);
+}
+
+async function getModelPreference(
+  primaryKey: string,
+  primaryFallback: string,
+  fallbackKey: string,
+): Promise<{ primary: string; fallback: string | null }> {
+  const primary = ((await getSetting(primaryKey)).trim() || primaryFallback).trim();
+  const fallback = (await getSetting(fallbackKey)).trim();
+  return {
+    primary,
+    fallback: fallback && fallback !== primary ? fallback : null,
+  };
+}
+
+async function runWithModelFallback<T>(opts: {
+  primaryKey: string;
+  primaryFallback: string;
+  fallbackKey: string;
+  label: string;
+  run: (model: string) => Promise<T>;
+}): Promise<T> {
+  const pref = await getModelPreference(opts.primaryKey, opts.primaryFallback, opts.fallbackKey);
+  try {
+    return await runWithRetries(() => opts.run(pref.primary));
+  } catch (primaryError) {
+    if (!pref.fallback) throw primaryError;
+    console.warn(`${opts.label}: primary model ${pref.primary} failed, trying fallback ${pref.fallback}`);
+    try {
+      return await runWithRetries(() => opts.run(pref.fallback!));
+    } catch (fallbackError) {
+      const p = primaryError instanceof Error ? primaryError.message : String(primaryError);
+      const f = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+      throw new Error(`${opts.label} failed on primary (${pref.primary}): ${p}; fallback (${pref.fallback}): ${f}`);
+    }
+  }
+}
+
+async function getExplanationLanguageInstruction(): Promise<string> {
+  const pref = ((await getSetting("analysis_language")).trim() || "zh-CN").toLowerCase();
+  if (pref === "en") {
+    return "Use English for explanatory text such as meanings, etymology, distinctions, notes, reasons, and core image descriptions unless a field explicitly requires Chinese.";
+  }
+  if (pref === "bilingual") {
+    return "Use concise bilingual explanations: English first, then Simplified Chinese where it helps learners. Keep them compact.";
+  }
+  return "Use Simplified Chinese for explanatory text unless a field explicitly requires English.";
+}
+
 // ---------------------------------------------------------------------------
 // System prompt for story generation (picture description)
 // ---------------------------------------------------------------------------
@@ -315,57 +389,60 @@ export async function generateStory(
     throw err;
   }
   try {
-    return await retryWithBackoff(async () => {
-      const ai = await getClient();
-      const model = await getModel("story_model", "gemini-2.5-pro");
+    return await runWithModelFallback({
+      primaryKey: "story_model",
+      primaryFallback: "gemini-2.5-pro",
+      fallbackKey: "story_fallback_model",
+      label: "generateStory",
+      run: async (model) => {
+        const ai = await getClient();
 
-      let systemInstruction = STORY_SYSTEM_PROMPT;
-      if (prompt) {
-        systemInstruction += `\n\n**User's Custom Requirements (PRIORITY):**\n${prompt}`;
-      }
+        let systemInstruction = STORY_SYSTEM_PROMPT;
+        if (prompt) {
+          systemInstruction += `\n\n**User's Custom Requirements (PRIORITY):**\n${prompt}`;
+        }
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                inlineData: {
-                  mimeType,
-                  data: imageBuffer.toString("base64"),
+        const response = await ai.models.generateContent({
+          model,
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  inlineData: {
+                    mimeType,
+                    data: imageBuffer.toString("base64"),
+                  },
                 },
-              },
-              { text: "Describe this image following the instructions." },
-            ],
+                { text: "Describe this image following the instructions." },
+              ],
+            },
+          ],
+          config: {
+            systemInstruction,
+            tools: [{ googleSearch: {} }],
           },
-        ],
-        config: {
-          systemInstruction,
-          tools: [{ googleSearch: {} }],
-        },
-      });
+        });
 
-      const story = response.text ?? "";
+        const story = response.text ?? "";
 
-      // Extract grounding sources from metadata
-      const sources: GroundingSource[] = [];
-      const chunks =
-        response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-      if (chunks) {
-        for (const chunk of chunks) {
-          if (chunk.web) {
-            sources.push({
-              web: {
-                uri: chunk.web.uri ?? "",
-                title: chunk.web.title ?? "",
-              },
-            });
+        const sources: GroundingSource[] = [];
+        const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        if (chunks) {
+          for (const chunk of chunks) {
+            if (chunk.web) {
+              sources.push({
+                web: {
+                  uri: chunk.web.uri ?? "",
+                  title: chunk.web.title ?? "",
+                },
+              });
+            }
           }
         }
-      }
 
-      return { story, sources };
+        return { story, sources };
+      },
     });
   } finally {
     geminiSemaphore.release();
@@ -386,37 +463,41 @@ export async function generateTTS(text: string): Promise<string> {
     throw err;
   }
   try {
-    return await retryWithBackoff(async () => {
-      const ai = await getClient();
-      const model = await getModel("tts_model", "gemini-2.5-flash-preview-tts");
+    return await runWithModelFallback({
+      primaryKey: "tts_model",
+      primaryFallback: "gemini-2.5-flash-preview-tts",
+      fallbackKey: "tts_fallback_model",
+      label: "generateTTS",
+      run: async (model) => {
+        const ai = await getClient();
+        const voiceName = (await getSetting("gemini_tts_voice")).trim() || "Zephyr";
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text: `Read this story in a natural, human-like voice, with engaging and varied intonation suitable for an English learner. Avoid a robotic tone. Story: ${text}`,
+        const response = await ai.models.generateContent({
+          model,
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: `Read this story in a natural, human-like voice, with engaging and varied intonation suitable for an English learner. Avoid a robotic tone. Story: ${text}`,
+                },
+              ],
+            },
+          ],
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName },
               },
-            ],
-          },
-        ],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: "Zephyr" },
             },
           },
-        },
-      });
+        });
 
-      // The response contains inline audio data
-      const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData
-        ?.data;
-      if (!data) throw new Error("TTS returned no audio data");
-      return data;
+        const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        if (!data) throw new Error("TTS returned no audio data");
+        return data;
+      },
     });
   } finally {
     geminiSemaphore.release();
@@ -437,16 +518,19 @@ export async function translateText(text: string): Promise<string> {
     throw err;
   }
   try {
-    return await retryWithBackoff(async () => {
-      const ai = await getClient();
-      const model = await getModel("general_model", "gemini-2.5-flash");
-
-      const response = await ai.models.generateContent({
-        model,
-        contents: `Translate the following text to Simplified Chinese. Keep the markdown formatting intact. Only return the translated text, nothing else.\n\n${text}`,
-      });
-
-      return response.text ?? "";
+    return await runWithModelFallback({
+      primaryKey: "general_model",
+      primaryFallback: "gemini-2.5-flash",
+      fallbackKey: "general_fallback_model",
+      label: "translateText",
+      run: async (model) => {
+        const ai = await getClient();
+        const response = await ai.models.generateContent({
+          model,
+          contents: `Translate the following text to Simplified Chinese. Keep the markdown formatting intact. Only return the translated text, nothing else.\n\n${text}`,
+        });
+        return response.text ?? "";
+      },
     });
   } finally {
     geminiSemaphore.release();
@@ -510,68 +594,71 @@ export async function generateCards(
     throw err;
   }
   try {
-    return await retryWithBackoff(async () => {
-      const ai = await getClient();
-      const model = await getModel("general_model", "gemini-2.5-flash");
+    const languageInstruction = await getExplanationLanguageInstruction();
+    return await runWithModelFallback({
+      primaryKey: "general_model",
+      primaryFallback: "gemini-2.5-flash",
+      fallbackKey: "general_fallback_model",
+      label: "generateCards",
+      run: async (model) => {
+        const ai = await getClient();
+        const response = await ai.models.generateContent({
+          model,
+          contents: `${CARDS_PROMPT}\n\nLanguage preference: ${languageInstruction}\n\nWords to analyze: ${JSON.stringify(words)}`,
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: `${CARDS_PROMPT}\n\nWords to analyze: ${JSON.stringify(words)}`,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
-
-      const text = response.text ?? "[]";
-      let parsed: unknown;
-      try {
-        parsed = parseJsonLenient(text);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        throw new Error(`Failed to parse Gemini JSON response: ${msg}`);
-      }
-
-      parsed = normalizeCardsPayload(parsed);
-
-      const result = aiCardsResponseSchema.safeParse(parsed);
-      if (result.success) {
-        return { success: result.data as ParsedCard[], failed: [] };
-      }
-
-      // Partial success: try to validate each item individually
-      const rawArray = Array.isArray(parsed) ? parsed : [];
-      const success: ParsedCard[] = [];
-      const failed: { word: string; error: string }[] = [];
-
-      for (const item of rawArray) {
-        const single = aiCardsResponseSchema.element.safeParse(item);
-        if (single.success) {
-          success.push(single.data as ParsedCard);
-        } else {
-          const word =
-            typeof item === "object" && item !== null && "word" in item
-              ? String((item as { word: unknown }).word)
-              : "unknown";
-          const first = single.error.issues?.[0];
-          const path = first?.path?.length ? first.path.join(".") : "";
-          const msg = first?.message ? String(first.message) : "Validation failed";
-          failed.push({ word, error: path ? `${path}: ${msg}` : msg });
+        const text = response.text ?? "[]";
+        let parsed: unknown;
+        try {
+          parsed = parseJsonLenient(text);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new Error(`Failed to parse Gemini JSON response: ${msg}`);
         }
-      }
 
-      // Report words that were requested but missing from response
-      const returnedWords = new Set(
-        [...success.map((c) => c.word), ...failed.map((f) => f.word)].map(
-          (w) => w.toLowerCase(),
-        ),
-      );
-      for (const w of words) {
-        if (!returnedWords.has(w.toLowerCase())) {
-          failed.push({ word: w, error: "Not returned by AI" });
+        parsed = normalizeCardsPayload(parsed);
+
+        const result = aiCardsResponseSchema.safeParse(parsed);
+        if (result.success) {
+          return { success: result.data as ParsedCard[], failed: [] };
         }
-      }
 
-      return { success, failed };
+        const rawArray = Array.isArray(parsed) ? parsed : [];
+        const success: ParsedCard[] = [];
+        const failed: { word: string; error: string }[] = [];
+
+        for (const item of rawArray) {
+          const single = aiCardsResponseSchema.element.safeParse(item);
+          if (single.success) {
+            success.push(single.data as ParsedCard);
+          } else {
+            const word =
+              typeof item === "object" && item !== null && "word" in item
+                ? String((item as { word: unknown }).word)
+                : "unknown";
+            const first = single.error.issues?.[0];
+            const path = first?.path?.length ? first.path.join(".") : "";
+            const msg = first?.message ? String(first.message) : "Validation failed";
+            failed.push({ word, error: path ? `${path}: ${msg}` : msg });
+          }
+        }
+
+        const returnedWords = new Set(
+          [...success.map((c) => c.word), ...failed.map((f) => f.word)].map(
+            (w) => w.toLowerCase(),
+          ),
+        );
+        for (const w of words) {
+          if (!returnedWords.has(w.toLowerCase())) {
+            failed.push({ word: w, error: "Not returned by AI" });
+          }
+        }
+
+        return { success, failed };
+      },
     });
   } finally {
     geminiSemaphore.release();
@@ -657,76 +744,78 @@ export async function generateDeepLayer(
     throw err;
   }
   try {
-    return await retryWithBackoff(async () => {
-      const ai = await getClient();
-      const model = await getModel("general_model", "gemini-2.5-flash");
+    const languageInstruction = await getExplanationLanguageInstruction();
+    return await runWithModelFallback({
+      primaryKey: "general_model",
+      primaryFallback: "gemini-2.5-flash",
+      fallbackKey: "general_fallback_model",
+      label: "generateDeepLayer",
+      run: async (model) => {
+        const ai = await getClient();
+        const response = await ai.models.generateContent({
+          model,
+          contents: `${DEEP_PROMPT}\n\nLanguage preference: ${languageInstruction}\n\nWord: "${word}"`,
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: `${DEEP_PROMPT}\n\nWord: "${word}"`,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
-
-      const text = response.text ?? "{}";
-      let parsed: unknown;
-      try {
-        parsed = parseJsonLenient(text);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        throw new Error(`Failed to parse deep layer JSON: ${msg}`);
-      }
-
-      const result = aiDeepLayerSchema.safeParse(parsed);
-      if (!result.success) {
-        throw new Error(`Deep layer validation failed for "${word}"`);
-      }
-
-      // Post-process to guarantee animated schema compatibility.
-      const ALLOWED = ["blockage", "container", "path", "link", "balance"] as const;
-      type CoreSchema = (typeof ALLOWED)[number];
-      const normalizeCoreSchema = (raw: unknown): CoreSchema => {
-        if (typeof raw !== "string") return "blockage";
-        const v = raw.trim().toLowerCase();
-        if ((ALLOWED as readonly string[]).includes(v)) return v as CoreSchema;
-
-        // Common near-misses and aliases
-        if (["scale", "weigh", "weighing", "tradeoff", "trade-off", "equilibrium"].includes(v)) {
-          return "balance";
+        const text = response.text ?? "{}";
+        let parsed: unknown;
+        try {
+          parsed = parseJsonLenient(text);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new Error(`Failed to parse deep layer JSON: ${msg}`);
         }
-        if (["force", "pressure", "push", "pull"].includes(v)) return "blockage";
-        if (["cycle", "loop", "repeat", "repetition"].includes(v)) return "path";
-        if (v.includes("contain") || v.includes("inside") || v.includes("outside") || v.includes("boundary") || v === "box") {
-          return "container";
-        }
-        if (v.includes("journey") || v.includes("route") || v.includes("progress") || v.includes("path")) {
-          return "path";
-        }
-        if (v.includes("connect") || v.includes("relation") || v.includes("association") || v.includes("link")) {
-          return "link";
-        }
-        if (v.includes("balance") || v.includes("equilib") || v.includes("weigh")) {
-          return "balance";
-        }
-        return "blockage";
-      };
 
-      const out = result.data;
-      if (!out.schemaAnalysis) {
-        out.schemaAnalysis = {
-          coreSchema: "blockage",
-          coreImageText: "",
-          metaphoricalExtensions: [],
-          registerVariation: "",
-          etymologyChain: [],
-          sceneActivation: [],
+        const result = aiDeepLayerSchema.safeParse(parsed);
+        if (!result.success) {
+          throw new Error(`Deep layer validation failed for "${word}"`);
+        }
+
+        const ALLOWED = ["blockage", "container", "path", "link", "balance"] as const;
+        type CoreSchema = (typeof ALLOWED)[number];
+        const normalizeCoreSchema = (raw: unknown): CoreSchema => {
+          if (typeof raw !== "string") return "blockage";
+          const v = raw.trim().toLowerCase();
+          if ((ALLOWED as readonly string[]).includes(v)) return v as CoreSchema;
+          if (["scale", "weigh", "weighing", "tradeoff", "trade-off", "equilibrium"].includes(v)) {
+            return "balance";
+          }
+          if (["force", "pressure", "push", "pull"].includes(v)) return "blockage";
+          if (["cycle", "loop", "repeat", "repetition"].includes(v)) return "path";
+          if (v.includes("contain") || v.includes("inside") || v.includes("outside") || v.includes("boundary") || v === "box") {
+            return "container";
+          }
+          if (v.includes("journey") || v.includes("route") || v.includes("progress") || v.includes("path")) {
+            return "path";
+          }
+          if (v.includes("connect") || v.includes("relation") || v.includes("association") || v.includes("link")) {
+            return "link";
+          }
+          if (v.includes("balance") || v.includes("equilib") || v.includes("weigh")) {
+            return "balance";
+          }
+          return "blockage";
         };
-      } else {
-        out.schemaAnalysis.coreSchema = normalizeCoreSchema(out.schemaAnalysis.coreSchema);
-      }
 
-      return out;
+        const out = result.data;
+        if (!out.schemaAnalysis) {
+          out.schemaAnalysis = {
+            coreSchema: "blockage",
+            coreImageText: "",
+            metaphoricalExtensions: [],
+            registerVariation: "",
+            etymologyChain: [],
+            sceneActivation: [],
+          };
+        } else {
+          out.schemaAnalysis.coreSchema = normalizeCoreSchema(out.schemaAnalysis.coreSchema);
+        }
+
+        return out;
+      },
     });
   } finally {
     geminiSemaphore.release();
@@ -747,34 +836,38 @@ export async function extractWords(text: string): Promise<string[]> {
     throw err;
   }
   try {
-    return await retryWithBackoff(async () => {
-      const ai = await getClient();
-      const model = await getModel("general_model", "gemini-2.5-flash");
-
-      const response = await ai.models.generateContent({
-        model,
-        contents: `Extract English words worth studying from the following text. Exclude common/simple words (the, is, a, it, etc.). Focus on vocabulary useful for intermediate-to-advanced English learners.
+    return await runWithModelFallback({
+      primaryKey: "general_model",
+      primaryFallback: "gemini-2.5-flash",
+      fallbackKey: "general_fallback_model",
+      label: "extractWords",
+      run: async (model) => {
+        const ai = await getClient();
+        const response = await ai.models.generateContent({
+          model,
+          contents: `Extract English words worth studying from the following text. Exclude common/simple words (the, is, a, it, etc.). Focus on vocabulary useful for intermediate-to-advanced English learners.
 
 Return a JSON array of strings (just the words).
 
 Text:
 ${text}`,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
 
-      const raw = response.text ?? "[]";
-      let parsed: unknown;
-      try {
-        parsed = parseJsonLenient(raw);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        throw new Error(`Failed to parse extracted words JSON: ${msg}`);
-      }
+        const raw = response.text ?? "[]";
+        let parsed: unknown;
+        try {
+          parsed = parseJsonLenient(raw);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new Error(`Failed to parse extracted words JSON: ${msg}`);
+        }
 
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter((w): w is string => typeof w === "string");
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter((w): w is string => typeof w === "string");
+      },
     });
   } finally {
     geminiSemaphore.release();

@@ -67,21 +67,34 @@ pnpm dev
 
 ## AI 服务配置
 
-在应用内 **Settings** 页面配置，所有配置存储在服务端数据库中：
+在应用内 **Settings** 页面配置，所有配置存储在服务端数据库中。新版设置页支持：
+
+- **Detect / Refresh Models**：自动探测当前 API key + Base URL 下可用的模型列表
+- **Test All / Health Overview**：一键检测 API Key、Base URL、Story/General/TTS 三类模型状态
+- **主模型 + Fallback**：Story / General / TTS 都支持 fallback model，主模型重试失败后自动切换
+- **Advanced**：可调 `api_timeout_ms` 和 `api_max_retries`
+- **Voices & Language**：Edge TTS voice、Gemini TTS voice、分析语言偏好
+- **Local Data & Cache**：强制刷新 PWA、清理本地缓存
 
 | 配置项 | 说明 | 默认值 |
 |---|---|---|
 | API Key | Gemini API 密钥（[申请](https://aistudio.google.com/apikey)）或中转站密钥 | 必填 |
 | API Base URL | 留空用 Google 官方 API；填入中转站地址则走代理 | Google 官方 |
-| Story Model | 图片生成故事用的模型 | `gemini-2.5-pro` |
-| General Model | 卡片生成、翻译、词汇提取用的模型 | `gemini-2.5-flash` |
-| TTS Model | AI 语音朗读用的模型 | `gemini-2.5-flash-preview-tts` |
-| TTS Preference | TTS 默认方式 | `browser` / `edge` / `gemini` |
+| Story Model / Fallback | 图片生成故事用的主模型 / 备用模型 | `gemini-2.5-pro` / 空 |
+| General Model / Fallback | 卡片生成、翻译、词汇提取、深度分析 | `gemini-2.5-flash` / 空 |
+| TTS Model / Fallback | Gemini 语音朗读主模型 / 备用模型 | `gemini-2.5-flash-preview-tts` / 空 |
+| TTS Preference | 默认朗读方式 | `browser` / `edge` / `gemini` |
+| Edge TTS Voice | Edge TTS 声音 | `en-US-EmmaMultilingualNeural` |
+| Gemini TTS Voice | Gemini TTS 声音 | `Zephyr` |
+| Analysis Language | 解释性文本语言 | `zh-CN` / `en` / `bilingual` |
+| API Timeout | 单次 AI 请求超时 | `45000` ms |
+| Max Retries | AI 请求重试次数 | `3` |
 
 **使用中转站示例**：如果你的中转站是 `https://x666.me`，在 Settings 中：
 - API Key → 中转站给的 key
 - API Base URL → `https://x666.me`
-- 模型名 → 按中转站支持的模型填写（如 `gpt-5.2`）
+- 先点 **Detect / Refresh Models** 看当前代理实际支持哪些模型
+- 再从检测结果里选主模型和 fallback，而不是盲打字符串
 
 ## 项目结构
 

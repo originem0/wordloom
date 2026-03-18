@@ -347,9 +347,12 @@ settingRoutes.post("/test", async (c) => {
       const list = target === "listModels" ? names : names.slice(0, 20);
 
       const isProd = process.env.NODE_ENV === "production";
-      const result = isProd
-        ? { modelCount: names.length }
-        : { modelCount: names.length, models: list, truncated: list.length !== names.length };
+      const result =
+        target === "listModels"
+          ? { modelCount: names.length, models: list, truncated: list.length !== names.length }
+          : isProd
+            ? { modelCount: names.length }
+            : { modelCount: names.length, models: list, truncated: list.length !== names.length };
       return c.json({
         ok: true,
         ...baseRequest,
@@ -523,6 +526,7 @@ settingRoutes.post("/test", async (c) => {
     const model = await resolveModel("tts_model", "gemini-2.5-flash-preview-tts");
     const url = `${requestRoot}/models/${encodeURIComponent(model)}:generateContent`;
 
+    const voiceName = (await getSetting("gemini_tts_voice")).trim() || "Zephyr";
     const payload = {
       contents: [
         {
@@ -534,7 +538,7 @@ settingRoutes.post("/test", async (c) => {
         responseModalities: ["AUDIO"],
         speechConfig: {
           voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: "Zephyr" },
+            prebuiltVoiceConfig: { voiceName },
           },
         },
       },
