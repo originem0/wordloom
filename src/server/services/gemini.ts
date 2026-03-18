@@ -310,13 +310,21 @@ async function runWithRetries<T>(fn: () => Promise<T>): Promise<T> {
   return await retryWithBackoff(() => withTimeout(fn(), timeoutMs), maxRetries);
 }
 
+async function getFirstSetting(keys: string[]): Promise<string> {
+  for (const key of keys) {
+    const value = (await getSetting(key)).trim();
+    if (value) return value;
+  }
+  return "";
+}
+
 async function getModelPreference(
-  primaryKey: string,
+  primaryKeys: string[],
   primaryFallback: string,
-  fallbackKey: string,
+  fallbackKeys: string[],
 ): Promise<{ primary: string; fallback: string | null }> {
-  const primary = ((await getSetting(primaryKey)).trim() || primaryFallback).trim();
-  const fallback = (await getSetting(fallbackKey)).trim();
+  const primary = ((await getFirstSetting(primaryKeys)) || primaryFallback).trim();
+  const fallback = (await getFirstSetting(fallbackKeys)).trim();
   return {
     primary,
     fallback: fallback && fallback !== primary ? fallback : null,
@@ -324,13 +332,13 @@ async function getModelPreference(
 }
 
 async function runWithModelFallback<T>(opts: {
-  primaryKey: string;
+  primaryKeys: string[];
   primaryFallback: string;
-  fallbackKey: string;
+  fallbackKeys: string[];
   label: string;
   run: (model: string) => Promise<T>;
 }): Promise<T> {
-  const pref = await getModelPreference(opts.primaryKey, opts.primaryFallback, opts.fallbackKey);
+  const pref = await getModelPreference(opts.primaryKeys, opts.primaryFallback, opts.fallbackKeys);
   try {
     return await runWithRetries(() => opts.run(pref.primary));
   } catch (primaryError) {
@@ -390,9 +398,9 @@ export async function generateStory(
   }
   try {
     return await runWithModelFallback({
-      primaryKey: "story_model",
+      primaryKeys: ["story_model"],
       primaryFallback: "gemini-2.5-pro",
-      fallbackKey: "story_fallback_model",
+      fallbackKeys: ["story_fallback_model"],
       label: "generateStory",
       run: async (model) => {
         const ai = await getClient();
@@ -464,9 +472,9 @@ export async function generateTTS(text: string): Promise<string> {
   }
   try {
     return await runWithModelFallback({
-      primaryKey: "tts_model",
+      primaryKeys: ["gemini_tts_model", "tts_model"],
       primaryFallback: "gemini-2.5-flash-preview-tts",
-      fallbackKey: "tts_fallback_model",
+      fallbackKeys: ["gemini_tts_fallback_model", "tts_fallback_model"],
       label: "generateTTS",
       run: async (model) => {
         const ai = await getClient();
@@ -519,9 +527,9 @@ export async function translateText(text: string): Promise<string> {
   }
   try {
     return await runWithModelFallback({
-      primaryKey: "general_model",
+      primaryKeys: ["utility_model", "general_model"],
       primaryFallback: "gemini-2.5-flash",
-      fallbackKey: "general_fallback_model",
+      fallbackKeys: ["utility_fallback_model", "general_fallback_model"],
       label: "translateText",
       run: async (model) => {
         const ai = await getClient();
@@ -596,9 +604,9 @@ export async function generateCards(
   try {
     const languageInstruction = await getExplanationLanguageInstruction();
     return await runWithModelFallback({
-      primaryKey: "general_model",
+      primaryKeys: ["cards_model", "general_model"],
       primaryFallback: "gemini-2.5-flash",
-      fallbackKey: "general_fallback_model",
+      fallbackKeys: ["cards_fallback_model", "general_fallback_model"],
       label: "generateCards",
       run: async (model) => {
         const ai = await getClient();
@@ -746,9 +754,9 @@ export async function generateDeepLayer(
   try {
     const languageInstruction = await getExplanationLanguageInstruction();
     return await runWithModelFallback({
-      primaryKey: "general_model",
+      primaryKeys: ["deep_model", "general_model"],
       primaryFallback: "gemini-2.5-flash",
-      fallbackKey: "general_fallback_model",
+      fallbackKeys: ["deep_fallback_model", "general_fallback_model"],
       label: "generateDeepLayer",
       run: async (model) => {
         const ai = await getClient();
@@ -837,9 +845,9 @@ export async function extractWords(text: string): Promise<string[]> {
   }
   try {
     return await runWithModelFallback({
-      primaryKey: "general_model",
+      primaryKeys: ["utility_model", "general_model"],
       primaryFallback: "gemini-2.5-flash",
-      fallbackKey: "general_fallback_model",
+      fallbackKeys: ["utility_fallback_model", "general_fallback_model"],
       label: "extractWords",
       run: async (model) => {
         const ai = await getClient();

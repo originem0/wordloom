@@ -1,10 +1,15 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import { queryClient } from "../lib/query-client";
-import type { Story, CardGenerateResult } from "../../shared/types";
+import type { Story, Card, CardGenerateResult } from "../../shared/types";
 
-export type TaskStatus = "running" | "done" | "failed" | "cancelled";
+export type TaskStatus = "running" | "verifying" | "done" | "failed" | "cancelled";
 export type TaskType = "story" | "cards";
+
+export interface TaskMeta {
+  prompt?: string;
+  words?: string[];
+}
 
 export interface Task {
   id: string;
@@ -14,10 +19,12 @@ export interface Task {
   error?: string;
   result?: Story | CardGenerateResult;
   createdAt: number;
+  meta?: TaskMeta;
 }
 
 // AbortControllers stored outside Zustand (non-serializable)
 const controllers = new Map<string, AbortController>();
+const verifyTimers = new Map<string, number>();
 let seq = 0;
 
 function genId() {
@@ -30,6 +37,88 @@ function updateTask(id: string, patch: Partial<Task>) {
   }));
 }
 
+function clearVerify(id: string) {
+  const t = verifyTimers.get(id);
+  if (t) clearTimeout(t);
+  verifyTimers.delete(id);
+}
+
+function scheduleVerify(id: string, fn: () => void, delay: number) {
+  clearVerify(id);
+  const t = window.setTimeout(() => {
+    verifyTimers.delete(id);
+    fn();
+  }, delay);
+  verifyTimers.set(id, t);
+}
+
+const STORY_VERIFY_DELAYS = [6000, 15000];
+const CARDS_VERIFY_DELAYS = [6000, 15000];
+
+async function recoverStory(id: string, prompt: string, createdAt: number, attempt = 0) {
+  const task = useTaskStore.getState().tasks.find((t) => t.id === id);
+  if (!task || task.status === "cancelled") return;
+  try {
+    const res = await fetch(`/api/stories?page=1&limit=6`, { credentials: "include" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = (await res.json()) as { stories: Story[] };
+    const match = body.stories.find(
+      (s) => s.prompt === prompt && s.createdAt >= createdAt - 60_000,
+    );
+    if (match) {
+      clearVerify(id);
+      updateTask(id, { status: "done", result: match, error: undefined, label: "故事生成完成" });
+      queryClient.invalidateQueries({ queryKey: ["stories"] });
+      toast.success("故事生成完成（后台确认）");
+      return;
+    }
+  } catch {
+    // ignore, we'll retry below
+  }
+
+  if (attempt < STORY_VERIFY_DELAYS.length) {
+    scheduleVerify(id, () => recoverStory(id, prompt, createdAt, attempt + 1), STORY_VERIFY_DELAYS[attempt]);
+  } else {
+    clearVerify(id);
+    updateTask(id, { status: "failed", error: "未确认生成结果" });
+  }
+}
+
+async function recoverCards(id: string, words: string[], createdAt: number, attempt = 0) {
+  const task = useTaskStore.getState().tasks.find((t) => t.id === id);
+  if (!task || task.status === "cancelled") return;
+  try {
+    const checks = await Promise.all(
+      words.map(async (word) => {
+        const res = await fetch(`/api/cards?search=${encodeURIComponent(word)}&limit=5`, {
+          credentials: "include",
+        });
+        if (!res.ok) return false;
+        const body = (await res.json()) as { cards: { word: string; createdAt: number }[] };
+        const found = body.cards.find((c) => c.word.toLowerCase() === word.toLowerCase());
+        return Boolean(found && found.createdAt >= createdAt - 60_000);
+      }),
+    );
+
+    if (checks.every(Boolean)) {
+      clearVerify(id);
+      updateTask(id, { status: "done", error: undefined, label: "单词卡生成完成" });
+      queryClient.invalidateQueries({ queryKey: ["cards"] });
+      toast.success("单词卡生成完成（后台确认）");
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
+  if (attempt < CARDS_VERIFY_DELAYS.length) {
+    scheduleVerify(id, () => recoverCards(id, words, createdAt, attempt + 1), CARDS_VERIFY_DELAYS[attempt]);
+  } else {
+    clearVerify(id);
+    updateTask(id, { status: "failed", error: "未确认生成结果" });
+  }
+}
+
 export const useTaskStore = create<{
   tasks: Task[];
   submitStory: (image: File, prompt: string) => string;
@@ -38,12 +127,14 @@ export const useTaskStore = create<{
   removeTask: (id: string) => void;
   clearDone: () => void;
 }>((set) => ({
+
   tasks: [],
 
   submitStory(image: File, prompt: string) {
     const id = genId();
     const ac = new AbortController();
     controllers.set(id, ac);
+    const createdAt = Date.now();
 
     set((s) => ({
       tasks: [
@@ -52,7 +143,8 @@ export const useTaskStore = create<{
           type: "story" as const,
           label: "生成故事",
           status: "running" as const,
-          createdAt: Date.now(),
+          createdAt,
+          meta: { prompt },
         },
         ...s.tasks,
       ],
@@ -84,8 +176,9 @@ export const useTaskStore = create<{
         if (err.name === "AbortError") {
           updateTask(id, { status: "cancelled" });
         } else {
-          updateTask(id, { status: "failed", error: err.message });
-          toast.error(`故事生成失败: ${err.message}`);
+          updateTask(id, { status: "verifying", error: undefined, label: "生成失败，确认中" });
+          toast.warning("故事生成失败，正在确认后台结果…");
+          recoverStory(id, prompt, createdAt, 0);
         }
       })
       .finally(() => controllers.delete(id));
@@ -103,6 +196,8 @@ export const useTaskStore = create<{
     );
     const label = `生成 ${unique.length} 张单词卡`;
 
+    const createdAt = Date.now();
+
     set((s) => ({
       tasks: [
         {
@@ -110,7 +205,8 @@ export const useTaskStore = create<{
           type: "cards" as const,
           label,
           status: "running" as const,
-          createdAt: Date.now(),
+          createdAt,
+          meta: { words: unique },
         },
         ...s.tasks,
       ],
@@ -159,8 +255,9 @@ export const useTaskStore = create<{
         if (err.name === "AbortError") {
           updateTask(id, { status: "cancelled" });
         } else {
-          updateTask(id, { status: "failed", error: err.message });
-          toast.error(`单词卡生成失败: ${err.message}`);
+          updateTask(id, { status: "verifying", error: undefined, label: "生成失败，确认中" });
+          toast.warning("单词卡生成失败，正在确认后台结果…");
+          recoverCards(id, unique, createdAt, 0);
         }
       })
       .finally(() => controllers.delete(id));
@@ -169,11 +266,18 @@ export const useTaskStore = create<{
   },
 
   cancelTask(id: string) {
+    const task = useTaskStore.getState().tasks.find((t) => t.id === id);
+    if (task?.status === "verifying") {
+      clearVerify(id);
+      updateTask(id, { status: "cancelled" });
+      return;
+    }
     const ac = controllers.get(id);
     if (ac) ac.abort();
   },
 
   removeTask(id: string) {
+    clearVerify(id);
     const ac = controllers.get(id);
     if (ac) ac.abort();
     controllers.delete(id);
@@ -182,7 +286,7 @@ export const useTaskStore = create<{
 
   clearDone() {
     set((s) => ({
-      tasks: s.tasks.filter((t) => t.status === "running"),
+      tasks: s.tasks.filter((t) => t.status === "running" || t.status === "verifying"),
     }));
   },
 }));

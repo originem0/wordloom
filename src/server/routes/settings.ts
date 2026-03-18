@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import { settings } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { updateSettingsSchema } from "../../shared/validation.js";
+import { generateEdgeTtsMp3 } from "../services/edgeTts.js";
 
 export const settingRoutes = new Hono();
 
@@ -130,8 +131,13 @@ const settingTestSchema = z
       "baseUrl",
       "listModels",
       "storyModel",
-      "generalModel",
+      "cardsModel",
+      "deepModel",
+      "utilityModel",
       "ttsModel",
+      "geminiTts",
+      "edgeTts",
+      "generalModel",
     ]),
     apiKey: z.string().optional(),
     baseUrl: z.string().optional(),
@@ -369,16 +375,19 @@ settingRoutes.post("/test", async (c) => {
     }
   }
 
-  // Resolve model name (override > setting > fallback)
-  const resolveModel = async (key: string, fallback: string) => {
+  // Resolve model name (override > first non-empty setting > fallback)
+  const resolveModel = async (keys: string[], fallback: string) => {
     const override = (parsed.data.model ?? "").trim();
     if (override) return override;
-    const stored = (await getSetting(key)).trim();
-    return stored || fallback;
+    for (const key of keys) {
+      const stored = (await getSetting(key)).trim();
+      if (stored) return stored;
+    }
+    return fallback;
   };
 
   if (target === "generalModel") {
-    const model = await resolveModel("general_model", "gemini-2.5-flash");
+    const model = await resolveModel(["general_model"], "gemini-2.5-flash");
     const url = `${requestRoot}/models/${encodeURIComponent(model)}:generateContent`;
 
     const payload = {
@@ -452,8 +461,104 @@ settingRoutes.post("/test", async (c) => {
     }
   }
 
+  if (target === "utilityModel") {
+    const model = await resolveModel(["utility_model", "general_model"], "gemini-2.5-flash");
+    const url = `${requestRoot}/models/${encodeURIComponent(model)}:generateContent`;
+    const payload = {
+      contents: [{ role: "user", parts: [{ text: "Translate to Simplified Chinese, output plain text only: A red kite hangs above a quiet field." }] }],
+    };
+    try {
+      const res = await fetchJson(url, {
+        headers,
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeoutMs: 20000,
+      });
+      const upstream = extractUpstreamError(res.json as any);
+      if (res.status >= 400 || upstream.message) {
+        const msg = upstream.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
+        return fail(msg, { status: res.status, requestUrl: url, model, upstream });
+      }
+      const text = extractGeminiText(res.json as any).trim();
+      if (!text) return fail("Model returned empty text.", { requestUrl: url, model });
+      return c.json({ ok: true, ...baseRequest, latencyMs: Date.now() - started, requestUrl: url, model, result: { mode: "plain-text", sample: text.slice(0, 120) } });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return fail(msg, { requestUrl: url, model, code: "NETWORK_ERROR" });
+    }
+  }
+
+  if (target === "cardsModel") {
+    const model = await resolveModel(["cards_model", "general_model"], "gemini-2.5-flash");
+    const url = `${requestRoot}/models/${encodeURIComponent(model)}:generateContent`;
+    const payload = {
+      contents: [{ role: "user", parts: [{ text: 'Return JSON only: [{"word":"signal","coreMeaning":"信号","collocations":[],"examples":[],"contextLadder":[],"phrases":[],"synonyms":[],"antonyms":[]}]' }] }],
+      generationConfig: { responseMimeType: "application/json" },
+    };
+    try {
+      const res = await fetchJson(url, { headers, method: "POST", body: JSON.stringify(payload), timeoutMs: 20000 });
+      const upstream = extractUpstreamError(res.json as any);
+      if (res.status >= 400 || upstream.message) {
+        const msg = upstream.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
+        return fail(msg, { status: res.status, requestUrl: url, model, upstream });
+      }
+      const text = extractGeminiText(res.json as any);
+      const candidate = extractJsonCandidate(text);
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(candidate);
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        return fail(`JSON.parse failed: ${reason}`, { requestUrl: url, model, rawText: text.slice(0, 220) });
+      }
+      const first = Array.isArray(parsedJson) ? parsedJson[0] : null;
+      const hasShape = !!first && typeof first === "object" && "word" in (first as object);
+      if (!hasShape) {
+        return fail("Cards probe returned unexpected JSON shape.", { requestUrl: url, model, rawText: text.slice(0, 220) });
+      }
+      return c.json({ ok: true, ...baseRequest, latencyMs: Date.now() - started, requestUrl: url, model, result: { mode: "json-cards", stableJson: true } });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return fail(msg, { requestUrl: url, model, code: "NETWORK_ERROR" });
+    }
+  }
+
+  if (target === "deepModel") {
+    const model = await resolveModel(["deep_model", "general_model"], "gemini-2.5-flash");
+    const url = `${requestRoot}/models/${encodeURIComponent(model)}:generateContent`;
+    const payload = {
+      contents: [{ role: "user", parts: [{ text: 'Return JSON only with keys familyComparison, schemaAnalysis, boundaryTests for word "diverge". schemaAnalysis must contain coreSchema and coreImageText.' }] }],
+      generationConfig: { responseMimeType: "application/json" },
+    };
+    try {
+      const res = await fetchJson(url, { headers, method: "POST", body: JSON.stringify(payload), timeoutMs: 30000 });
+      const upstream = extractUpstreamError(res.json as any);
+      if (res.status >= 400 || upstream.message) {
+        const msg = upstream.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
+        return fail(msg, { status: res.status, requestUrl: url, model, upstream });
+      }
+      const text = extractGeminiText(res.json as any);
+      const candidate = extractJsonCandidate(text);
+      let parsedJson: any;
+      try {
+        parsedJson = JSON.parse(candidate);
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        return fail(`JSON.parse failed: ${reason}`, { requestUrl: url, model, rawText: text.slice(0, 220) });
+      }
+      const okShape = parsedJson && typeof parsedJson === "object" && parsedJson.schemaAnalysis && parsedJson.familyComparison !== undefined && parsedJson.boundaryTests !== undefined;
+      if (!okShape) {
+        return fail("Deep probe returned incomplete JSON structure.", { requestUrl: url, model, rawText: text.slice(0, 220) });
+      }
+      return c.json({ ok: true, ...baseRequest, latencyMs: Date.now() - started, requestUrl: url, model, result: { mode: "json-deep", hasSchemaAnalysis: true } });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return fail(msg, { requestUrl: url, model, code: "NETWORK_ERROR" });
+    }
+  }
+
   if (target === "storyModel") {
-    const model = await resolveModel("story_model", "gemini-2.5-pro");
+    const model = await resolveModel(["story_model"], "gemini-2.5-pro");
     const url = `${requestRoot}/models/${encodeURIComponent(model)}:generateContent`;
 
     const payload = {
@@ -522,8 +627,23 @@ settingRoutes.post("/test", async (c) => {
     }
   }
 
-  if (target === "ttsModel") {
-    const model = await resolveModel("tts_model", "gemini-2.5-flash-preview-tts");
+  if (target === "edgeTts") {
+    try {
+      const audio = await generateEdgeTtsMp3("OK");
+      return c.json({
+        ok: true,
+        ...baseRequest,
+        latencyMs: Date.now() - started,
+        result: { mode: "edge-tts", bytes: audio.byteLength },
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return fail(msg, { code: "EDGE_TTS_ERROR" });
+    }
+  }
+
+  if (target === "ttsModel" || target === "geminiTts") {
+    const model = await resolveModel(["gemini_tts_model", "tts_model"], "gemini-2.5-flash-preview-tts");
     const url = `${requestRoot}/models/${encodeURIComponent(model)}:generateContent`;
 
     const voiceName = (await getSetting("gemini_tts_voice")).trim() || "Zephyr";

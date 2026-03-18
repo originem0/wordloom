@@ -1,30 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Key,
-  Volume2,
-  Sun,
+  ChevronRight,
+  Cpu,
+  Globe,
+  Loader2,
   Moon,
   Monitor,
-  Info,
-  Loader2,
-  Globe,
-  Cpu,
   PlayCircle,
-  ShieldCheck,
   RefreshCcw,
-  Wrench,
-  Database,
   Sparkles,
+  Sun,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiPost } from "@/client/lib/api";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from "@/client/components/ui/card";
 import { Button } from "@/client/components/ui/button";
 import { Input } from "@/client/components/ui/input";
 import { Badge } from "@/client/components/ui/badge";
@@ -39,6 +28,11 @@ type SettingTestTarget =
   | "baseUrl"
   | "listModels"
   | "storyModel"
+  | "cardsModel"
+  | "deepModel"
+  | "utilityModel"
+  | "edgeTts"
+  | "geminiTts"
   | "generalModel"
   | "ttsModel";
 
@@ -47,35 +41,42 @@ type SettingTestResponse = {
   target?: SettingTestTarget;
   latencyMs?: number;
   warnings?: string[];
-  request?: {
-    baseUrl?: string;
-    apiVersion?: string;
-    requestRoot?: string | null;
-  };
   requestUrl?: string;
   model?: string;
   result?: unknown;
   error?: {
     message?: string;
     hint?: string;
-    upstream?: unknown;
   };
   [key: string]: unknown;
 };
 
 type Drafts = Record<string, string>;
-type HealthKey = "apiKey" | "baseUrl" | "storyModel" | "generalModel" | "ttsModel";
+type HealthKey =
+  | "apiKey"
+  | "baseUrl"
+  | "story"
+  | "cards"
+  | "deep"
+  | "utility"
+  | "edgeTts"
+  | "geminiTts";
 type HealthMap = Partial<Record<HealthKey, SettingTestResponse>>;
 
 const DEFAULTS: Record<string, string> = {
   gemini_base_url: "",
   story_model: "gemini-2.5-pro",
   story_fallback_model: "",
-  general_model: "gemini-2.5-flash",
-  general_fallback_model: "",
-  tts_model: "gemini-2.5-flash-preview-tts",
-  tts_fallback_model: "",
+  cards_model: "",
+  cards_fallback_model: "",
+  deep_model: "",
+  deep_fallback_model: "",
+  utility_model: "",
+  utility_fallback_model: "",
+  gemini_tts_model: "gemini-2.5-flash-preview-tts",
+  gemini_tts_fallback_model: "",
   tts_preference: "browser",
+  tts_provider_fallback: "",
   edge_tts_voice: "en-US-EmmaMultilingualNeural",
   gemini_tts_voice: "Zephyr",
   analysis_language: "zh-CN",
@@ -94,86 +95,87 @@ const EDGE_VOICES = [
 ] as const;
 
 const GEMINI_VOICES = ["Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Aoede"] as const;
+const TTS_PROVIDERS = ["browser", "edge", "gemini"] as const;
+const MODEL_RUNTIME_DEFAULTS = {
+  story: "gemini-2.5-pro",
+  shared: "gemini-2.5-flash",
+  geminiTts: "gemini-2.5-flash-preview-tts",
+} as const;
 
-function statusTone(res?: SettingTestResponse) {
-  if (!res) return "secondary" as const;
-  return res.ok ? "default" : "destructive" as const;
+const PRIMARY_BUTTON = "bg-sky-600 text-white hover:bg-sky-700 dark:bg-sky-500 dark:hover:bg-sky-400";
+const INPUT_CLASS = "h-10 rounded-lg border-border/60 bg-background/80 focus-visible:ring-sky-500/20";
+const SELECT_CLASS = "h-10 w-full rounded-lg border border-border/60 bg-background/80 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20";
+
+/* ── Status dot ── */
+function StatusDot({ res }: { res?: SettingTestResponse }) {
+  if (!res) return <span className="inline-block size-2 rounded-full bg-muted-foreground/30" title="untested" />;
+  return res.ok ? (
+    <span className="inline-block size-2 rounded-full bg-emerald-500" title={`verified${res.latencyMs ? ` ${res.latencyMs}ms` : ""}`} />
+  ) : (
+    <span className="inline-block size-2 rounded-full bg-red-500" title="failed" />
+  );
 }
 
-function modelCandidatesForRole(models: string[], role: "story" | "general" | "tts") {
-  const unique = [...new Set(models)];
-  if (role === "tts") {
-    return unique.filter((m) => /tts|audio|speech/i.test(m));
-  }
-  if (role === "story") {
-    return unique.filter((m) => !/tts|audio|speech/i.test(m)).sort((a, b) => {
-      const pa = /pro|vision/i.test(a) ? -1 : 0;
-      const pb = /pro|vision/i.test(b) ? -1 : 0;
-      return pa - pb || a.localeCompare(b);
-    });
-  }
-  return unique.filter((m) => !/tts|audio|speech/i.test(m));
-}
-
-function HealthBadge({ label, res }: { label: string; res?: SettingTestResponse }) {
-  const ok = res?.ok;
-  const latency = typeof res?.latencyMs === "number" ? `${res.latencyMs}ms` : null;
-  const text = res ? (ok ? "OK" : "FAIL") : "N/A";
+/* ── Section divider + label ── */
+function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-sm">
-      <span>{label}</span>
-      <div className="flex items-center gap-2">
-        {latency && <span className="text-xs text-muted-foreground">{latency}</span>}
-        <Badge variant={statusTone(res)}>{text}</Badge>
-      </div>
+    <div className="border-t border-border/50 pt-6 pb-2">
+      <div className="text-xs font-medium uppercase tracking-widest text-muted-foreground/60">{children}</div>
     </div>
   );
 }
 
-function ThemeSection() {
-  const theme = useAppStore((s) => s.theme);
-  const setTheme = useAppStore((s) => s.setTheme);
-
-  function handleChange(next: Theme) {
-    setTheme(next);
-    applyTheme(next);
-  }
-
-  const options: { value: Theme; label: string; icon: typeof Sun }[] = [
-    { value: "light", label: "Light", icon: Sun },
-    { value: "dark", label: "Dark (Solarized)", icon: Moon },
-    { value: "system", label: "System", icon: Monitor },
-  ];
-
+/* ── Flat expandable row ── */
+function SettingRow({
+  title,
+  subtitle,
+  value,
+  right,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  subtitle?: React.ReactNode;
+  value?: React.ReactNode;
+  right?: React.ReactNode;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Sun className="size-4" />
-          Theme
-        </CardTitle>
-        <CardDescription>
-          Dark mode uses Solarized Dark. Stored locally in your browser.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="flex gap-2">
-          {options.map(({ value, label, icon: Icon }) => (
-            <Button
-              key={value}
-              variant={theme === value ? "default" : "outline"}
-              size="sm"
-              onClick={() => handleChange(value)}
-              className="flex-1"
-            >
-              <Icon className="size-4" />
-              {label}
-            </Button>
-          ))}
+    <details open={defaultOpen} className="group">
+      <summary className="list-none cursor-pointer py-3 [&::-webkit-details-marker]:hidden">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 min-w-0">
+            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/40 transition-transform group-open:rotate-90" />
+            <div className="min-w-0">
+              <div className="text-[14px] font-medium leading-5 text-foreground">{title}</div>
+              {subtitle && <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground/60">{subtitle}</div>}
+            </div>
+          </div>
+          <div className="shrink-0 flex items-center gap-2">
+            {right}
+            {!right && value && <div className="max-w-[200px] truncate text-[12px] text-muted-foreground">{value}</div>}
+          </div>
         </div>
-      </CardContent>
-    </Card>
+      </summary>
+      <div className="pt-2 pb-4 ml-[22px]">{children}</div>
+    </details>
   );
+}
+
+function roleCandidates(models: string[], role: "story" | "cards" | "deep" | "utility" | "geminiTts") {
+  const unique = [...new Set(models)];
+  const textModels = unique.filter((m) => !/tts|audio|speech/i.test(m));
+  const ttsModels = unique.filter((m) => /tts|audio|speech/i.test(m));
+  const score = (m: string) => {
+    if (role === "story") return (/pro|vision/i.test(m) ? 20 : 0) + (/flash/i.test(m) ? -2 : 0);
+    if (role === "deep") return (/pro|gpt-5/i.test(m) ? 20 : 0) + (/flash/i.test(m) ? -4 : 0);
+    if (role === "cards") return (/flash|mini/i.test(m) ? 10 : 0) + (/pro/i.test(m) ? 2 : 0);
+    if (role === "utility") return (/flash|mini/i.test(m) ? 12 : 0) + (/pro/i.test(m) ? -2 : 0);
+    return (/tts|audio/i.test(m) ? 10 : 0);
+  };
+  const list = role === "geminiTts" ? ttsModels : textModels;
+  return list.sort((a, b) => score(b) - score(a) || a.localeCompare(b));
 }
 
 export function SettingsPage() {
@@ -181,17 +183,61 @@ export function SettingsPage() {
   const updateSetting = useUpdateSetting();
   const settings = settingsQuery.data;
 
-  const [drafts, setDrafts] = useState<Drafts>({
-    gemini_api_key: "",
-    ...DEFAULTS,
-  });
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
+
+  const [drafts, setDrafts] = useState<Drafts>({ gemini_api_key: "", ...DEFAULTS });
   const [initialized, setInitialized] = useState(false);
   const [detectedModels, setDetectedModels] = useState<string[]>([]);
   const [detectingModels, setDetectingModels] = useState(false);
   const [health, setHealth] = useState<HealthMap>({});
   const [testingAll, setTestingAll] = useState(false);
-  const [savingSection, setSavingSection] = useState<string | null>(null);
+  const [testingSingle, setTestingSingle] = useState<string | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
+  // Track which model fields are in manual-input mode
+  const [manualInput, setManualInput] = useState<Record<string, boolean>>({});
+  // Ensure auto-detect + auto-test only fires once per session
+  const hasAutoTested = useRef(false);
+  const AUTO_TEST_KEY = "wordloom:settings-auto-tested";
+  const TEST_ALL_KEY = "wordloom:settings-test-all";
+  const HEALTH_CACHE_KEY = "wordloom:settings-health";
+  const MODELS_CACHE_KEY = "wordloom:settings-models";
+  const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2h safety window
+  const TEST_TTL_MS = 5 * 60 * 1000; // resume test-all if navigated away recently
+  const hasHydrated = useRef(false);
+
+  // Hydrate cached health + models from session storage (survive route changes)
+  useEffect(() => {
+    try {
+      const cachedHealth = sessionStorage.getItem(HEALTH_CACHE_KEY);
+      if (cachedHealth) setHealth(JSON.parse(cachedHealth) as HealthMap);
+      const cachedModels = sessionStorage.getItem(MODELS_CACHE_KEY);
+      if (cachedModels) setDetectedModels(JSON.parse(cachedModels) as string[]);
+    } catch {
+      // ignore
+    } finally {
+      hasHydrated.current = true;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydrated.current) return;
+    try {
+      sessionStorage.setItem(HEALTH_CACHE_KEY, JSON.stringify(health));
+    } catch {
+      // ignore
+    }
+  }, [health]);
+
+  useEffect(() => {
+    if (!hasHydrated.current) return;
+    try {
+      sessionStorage.setItem(MODELS_CACHE_KEY, JSON.stringify(detectedModels));
+    } catch {
+      // ignore
+    }
+  }, [detectedModels]);
 
   useEffect(() => {
     if (!settings || initialized) return;
@@ -200,11 +246,20 @@ export function SettingsPage() {
       gemini_base_url: settings.gemini_base_url ?? DEFAULTS.gemini_base_url,
       story_model: settings.story_model ?? DEFAULTS.story_model,
       story_fallback_model: settings.story_fallback_model ?? DEFAULTS.story_fallback_model,
-      general_model: settings.general_model ?? DEFAULTS.general_model,
-      general_fallback_model: settings.general_fallback_model ?? DEFAULTS.general_fallback_model,
-      tts_model: settings.tts_model ?? DEFAULTS.tts_model,
-      tts_fallback_model: settings.tts_fallback_model ?? DEFAULTS.tts_fallback_model,
+      cards_model: settings.cards_model ?? settings.general_model ?? DEFAULTS.cards_model,
+      cards_fallback_model:
+        settings.cards_fallback_model ?? settings.general_fallback_model ?? DEFAULTS.cards_fallback_model,
+      deep_model: settings.deep_model ?? settings.general_model ?? DEFAULTS.deep_model,
+      deep_fallback_model:
+        settings.deep_fallback_model ?? settings.general_fallback_model ?? DEFAULTS.deep_fallback_model,
+      utility_model: settings.utility_model ?? settings.general_model ?? DEFAULTS.utility_model,
+      utility_fallback_model:
+        settings.utility_fallback_model ?? settings.general_fallback_model ?? DEFAULTS.utility_fallback_model,
+      gemini_tts_model: settings.gemini_tts_model ?? settings.tts_model ?? DEFAULTS.gemini_tts_model,
+      gemini_tts_fallback_model:
+        settings.gemini_tts_fallback_model ?? settings.tts_fallback_model ?? DEFAULTS.gemini_tts_fallback_model,
       tts_preference: settings.tts_preference ?? DEFAULTS.tts_preference,
+      tts_provider_fallback: settings.tts_provider_fallback ?? DEFAULTS.tts_provider_fallback,
       edge_tts_voice: settings.edge_tts_voice ?? DEFAULTS.edge_tts_voice,
       gemini_tts_voice: settings.gemini_tts_voice ?? DEFAULTS.gemini_tts_voice,
       analysis_language: settings.analysis_language ?? DEFAULTS.analysis_language,
@@ -216,36 +271,113 @@ export function SettingsPage() {
 
   const hasSavedApiKey = settings?.gemini_api_key === "configured";
 
+  const savedValue = useCallback(
+    (key: string) => {
+      if (key === "gemini_api_key") return "";
+      return settings?.[key] ?? DEFAULTS[key] ?? "";
+    },
+    [settings],
+  );
+
+  const draftValue = useCallback((key: string) => drafts[key] ?? "", [drafts]);
+
+  const resolveRuntimePrimary = useCallback(
+    (route: "story" | "cards" | "deep" | "utility" | "geminiTts") => {
+      if (route === "story") return draftValue("story_model") || MODEL_RUNTIME_DEFAULTS.story;
+      if (route === "geminiTts") {
+        return draftValue("gemini_tts_model") || settings?.tts_model || MODEL_RUNTIME_DEFAULTS.geminiTts;
+      }
+      const routeKey = `${route}_model`;
+      return draftValue(routeKey) || settings?.general_model || MODEL_RUNTIME_DEFAULTS.shared;
+    },
+    [draftValue, settings],
+  );
+
+  const resolveRuntimeFallback = useCallback(
+    (route: "story" | "cards" | "deep" | "utility" | "geminiTts") => {
+      if (route === "story") return draftValue("story_fallback_model");
+      if (route === "geminiTts") {
+        return draftValue("gemini_tts_fallback_model") || settings?.tts_fallback_model || "";
+      }
+      const routeKey = `${route}_fallback_model`;
+      return draftValue(routeKey) || settings?.general_fallback_model || "";
+    },
+    [draftValue, settings],
+  );
+
+  const dirtyKeys = useMemo(() => {
+    if (!initialized) return [] as string[];
+    return Object.keys(DEFAULTS)
+      .filter((key) => draftValue(key) !== savedValue(key))
+      .concat(drafts.gemini_api_key.trim() ? ["gemini_api_key"] : []);
+  }, [draftValue, drafts.gemini_api_key, initialized, savedValue]);
+
   const buildTestPayload = useCallback(
     (target: SettingTestTarget, model?: string) => {
       const payload: Record<string, unknown> = {
         target,
-        baseUrl: drafts.gemini_base_url,
+        baseUrl: draftValue("gemini_base_url"),
       };
       if (drafts.gemini_api_key.trim()) payload.apiKey = drafts.gemini_api_key.trim();
       if (model) payload.model = model;
       return payload;
     },
-    [drafts.gemini_api_key, drafts.gemini_base_url],
+    [drafts.gemini_api_key, draftValue],
   );
 
-  const runSingleTest = useCallback(
+  const readCache = useCallback(<T,>(key: string, ttl = CACHE_TTL_MS): T | null => {
+    try {
+      const raw = sessionStorage.getItem(key);
+      if (!raw) return null;
+      const data = JSON.parse(raw) as { ts?: number } & T;
+      if (!data.ts) return null;
+      if (Date.now() - data.ts > ttl) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const writeCache = useCallback((key: string, payload: Record<string, unknown>) => {
+    try {
+      sessionStorage.setItem(key, JSON.stringify({ ...payload, ts: Date.now() }));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+
+  const runProbe = useCallback(
     async (key: HealthKey, target: SettingTestTarget, model?: string) => {
       try {
         const res = await apiPost<SettingTestResponse>("/api/settings/test", buildTestPayload(target, model));
-        setHealth((prev) => ({ ...prev, [key]: res }));
+        const compact: SettingTestResponse = {
+          ok: res.ok,
+          target: res.target,
+          latencyMs: res.latencyMs,
+          error: res.error ? { message: res.error.message } : undefined,
+        };
+        setHealth((prev) => {
+          const next = { ...prev, [key]: compact };
+          writeCache(HEALTH_CACHE_KEY, { health: next });
+          return next;
+        });
         return res;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         const fail: SettingTestResponse = { ok: false, target, error: { message: msg } };
-        setHealth((prev) => ({ ...prev, [key]: fail }));
+        setHealth((prev) => {
+          const next = { ...prev, [key]: fail };
+          writeCache(HEALTH_CACHE_KEY, { health: next });
+          return next;
+        });
         throw e;
       }
     },
-    [buildTestPayload],
+    [buildTestPayload, writeCache],
   );
 
-  const handleDetectModels = useCallback(async () => {
+  const detectModels = useCallback(async () => {
     setDetectingModels(true);
     try {
       const res = await apiPost<SettingTestResponse>("/api/settings/test", buildTestPayload("listModels"));
@@ -254,57 +386,142 @@ export function SettingsPage() {
         return;
       }
       const models = Array.isArray((res.result as { models?: unknown[] } | undefined)?.models)
-        ? ((res.result as { models?: string[] }).models ?? [])
+        ? (((res.result as { models?: string[] }).models ?? []).map((m) => String(m)))
         : [];
       setDetectedModels(models);
+      writeCache(MODELS_CACHE_KEY, { models });
       toast.success(models.length > 0 ? `Detected ${models.length} models` : "Connected, but no model list returned");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setDetectingModels(false);
     }
-  }, [buildTestPayload]);
+  }, [buildTestPayload, writeCache]);
 
-  const handleTestAll = useCallback(async () => {
+  /* Per-route test */
+  const testRoute = useCallback(
+    async (key: HealthKey, target: SettingTestTarget, model: string) => {
+      setTestingSingle(key);
+      try {
+        const res = await runProbe(key, target, model);
+        toast[res.ok ? "success" : "error"](
+          res.ok ? `${key}: ${model} ✓ ${res.latencyMs ?? ""}ms` : `${key}: ${res.error?.message ?? "failed"}`,
+        );
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      } finally {
+        setTestingSingle(null);
+      }
+    },
+    [runProbe],
+  );
+
+  const testAll = useCallback(async () => {
     setTestingAll(true);
+    writeCache(TEST_ALL_KEY, { inProgress: true });
     try {
       await Promise.allSettled([
-        runSingleTest("apiKey", "apiKey"),
-        runSingleTest("baseUrl", "baseUrl"),
-        runSingleTest("storyModel", "storyModel", drafts.story_model || DEFAULTS.story_model),
-        runSingleTest("generalModel", "generalModel", drafts.general_model || DEFAULTS.general_model),
-        runSingleTest("ttsModel", "ttsModel", drafts.tts_model || DEFAULTS.tts_model),
+        runProbe("apiKey", "apiKey"),
+        runProbe("baseUrl", "baseUrl"),
+        runProbe("story", "storyModel", resolveRuntimePrimary("story")),
+        runProbe("cards", "cardsModel", resolveRuntimePrimary("cards")),
+        runProbe("deep", "deepModel", resolveRuntimePrimary("deep")),
+        runProbe("utility", "utilityModel", resolveRuntimePrimary("utility")),
+        runProbe("edgeTts", "edgeTts"),
+        runProbe("geminiTts", "geminiTts", resolveRuntimePrimary("geminiTts")),
       ]);
-      toast.success("Health check finished");
+      toast.success("Capability matrix refreshed");
     } finally {
       setTestingAll(false);
+      writeCache(TEST_ALL_KEY, { inProgress: false });
     }
-  }, [drafts.general_model, drafts.story_model, drafts.tts_model, runSingleTest]);
+  }, [resolveRuntimePrimary, runProbe, writeCache]);
 
   useEffect(() => {
     if (!initialized) return;
+    if (hasAutoTested.current) return;
     if (!hasSavedApiKey && !drafts.gemini_api_key.trim()) return;
-    handleDetectModels().catch(() => undefined);
-    handleTestAll().catch(() => undefined);
+
+    let shouldRun = true;
+    try {
+      if (sessionStorage.getItem(AUTO_TEST_KEY) === "1") shouldRun = false;
+      else sessionStorage.setItem(AUTO_TEST_KEY, "1");
+    } catch {
+      try {
+        const raw = localStorage.getItem(AUTO_TEST_KEY);
+        const ts = raw ? Number(raw) : 0;
+        if (ts && Date.now() - ts < CACHE_TTL_MS) shouldRun = false;
+        else localStorage.setItem(AUTO_TEST_KEY, String(Date.now()));
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!shouldRun) return;
+
+    hasAutoTested.current = true;
+    detectModels().catch(() => undefined);
+    testAll().catch(() => undefined);
   }, [initialized]);
 
+  // Hydrate cached models + health so results survive navigation
+  useEffect(() => {
+    if (!initialized || hasHydrated.current) return;
+    hasHydrated.current = true;
+    const cachedModels = readCache<{ models: string[] }>(MODELS_CACHE_KEY);
+    if (cachedModels?.models?.length) setDetectedModels(cachedModels.models);
+    const cachedHealth = readCache<{ health: HealthMap }>(HEALTH_CACHE_KEY);
+    if (cachedHealth?.health) setHealth(cachedHealth.health);
+  }, [initialized]);
+
+  // If Test All was running and user navigated away, resume when coming back
+  useEffect(() => {
+    if (!initialized || testingAll) return;
+    const cached = readCache<{ inProgress?: boolean }>(TEST_ALL_KEY, TEST_TTL_MS);
+    if (cached?.inProgress) testAll().catch(() => undefined);
+  }, [initialized, testingAll]);
+
   const savePairs = useCallback(
-    async (section: string, pairs: Array<{ key: string; value: string; skipEmpty?: boolean }>) => {
-      setSavingSection(section);
+    async (label: string, pairs: Array<{ key: string; value: string; skipEmpty?: boolean }>) => {
+      setSaving(label);
       try {
         for (const pair of pairs) {
           if (pair.skipEmpty && !pair.value.trim()) continue;
           await updateSetting.mutateAsync({ key: pair.key, value: pair.value.trim() });
         }
-        toast.success(`${section} saved`);
+        toast.success(`${label} saved`);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : String(e));
       } finally {
-        setSavingSection(null);
+        setSaving(null);
       }
     },
     [updateSetting],
   );
+
+  const saveAll = useCallback(async () => {
+    await savePairs("All settings", [
+      { key: "gemini_api_key", value: drafts.gemini_api_key, skipEmpty: true },
+      { key: "gemini_base_url", value: draftValue("gemini_base_url") },
+      { key: "story_model", value: draftValue("story_model") },
+      { key: "story_fallback_model", value: draftValue("story_fallback_model") },
+      { key: "cards_model", value: draftValue("cards_model") },
+      { key: "cards_fallback_model", value: draftValue("cards_fallback_model") },
+      { key: "deep_model", value: draftValue("deep_model") },
+      { key: "deep_fallback_model", value: draftValue("deep_fallback_model") },
+      { key: "utility_model", value: draftValue("utility_model") },
+      { key: "utility_fallback_model", value: draftValue("utility_fallback_model") },
+      { key: "gemini_tts_model", value: draftValue("gemini_tts_model") },
+      { key: "gemini_tts_fallback_model", value: draftValue("gemini_tts_fallback_model") },
+      { key: "tts_preference", value: draftValue("tts_preference") },
+      { key: "tts_provider_fallback", value: draftValue("tts_provider_fallback") },
+      { key: "edge_tts_voice", value: draftValue("edge_tts_voice") },
+      { key: "gemini_tts_voice", value: draftValue("gemini_tts_voice") },
+      { key: "analysis_language", value: draftValue("analysis_language") },
+      { key: "api_timeout_ms", value: draftValue("api_timeout_ms") },
+      { key: "api_max_retries", value: draftValue("api_max_retries") },
+    ]);
+  }, [draftValue, drafts.gemini_api_key, savePairs]);
 
   const clearLocalCache = useCallback(async () => {
     setMaintenanceBusy(true);
@@ -340,9 +557,24 @@ export function SettingsPage() {
     }
   }, []);
 
-  const storyModels = useMemo(() => modelCandidatesForRole(detectedModels, "story"), [detectedModels]);
-  const generalModels = useMemo(() => modelCandidatesForRole(detectedModels, "general"), [detectedModels]);
-  const ttsModels = useMemo(() => modelCandidatesForRole(detectedModels, "tts"), [detectedModels]);
+  const storyCandidates = useMemo(() => roleCandidates(detectedModels, "story"), [detectedModels]);
+  const cardsCandidates = useMemo(() => roleCandidates(detectedModels, "cards"), [detectedModels]);
+  const deepCandidates = useMemo(() => roleCandidates(detectedModels, "deep"), [detectedModels]);
+  const utilityCandidates = useMemo(() => roleCandidates(detectedModels, "utility"), [detectedModels]);
+  const geminiTtsCandidates = useMemo(() => roleCandidates(detectedModels, "geminiTts"), [detectedModels]);
+
+  const legacySharedRoutingActive = Boolean(settings?.general_model || settings?.general_fallback_model);
+  const legacyGeminiTtsActive = Boolean(settings?.tts_model || settings?.tts_fallback_model);
+
+  /* Which TTS providers are active (primary or fallback) */
+  const activeProviders = useMemo(() => {
+    const set = new Set<string>();
+    const prim = draftValue("tts_preference");
+    const fb = draftValue("tts_provider_fallback");
+    if (prim) set.add(prim);
+    if (fb) set.add(fb);
+    return set;
+  }, [draftValue]);
 
   if (settingsQuery.isLoading && !initialized) {
     return (
@@ -356,360 +588,477 @@ export function SettingsPage() {
     return <div className="p-6 text-destructive">Failed to load settings: {settingsQuery.error.message}</div>;
   }
 
-  const modelPicker = (
-    key: keyof Drafts,
+  const modelPreview = detectedModels.slice(0, 12);
+
+  /* ── Model picker: select from detected models, with manual fallback ── */
+  const modelField = (
+    key: string,
     label: string,
-    desc: string,
-    fallbackLabel: string,
-    suggestions: string[],
-  ) => (
-    <div className="space-y-2">
-      <div>
-        <div className="text-sm font-medium">{label}</div>
-        <div className="text-xs text-muted-foreground">{desc}</div>
-      </div>
-      <Input
-        value={drafts[key] ?? ""}
-        onChange={(e) => setDrafts((prev) => ({ ...prev, [key]: e.target.value }))}
-        placeholder={fallbackLabel}
-        className="font-mono text-sm"
-        list={`${String(key)}-models`}
-      />
-      <datalist id={`${String(key)}-models`}>
-        {suggestions.map((m) => (
-          <option key={m} value={m} />
-        ))}
-      </datalist>
-      {suggestions.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {suggestions.slice(0, 12).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setDrafts((prev) => ({ ...prev, [key]: m }))}
-              className={`rounded-full border px-2 py-0.5 text-xs transition-colors ${drafts[key] === m ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-accent/50"}`}
-            >
-              {m}
-            </button>
-          ))}
+    placeholder: string,
+    candidates: string[],
+    helper?: string,
+    allowEmpty = false,
+  ) => {
+    const current = draftValue(key);
+    const isManual = manualInput[key] ?? false;
+    const hasDetected = candidates.length > 0;
+
+    // Build option list: candidates + current value if not in list
+    const options = [...candidates];
+    if (current && !options.includes(current)) options.push(current);
+
+    if (!hasDetected || isManual) {
+      // Fallback: plain text input
+      return (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <div className="text-[13px] font-medium text-foreground">{label}</div>
+            {hasDetected && (
+              <button
+                type="button"
+                onClick={() => setManualInput((p) => ({ ...p, [key]: false }))}
+                className="text-[10px] text-sky-500 hover:underline"
+              >
+                ← pick from list
+              </button>
+            )}
+          </div>
+          <Input
+            value={current}
+            onChange={(e) => setDrafts((prev) => ({ ...prev, [key]: e.target.value }))}
+            placeholder={placeholder}
+            className={`${INPUT_CLASS} font-mono text-sm`}
+          />
+          {helper && <div className="text-[11px] text-muted-foreground/60">{helper}</div>}
         </div>
-      )}
+      );
+    }
+
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <div className="text-[13px] font-medium text-foreground">{label}</div>
+          <button
+            type="button"
+            onClick={() => setManualInput((p) => ({ ...p, [key]: true }))}
+            className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground"
+          >
+            type manually
+          </button>
+        </div>
+        <select
+          className={`${SELECT_CLASS} font-mono`}
+          value={current}
+          onChange={(e) => setDrafts((prev) => ({ ...prev, [key]: e.target.value }))}
+        >
+          {allowEmpty && <option value="">— inherit default —</option>}
+          {options.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+        {helper && <div className="text-[11px] text-muted-foreground/60">{helper}</div>}
+      </div>
+    );
+  };
+
+  /* ── Plain text field (non-model) ── */
+  const textField = (key: string, label: string, placeholder: string, helper?: string) => (
+    <div className="space-y-1.5">
+      <div className="text-[13px] font-medium text-foreground">{label}</div>
+      <Input
+        value={draftValue(key)}
+        onChange={(e) => setDrafts((prev) => ({ ...prev, [key]: e.target.value }))}
+        placeholder={placeholder}
+        className={`${INPUT_CLASS} font-mono text-sm`}
+      />
+      {helper && <div className="text-[11px] text-muted-foreground/60">{helper}</div>}
     </div>
   );
 
+  const saveTheme = (next: Theme) => {
+    setTheme(next);
+    applyTheme(next);
+  };
+
+  /* Per-route test button */
+  const routeTestBtn = (healthKey: HealthKey, target: SettingTestTarget, model: string) => (
+    <button
+      type="button"
+      title={`Test ${healthKey}`}
+      disabled={testingSingle === healthKey || testingAll}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        testRoute(healthKey, target, model);
+      }}
+      className="rounded-md p-1 text-muted-foreground/40 hover:text-sky-500 hover:bg-sky-500/10 disabled:opacity-40 transition-colors"
+    >
+      {testingSingle === healthKey ? (
+        <Loader2 className="size-3 animate-spin" />
+      ) : (
+        <Zap className="size-3" />
+      )}
+    </button>
+  );
+
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
-      <div className="space-y-1">
-        <h2 className="text-2xl font-semibold">Settings</h2>
-        <p className="text-sm text-muted-foreground">
-          草稿会直接显示在输入框里。点击 Test All 时，未保存的草稿也会参与测试。
-        </p>
+    <div className="mx-auto max-w-2xl px-4 pt-6 pb-24 md:px-6">
+      <h1 className="text-xl font-semibold text-foreground">Settings</h1>
+
+      {/* ══════════ CONNECTION ══════════ */}
+      <SectionHeader>Connection</SectionHeader>
+
+      <SettingRow
+        title="API Key"
+        subtitle="留空表示保留已保存的 key"
+        right={
+          <div className="flex items-center gap-2">
+            <StatusDot res={health.apiKey} />
+            <Badge variant={hasSavedApiKey ? "outline" : "destructive"} className="rounded-md text-[10px]">
+              {hasSavedApiKey ? "saved" : "missing"}
+            </Badge>
+          </div>
+        }
+        defaultOpen={!hasSavedApiKey}
+      >
+        <Input
+          type="password"
+          placeholder={hasSavedApiKey ? "Saved — type a new key only to replace" : "Enter your Gemini / relay API key"}
+          value={drafts.gemini_api_key}
+          onChange={(e) => setDrafts((prev) => ({ ...prev, gemini_api_key: e.target.value }))}
+          className={INPUT_CLASS}
+        />
+      </SettingRow>
+
+      <SettingRow
+        title="Base URL"
+        subtitle="官方 API 留空；中转站填根地址，不带 /v1"
+        right={
+          <div className="flex items-center gap-2">
+            <StatusDot res={health.baseUrl} />
+            <span className="max-w-[160px] truncate text-[12px] text-muted-foreground">
+              {draftValue("gemini_base_url") || "official"}
+            </span>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          {textField("gemini_base_url", "Base URL", "Leave empty for Google official API, or set https://x666.me")}
+          {health.baseUrl?.warnings?.[0] && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
+              {health.baseUrl.warnings[0]}
+            </div>
+          )}
+        </div>
+      </SettingRow>
+
+      <SettingRow
+        title="Model Discovery"
+        value={`${detectedModels.length} detected`}
+        defaultOpen={detectedModels.length === 0}
+      >
+        <div className="space-y-3">
+          {modelPreview.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {modelPreview.map((model) => (
+                <span key={model} className="rounded-md border border-border/60 bg-background/80 px-2 py-0.5 text-[11px] text-muted-foreground">
+                  {model}
+                </span>
+              ))}
+              {detectedModels.length > modelPreview.length && (
+                <span className="rounded-md border border-border/60 bg-background/80 px-2 py-0.5 text-[11px] text-muted-foreground">
+                  +{detectedModels.length - modelPreview.length} more
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="text-[11px] text-muted-foreground/60">No models detected yet. Click Detect Models below.</div>
+          )}
+        </div>
+      </SettingRow>
+
+      <div className="flex flex-wrap gap-2 py-3">
+        <Button size="sm" variant="outline" onClick={detectModels} disabled={detectingModels}>
+          {detectingModels ? <Loader2 className="size-3.5 animate-spin" /> : <Cpu className="size-3.5" />}
+          Detect Models
+        </Button>
+        <Button size="sm" variant="outline" onClick={testAll} disabled={testingAll}>
+          {testingAll ? <Loader2 className="size-3.5 animate-spin" /> : <PlayCircle className="size-3.5" />}
+          Test All
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => runProbe("baseUrl", "baseUrl").catch((e) => toast.error(e instanceof Error ? e.message : String(e)))}
+        >
+          <Globe className="size-3.5" />
+          Test URL
+        </Button>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ShieldCheck className="size-4" />
-            Health Overview
-          </CardTitle>
-          <CardDescription>
-            一眼看清连接、模型和 TTS 是否可用。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            <HealthBadge label="API Key" res={health.apiKey} />
-            <HealthBadge label="Base URL" res={health.baseUrl} />
-            <HealthBadge label="Story Model" res={health.storyModel} />
-            <HealthBadge label="General Model" res={health.generalModel} />
-            <HealthBadge label="TTS Model" res={health.ttsModel} />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={handleDetectModels} disabled={detectingModels}>
-              {detectingModels ? <Loader2 className="size-4 animate-spin" /> : <Cpu className="size-4" />}
-              Detect / Refresh Models
-            </Button>
-            <Button onClick={handleTestAll} disabled={testingAll}>
-              {testingAll ? <Loader2 className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
-              Test All
-            </Button>
-            {detectedModels.length > 0 && (
-              <Badge variant="outline">{detectedModels.length} detected models</Badge>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      {/* ══════════ MODELS & ROUTING ══════════ */}
+      <SectionHeader>Models & Routing</SectionHeader>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Key className="size-4" />
-            Connection
-          </CardTitle>
-          <CardDescription>
-            API key 不回显；留空表示保留已保存的 key。Base URL 可直接测试未保存草稿。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <div className="text-sm font-medium">Gemini API Key</div>
-              {hasSavedApiKey && <Badge variant="outline">saved</Badge>}
-            </div>
-            <Input
-              type="password"
-              placeholder={hasSavedApiKey ? "Saved. Type a new key only if you want to replace it" : "Enter your Gemini / relay API key"}
-              value={drafts.gemini_api_key ?? ""}
-              onChange={(e) => setDrafts((prev) => ({ ...prev, gemini_api_key: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-2">
-            <div className="text-sm font-medium">API Base URL</div>
-            <Input
-              placeholder="Leave empty for Google official API, or set https://x666.me"
-              value={drafts.gemini_base_url ?? ""}
-              onChange={(e) => setDrafts((prev) => ({ ...prev, gemini_base_url: e.target.value }))}
-            />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() =>
-                savePairs("Connection", [
-                  { key: "gemini_api_key", value: drafts.gemini_api_key, skipEmpty: true },
-                  { key: "gemini_base_url", value: drafts.gemini_base_url },
-                ])
-              }
-              disabled={savingSection === "Connection"}
-            >
-              {savingSection === "Connection" && <Loader2 className="size-4 animate-spin" />}
-              Save Connection
-            </Button>
-            <Button variant="outline" onClick={() => runSingleTest("baseUrl", "baseUrl").catch((e) => toast.error(e instanceof Error ? e.message : String(e)))}>
-              <Globe className="size-4" />
-              Test Base URL
-            </Button>
-          </div>
-          {health.baseUrl?.warnings?.[0] && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">{health.baseUrl.warnings[0]}</p>
-          )}
-        </CardContent>
-      </Card>
+      {(legacySharedRoutingActive || legacyGeminiTtsActive) && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 mb-2 text-[11px] text-muted-foreground/80">
+          Legacy fallback settings 还在库里。留空时会先继承旧的 general / tts 配置。
+        </div>
+      )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Cpu className="size-4" />
-            Models & Fallbacks
-          </CardTitle>
-          <CardDescription>
-            检测到模型后可直接点选；也保留手动输入。主模型失败后会尝试 fallback。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          {modelPicker("story_model", "Story Model", "Image → story generation", DEFAULTS.story_model, storyModels)}
-          {modelPicker("story_fallback_model", "Story Fallback", "Fallback when story model fails after retries", "Optional", storyModels)}
-          {modelPicker("general_model", "General Model", "Cards, extraction, translation, deep analysis", DEFAULTS.general_model, generalModels)}
-          {modelPicker("general_fallback_model", "General Fallback", "Fallback for card/extract/translate/deep failures", "Optional", generalModels)}
-          {modelPicker("tts_model", "Gemini TTS Model", "AI voice narration", DEFAULTS.tts_model, ttsModels)}
-          {modelPicker("tts_fallback_model", "TTS Fallback", "Fallback when Gemini TTS model fails", "Optional", ttsModels)}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() =>
-                savePairs("Models", [
-                  { key: "story_model", value: drafts.story_model },
-                  { key: "story_fallback_model", value: drafts.story_fallback_model },
-                  { key: "general_model", value: drafts.general_model },
-                  { key: "general_fallback_model", value: drafts.general_fallback_model },
-                  { key: "tts_model", value: drafts.tts_model },
-                  { key: "tts_fallback_model", value: drafts.tts_fallback_model },
-                ])
-              }
-              disabled={savingSection === "Models"}
-            >
-              {savingSection === "Models" && <Loader2 className="size-4 animate-spin" />}
-              Save Models
-            </Button>
-            <Button variant="outline" onClick={handleDetectModels} disabled={detectingModels}>
-              <RefreshCcw className="size-4" />
-              Refresh Detected Models
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {detectedModels.length === 0 && (
+        <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 mb-2 text-[11px] text-muted-foreground/70">
+          尚未检测到可用模型。请先在上方 Connection 区域点击 Detect Models，下面的选择器才能列出模型。
+        </div>
+      )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Volume2 className="size-4" />
-            Voices & Language
-          </CardTitle>
-          <CardDescription>
-            选择默认 TTS 方式、声音，以及解释文字的语言偏好。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="space-y-2">
-            <div className="text-sm font-medium">TTS Preference</div>
-            <div className="grid gap-2 md:grid-cols-3">
-              {[
-                { value: "browser", label: "Browser", desc: "offline, local" },
-                { value: "edge", label: "Edge TTS", desc: "free, server-side" },
-                { value: "gemini", label: "Gemini TTS", desc: "AI voice" },
-              ].map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setDrafts((prev) => ({ ...prev, tts_preference: opt.value }))}
-                  className={`rounded-lg border p-3 text-left transition-colors ${drafts.tts_preference === opt.value ? "border-primary bg-primary/5" : "border-border hover:bg-accent/40"}`}
-                >
-                  <div className="text-sm font-medium">{opt.label}</div>
-                  <div className="text-xs text-muted-foreground">{opt.desc}</div>
-                </button>
-              ))}
-            </div>
+      <SettingRow
+        title="Story"
+        subtitle="图片 → 故事生成"
+        right={
+          <div className="flex items-center gap-2">
+            {routeTestBtn("story", "storyModel", resolveRuntimePrimary("story"))}
+            <StatusDot res={health.story} />
+            <span className="text-[12px] text-muted-foreground">{resolveRuntimePrimary("story")}</span>
           </div>
+        }
+      >
+        <div className="space-y-3">
+          {modelField("story_model", "Primary", DEFAULTS.story_model, storyCandidates)}
+          {modelField("story_fallback_model", "Fallback", "Optional", storyCandidates, "Primary 挂了之后再试。", true)}
+        </div>
+      </SettingRow>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Edge TTS Voice</div>
+      <SettingRow
+        title="Cards"
+        subtitle="短 JSON、稳定结构"
+        right={
+          <div className="flex items-center gap-2">
+            {routeTestBtn("cards", "cardsModel", resolveRuntimePrimary("cards"))}
+            <StatusDot res={health.cards} />
+            <span className="text-[12px] text-muted-foreground">{resolveRuntimePrimary("cards")}</span>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          {modelField("cards_model", "Primary", "Leave empty to inherit", cardsCandidates, "卡片生成偏向稳定、快、规整。", true)}
+          {modelField("cards_fallback_model", "Fallback", "Optional", cardsCandidates, undefined, true)}
+        </div>
+      </SettingRow>
+
+      <SettingRow
+        title="Deep Analysis"
+        subtitle="长 JSON、schemaAnalysis、SVG"
+        right={
+          <div className="flex items-center gap-2">
+            {routeTestBtn("deep", "deepModel", resolveRuntimePrimary("deep"))}
+            <StatusDot res={health.deep} />
+            <span className="text-[12px] text-muted-foreground">{resolveRuntimePrimary("deep")}</span>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          {modelField("deep_model", "Primary", "Leave empty to inherit", deepCandidates, "深层分析容易把便宜模型打崩。", true)}
+          {modelField("deep_fallback_model", "Fallback", "Optional", deepCandidates, undefined, true)}
+        </div>
+      </SettingRow>
+
+      <SettingRow
+        title="Utility"
+        subtitle="抽词、翻译、轻量文本"
+        right={
+          <div className="flex items-center gap-2">
+            {routeTestBtn("utility", "utilityModel", resolveRuntimePrimary("utility"))}
+            <StatusDot res={health.utility} />
+            <span className="text-[12px] text-muted-foreground">{resolveRuntimePrimary("utility")}</span>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          {modelField("utility_model", "Primary", "Leave empty to inherit", utilityCandidates, "便宜快就行。", true)}
+          {modelField("utility_fallback_model", "Fallback", "Optional", utilityCandidates, undefined, true)}
+        </div>
+      </SettingRow>
+
+      {/* ══════════ TTS ══════════ */}
+      <SectionHeader>TTS</SectionHeader>
+
+      <SettingRow
+        title="Provider"
+        subtitle="选哪个 provider，就只看到它的配置"
+        right={
+          <div className="flex items-center gap-2">
+            {activeProviders.has("edge") && <StatusDot res={health.edgeTts} />}
+            {activeProviders.has("gemini") && <StatusDot res={health.geminiTts} />}
+            <span className="text-[12px] text-muted-foreground">
+              {draftValue("tts_preference")}{draftValue("tts_provider_fallback") ? ` → ${draftValue("tts_provider_fallback")}` : ""}
+            </span>
+          </div>
+        }
+        defaultOpen
+      >
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <div className="text-[13px] font-medium">Primary</div>
               <select
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
-                value={drafts.edge_tts_voice}
+                className={SELECT_CLASS}
+                value={draftValue("tts_preference")}
+                onChange={(e) => setDrafts((prev) => ({ ...prev, tts_preference: e.target.value }))}
+              >
+                {TTS_PROVIDERS.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <div className="text-[13px] font-medium">Fallback</div>
+              <select
+                className={SELECT_CLASS}
+                value={draftValue("tts_provider_fallback")}
+                onChange={(e) => setDrafts((prev) => ({ ...prev, tts_provider_fallback: e.target.value }))}
+              >
+                <option value="">none</option>
+                {TTS_PROVIDERS.filter((p) => p !== draftValue("tts_preference")).map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Conditional: Edge config */}
+          {activeProviders.has("edge") && (
+            <div className="space-y-1.5">
+              <div className="text-[13px] font-medium">Edge TTS voice</div>
+              <select
+                className={SELECT_CLASS}
+                value={draftValue("edge_tts_voice")}
                 onChange={(e) => setDrafts((prev) => ({ ...prev, edge_tts_voice: e.target.value }))}
               >
-                {EDGE_VOICES.map((voice) => (
-                  <option key={voice} value={voice}>{voice}</option>
+                {EDGE_VOICES.map((v) => (
+                  <option key={v} value={v}>{v}</option>
                 ))}
               </select>
             </div>
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Gemini TTS Voice</div>
-              <select
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
-                value={drafts.gemini_tts_voice}
-                onChange={(e) => setDrafts((prev) => ({ ...prev, gemini_tts_voice: e.target.value }))}
-              >
-                {GEMINI_VOICES.map((voice) => (
-                  <option key={voice} value={voice}>{voice}</option>
-                ))}
-              </select>
+          )}
+
+          {/* Conditional: Gemini config */}
+          {activeProviders.has("gemini") && (
+            <div className="space-y-3">
+              {modelField("gemini_tts_model", "Gemini TTS model", DEFAULTS.gemini_tts_model, geminiTtsCandidates)}
+              {modelField("gemini_tts_fallback_model", "Gemini TTS fallback", "Optional", geminiTtsCandidates, undefined, true)}
+              <div className="space-y-1.5">
+                <div className="text-[13px] font-medium">Gemini TTS voice</div>
+                <select
+                  className={SELECT_CLASS}
+                  value={draftValue("gemini_tts_voice")}
+                  onChange={(e) => setDrafts((prev) => ({ ...prev, gemini_tts_voice: e.target.value }))}
+                >
+                  {GEMINI_VOICES.map((v) => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="space-y-2">
-            <div className="text-sm font-medium">Analysis Language</div>
-            <select
-              className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
-              value={drafts.analysis_language}
-              onChange={(e) => setDrafts((prev) => ({ ...prev, analysis_language: e.target.value }))}
-            >
-              <option value="zh-CN">简体中文</option>
-              <option value="en">English</option>
-              <option value="bilingual">Bilingual</option>
-            </select>
-            <p className="text-xs text-muted-foreground">影响词义解释、词源、深度分析等说明性文本。</p>
-          </div>
+          {/* Browser needs no config */}
+          {draftValue("tts_preference") === "browser" && !draftValue("tts_provider_fallback") && (
+            <div className="text-[11px] text-muted-foreground/60">
+              Browser TTS uses your device's built-in speech synthesis. No additional configuration needed.
+            </div>
+          )}
+        </div>
+      </SettingRow>
 
-          <Button
-            onClick={() =>
-              savePairs("Voices & Language", [
-                { key: "tts_preference", value: drafts.tts_preference },
-                { key: "edge_tts_voice", value: drafts.edge_tts_voice },
-                { key: "gemini_tts_voice", value: drafts.gemini_tts_voice },
-                { key: "analysis_language", value: drafts.analysis_language },
-              ])
-            }
-            disabled={savingSection === "Voices & Language"}
-          >
-            {savingSection === "Voices & Language" && <Loader2 className="size-4 animate-spin" />}
-            Save Voices & Language
-          </Button>
-        </CardContent>
-      </Card>
+      {/* ══════════ LANGUAGE ══════════ */}
+      <SectionHeader>Language</SectionHeader>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Wrench className="size-4" />
-            Advanced
-          </CardTitle>
-          <CardDescription>
-            控制超时和重试。并发仍固定在服务端 semaphore，不在这里暴露，免得把自己玩死。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <div className="text-sm font-medium">API Timeout (ms)</div>
-            <Input
-              value={drafts.api_timeout_ms}
-              onChange={(e) => setDrafts((prev) => ({ ...prev, api_timeout_ms: e.target.value }))}
-              placeholder={DEFAULTS.api_timeout_ms}
-            />
-          </div>
-          <div className="space-y-2">
-            <div className="text-sm font-medium">Max Retries</div>
-            <Input
-              value={drafts.api_max_retries}
-              onChange={(e) => setDrafts((prev) => ({ ...prev, api_max_retries: e.target.value }))}
-              placeholder={DEFAULTS.api_max_retries}
-            />
-          </div>
-          <div className="md:col-span-2">
+      <SettingRow
+        title="Explanation Language"
+        subtitle="词义解释、词源、深度分析等说明性文本"
+        value={draftValue("analysis_language")}
+        defaultOpen
+      >
+        <select
+          className={SELECT_CLASS}
+          value={draftValue("analysis_language")}
+          onChange={(e) => setDrafts((prev) => ({ ...prev, analysis_language: e.target.value }))}
+        >
+          <option value="zh-CN">简体中文</option>
+          <option value="en">English</option>
+          <option value="bilingual">Bilingual</option>
+        </select>
+      </SettingRow>
+
+      {/* ══════════ APPEARANCE & APP ══════════ */}
+      <SectionHeader>Appearance & App</SectionHeader>
+
+      <SettingRow title="Theme" value={theme} defaultOpen>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { value: "light", label: "Light", icon: Sun },
+            { value: "dark", label: "Solarized Dark", icon: Moon },
+            { value: "system", label: "System", icon: Monitor },
+          ].map(({ value, label, icon: Icon }) => (
             <Button
-              onClick={() =>
-                savePairs("Advanced", [
-                  { key: "api_timeout_ms", value: drafts.api_timeout_ms },
-                  { key: "api_max_retries", value: drafts.api_max_retries },
-                ])
-              }
-              disabled={savingSection === "Advanced"}
+              key={value}
+              variant={theme === value ? "default" : "outline"}
+              size="sm"
+              onClick={() => saveTheme(value as Theme)}
+              className={theme === value ? PRIMARY_BUTTON : ""}
             >
-              {savingSection === "Advanced" && <Loader2 className="size-4 animate-spin" />}
-              Save Advanced Settings
+              <Icon className="size-3.5" />
+              {label}
+            </Button>
+          ))}
+        </div>
+      </SettingRow>
+
+      <SettingRow title="App Refresh & Cache" value="maintenance">
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={refreshPwa} disabled={maintenanceBusy}>
+            {maintenanceBusy ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCcw className="size-3.5" />}
+            Force Refresh
+          </Button>
+          <Button size="sm" variant="outline" onClick={clearLocalCache} disabled={maintenanceBusy}>
+            {maintenanceBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+            Clear Cache
+          </Button>
+        </div>
+      </SettingRow>
+
+      <SettingRow
+        title="Network Tolerance"
+        value={`${draftValue("api_timeout_ms")}ms · ${draftValue("api_max_retries")} retries`}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          {textField("api_timeout_ms", "API timeout (ms)", DEFAULTS.api_timeout_ms)}
+          {textField("api_max_retries", "Max retries", DEFAULTS.api_max_retries)}
+        </div>
+      </SettingRow>
+
+      {/* ══════════ ABOUT ══════════ */}
+      <SectionHeader>About</SectionHeader>
+      <div className="py-3 text-[13px] leading-6 text-muted-foreground/70">
+        <span className="font-medium text-foreground">WordLoom</span> — AI-powered English learning workspace: generate compact image-based stories, listen with TTS, double-click words into cards, and explore deep vocabulary analysis in one loop.
+      </div>
+
+      {/* ── Sticky bottom save bar ── */}
+      {dirtyKeys.length > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border/60 bg-background/95 backdrop-blur px-4 py-3">
+          <div className="mx-auto flex max-w-2xl items-center justify-between">
+            <span className="text-[12px] text-muted-foreground">{dirtyKeys.length} unsaved change{dirtyKeys.length > 1 ? "s" : ""}</span>
+            <Button
+              className={PRIMARY_BUTTON}
+              onClick={saveAll}
+              disabled={saving === "All settings"}
+            >
+              {saving === "All settings" && <Loader2 className="size-4 animate-spin" />}
+              Save Changes
             </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      <ThemeSection />
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Database className="size-4" />
-            Local Data & Cache
-          </CardTitle>
-          <CardDescription>
-            浏览器侧维护操作：PWA 更新、缓存清理、强制刷新。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={refreshPwa} disabled={maintenanceBusy}>
-            {maintenanceBusy ? <Loader2 className="size-4 animate-spin" /> : <RefreshCcw className="size-4" />}
-            Force Refresh / Update
-          </Button>
-          <Button variant="outline" onClick={clearLocalCache} disabled={maintenanceBusy}>
-            {maintenanceBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-            Clear Local Cache
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Info className="size-4" />
-            About
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-1 text-sm text-muted-foreground">
-          <p className="font-medium text-foreground">WordLoom</p>
-          <p>
-            AI-powered English learning workspace: generate compact image-based stories, listen with TTS,
-            double-click words into cards, and explore deep vocabulary analysis in one loop.
-          </p>
-        </CardContent>
-      </Card>
+        </div>
+      )}
     </div>
   );
 }
