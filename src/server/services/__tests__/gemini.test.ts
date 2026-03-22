@@ -25,7 +25,7 @@ vi.mock("@google/genai", () => {
 });
 
 // Import after mocks
-import { generateCards } from "../gemini.js";
+import { geminiGenerateCards as generateCards } from "../gemini.js";
 
 describe("generateCards — Zod validation + partial failure", () => {
   beforeEach(() => {

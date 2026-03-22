@@ -7,7 +7,8 @@ import { db } from "../db/index.js";
 import { stories } from "../db/schema.js";
 import { eq, desc, sql } from "drizzle-orm";
 import { compressImage } from "../services/image.js";
-import { generateStory, generateTTS, translateText } from "../services/gemini.js";
+import { generateStory, generateTTS, translateText } from "../services/ai-router.js";
+import { AI_BUSY } from "../services/ai-shared.js";
 import { generateEdgeTtsMp3 } from "../services/edgeTts.js";
 import { pcmToWav } from "../services/tts.js";
 import type { Story, GroundingSource } from "../../shared/types.js";
@@ -160,8 +161,8 @@ storyRoutes.post("/generate", async (c) => {
     return c.json(story);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Story generation failed";
-    if (msg === "GEMINI_BUSY") {
-      return c.json({ error: "Story generator busy", code: "GEMINI_BUSY" }, 429);
+    if (msg === AI_BUSY) {
+      return c.json({ error: "Story generator busy", code: "AI_BUSY" }, 429);
     }
     if (msg.toLowerCase().includes("invalid image")) {
       return c.json({ error: msg, code: "INVALID_IMAGE" }, 400);
@@ -222,8 +223,8 @@ const ttsHandler = async (c: Context) => {
     pcmBase64 = await generateTTS(row.story);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "TTS failed";
-    if (msg === "GEMINI_BUSY") {
-      return c.json({ error: "TTS busy", code: "TTS_BUSY" }, 429);
+    if (msg === AI_BUSY) {
+      return c.json({ error: "TTS busy", code: "AI_BUSY" }, 429);
     }
     return c.json({ error: "TTS failed", code: "TTS_FAILED" }, 500);
   }
@@ -252,8 +253,8 @@ storyRoutes.post("/:id/translate", async (c) => {
     return c.json({ translation });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Translation failed";
-    if (msg === "GEMINI_BUSY") {
-      return c.json({ error: "Translator busy", code: "GEMINI_BUSY" }, 429);
+    if (msg === AI_BUSY) {
+      return c.json({ error: "Translator busy", code: "AI_BUSY" }, 429);
     }
     return c.json({ error: "Translation failed", code: "TRANSLATION_FAILED" }, 500);
   }

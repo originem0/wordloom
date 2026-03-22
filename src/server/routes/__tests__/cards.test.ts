@@ -10,11 +10,15 @@ vi.mock("../../db/index.js", () => ({
   },
 }));
 
-// Block gemini service top-level side effects (imports db)
-vi.mock("../../services/gemini.js", () => ({
+// Block ai-router service (imports db indirectly)
+vi.mock("../../services/ai-router.js", () => ({
   generateCards: vi.fn(),
   generateDeepLayer: vi.fn(),
   extractWords: vi.fn(),
+}));
+
+vi.mock("../../services/ai-shared.js", () => ({
+  AI_BUSY: "AI_BUSY",
 }));
 
 import { toCard } from "../cards.js";

@@ -7,6 +7,7 @@ import { Shell } from "./components/layout/Shell";
 import { LoginPage } from "./components/auth/LoginPage";
 import { StoryStudioPage } from "./components/story/StoryStudioPage";
 import { SettingsPage } from "./components/settings/SettingsPage";
+import { AIProvidersPage } from "./components/settings/AIProvidersPage";
 import { Toaster } from "./components/ui/sonner";
 import { useAppStore } from "./store";
 import { applyTheme } from "./lib/theme";
@@ -43,8 +44,7 @@ function AppContent() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<Shell />}>
           <Route index element={<StoryStudioPage />} />
-          <Route
-            path="cards"
+          <Route path="cards"
             element={
               <Suspense
                 fallback={
@@ -57,6 +57,7 @@ function AppContent() {
               </Suspense>
             }
           />
+          <Route path="providers" element={<AIProvidersPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

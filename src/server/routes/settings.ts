@@ -5,15 +5,12 @@ import { settings } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { updateSettingsSchema } from "../../shared/validation.js";
 import { generateEdgeTtsMp3 } from "../services/edgeTts.js";
+import { getSetting } from "../services/ai-shared.js";
+import { extractJsonCandidate } from "../services/ai-normalize.js";
 
 export const settingRoutes = new Hono();
 
 const GEMINI_API_VERSION = "v1beta";
-
-async function getSetting(key: string): Promise<string> {
-  const row = await db.select().from(settings).where(eq(settings.key, key)).get();
-  return row?.value ?? "";
-}
 
 function buildRequestRoot(baseUrlRaw: string): { requestRoot: string; warnings: string[] } {
   const warnings: string[] = [];
@@ -82,34 +79,6 @@ function extractUpstreamError(payload: any): { message?: string; code?: unknown;
   };
 }
 
-function extractJsonCandidate(raw: string): string {
-  const text = raw.trim();
-  if (!text) return text;
-
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (fenceMatch?.[1]) return fenceMatch[1].trim();
-
-  const firstObj = text.indexOf("{");
-  const lastObj = text.lastIndexOf("}");
-  const firstArr = text.indexOf("[");
-  const lastArr = text.lastIndexOf("]");
-
-  const candidates: string[] = [];
-  if (firstArr !== -1 && lastArr !== -1 && lastArr > firstArr) {
-    candidates.push(text.slice(firstArr, lastArr + 1));
-  }
-  if (firstObj !== -1 && lastObj !== -1 && lastObj > firstObj) {
-    candidates.push(text.slice(firstObj, lastObj + 1));
-  }
-
-  if (candidates.length) {
-    candidates.sort((a, b) => b.length - a.length);
-    return candidates[0].trim();
-  }
-
-  return text;
-}
-
 function buildHint(msg: string, warnings: string[], target: string): string | undefined {
   const m = msg.toLowerCase();
   if (warnings.length) return warnings[0];
@@ -138,12 +107,137 @@ const settingTestSchema = z
       "geminiTts",
       "edgeTts",
       "generalModel",
+      "openaiListModels",
+      "openaiBaseUrl",
     ]),
     apiKey: z.string().optional(),
     baseUrl: z.string().optional(),
     model: z.string().optional(),
+    provider: z.enum(["gemini", "openai"]).optional(),
+    verify: z.boolean().optional(), // when true, ping each model and filter to usable ones
   })
   .strict();
+
+// ---------------------------------------------------------------------------
+// Batch model verification — ping each model with a trivial prompt,
+// concurrency-limited, return only the ones that respond.
+// ---------------------------------------------------------------------------
+
+async function verifyGeminiModels(
+  models: string[],
+  requestRoot: string,
+  headers: Record<string, string>,
+  concurrency = 5,
+  perModelTimeoutMs = 10_000,
+): Promise<string[]> {
+  const verified: string[] = [];
+
+  // Simple semaphore for concurrency control
+  let running = 0;
+  let idx = 0;
+  const results = new Array<boolean>(models.length);
+
+  async function runOne(i: number) {
+    const model = models[i];
+    // Skip TTS / embedding / tuning models — they can't do generateContent
+    if (/embed|tts|audio|speech|tuning|aqa/i.test(model)) {
+      results[i] = false;
+      return;
+    }
+    const url = `${requestRoot}/models/${encodeURIComponent(model)}:generateContent`;
+    const payload = {
+      contents: [{ role: "user", parts: [{ text: "Say OK" }] }],
+    };
+    try {
+      const res = await fetchJson(url, {
+        headers,
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeoutMs: perModelTimeoutMs,
+      });
+      const text = extractGeminiText(res.json as any).trim();
+      results[i] = res.status < 400 && text.length > 0;
+    } catch {
+      results[i] = false;
+    }
+  }
+
+  // Run with concurrency limit
+  await new Promise<void>((resolve) => {
+    function next() {
+      if (idx >= models.length && running === 0) { resolve(); return; }
+      while (running < concurrency && idx < models.length) {
+        const i = idx++;
+        running++;
+        runOne(i).finally(() => { running--; next(); });
+      }
+    }
+    next();
+  });
+
+  for (let i = 0; i < models.length; i++) {
+    if (results[i]) verified.push(models[i]);
+  }
+  return verified;
+}
+
+async function verifyOpenaiModels(
+  models: string[],
+  chatUrl: string,
+  apiKey: string,
+  concurrency = 5,
+  perModelTimeoutMs = 10_000,
+): Promise<string[]> {
+  const verified: string[] = [];
+  let running = 0;
+  let idx = 0;
+  const results = new Array<boolean>(models.length);
+
+  async function runOne(i: number) {
+    const model = models[i];
+    // Skip known non-chat models
+    if (/embed|tts|audio|speech|whisper|dall-e|moderation/i.test(model)) {
+      results[i] = false;
+      return;
+    }
+    try {
+      const res = await fetchJson(chatUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: "Say OK" }],
+          max_tokens: 5,
+        }),
+        timeoutMs: perModelTimeoutMs,
+      });
+      const content = (res.json as any)?.choices?.[0]?.message?.content;
+      results[i] = res.status < 400 && typeof content === "string" && content.length > 0;
+    } catch {
+      results[i] = false;
+    }
+  }
+
+  await new Promise<void>((resolve) => {
+    function next() {
+      if (idx >= models.length && running === 0) { resolve(); return; }
+      while (running < concurrency && idx < models.length) {
+        const i = idx++;
+        running++;
+        runOne(i).finally(() => { running--; next(); });
+      }
+    }
+    next();
+  });
+
+  for (let i = 0; i < models.length; i++) {
+    if (results[i]) verified.push(models[i]);
+  }
+  return verified;
+}
 
 // GET / — read all settings (mask API key)
 settingRoutes.get("/", async (c) => {
@@ -151,7 +245,7 @@ settingRoutes.get("/", async (c) => {
 
   const result: Record<string, string> = {};
   for (const row of rows) {
-    if (row.key === "gemini_api_key") {
+    if (row.key === "gemini_api_key" || row.key === "openai_api_key") {
       result[row.key] = row.value ? "configured" : "";
     } else {
       result[row.key] = row.value;
@@ -352,10 +446,16 @@ settingRoutes.post("/test", async (c) => {
 
       const list = target === "listModels" ? names : names.slice(0, 20);
 
+      // When verify=true, ping each model and filter to usable ones
+      const shouldVerify = parsed.data.verify === true && target === "listModels";
+      const finalModels = shouldVerify
+        ? await verifyGeminiModels(list, requestRoot, headers)
+        : list;
+
       const isProd = process.env.NODE_ENV === "production";
       const result =
         target === "listModels"
-          ? { modelCount: names.length, models: list, truncated: list.length !== names.length }
+          ? { modelCount: finalModels.length, models: finalModels, truncated: false, totalListed: names.length, verified: shouldVerify }
           : isProd
             ? { modelCount: names.length }
             : { modelCount: names.length, models: list, truncated: list.length !== names.length };
@@ -385,6 +485,111 @@ settingRoutes.post("/test", async (c) => {
     }
     return fallback;
   };
+
+  // --- OpenAI-compatible model tests ---
+  // When provider=openai, handle storyModel/cardsModel/deepModel/utilityModel via chat completions
+  const modelTestTargets = ["storyModel", "cardsModel", "deepModel", "utilityModel", "generalModel"];
+  if (parsed.data.provider === "openai" && modelTestTargets.includes(target)) {
+    const openaiKey = (parsed.data.apiKey ?? (await getSetting("openai_api_key"))).trim();
+    const openaiBase = (parsed.data.baseUrl ?? (await getSetting("openai_base_url"))).trim().replace(/\/+$/, "");
+    const model = (parsed.data.model ?? "").trim();
+
+    if (!openaiKey) return c.json({ ok: false, target, latencyMs: Date.now() - started, error: { message: "OpenAI API Key not configured." } });
+    if (!openaiBase) return c.json({ ok: false, target, latencyMs: Date.now() - started, error: { message: "OpenAI Base URL not configured." } });
+    if (!model) return c.json({ ok: false, target, latencyMs: Date.now() - started, error: { message: "No model specified." } });
+
+    const chatPath = /\/v1\/?$/i.test(openaiBase) ? "chat/completions" : "v1/chat/completions";
+    const chatUrl = `${openaiBase}/${chatPath}`;
+
+    // Build test prompt based on target — match actual route complexity
+    let messages: Array<{ role: string; content: unknown }>;
+    let expectJson = false;
+    let validateShape: ((parsed: unknown) => string | null) | null = null;
+    let testTimeoutMs = 30_000;
+
+    if (target === "storyModel") {
+      testTimeoutMs = 45_000;
+      messages = [
+        { role: "system", content: "Reply with exactly: OK" },
+        { role: "user", content: [
+          { type: "image_url", image_url: { url: `data:image/png;base64,${SAMPLE_IMAGE_PNG_BASE64}` } },
+          { type: "text", text: "Reply with exactly: OK" },
+        ]},
+      ];
+    } else if (target === "cardsModel") {
+      messages = [
+        { role: "user", content: 'Return JSON only, no markdown fences. Generate a word card for "signal": [{"word":"signal","coreMeaning":"信号","collocations":["signal to"],"examples":[{"level":"B1","sentence":"She gave the signal.","translation":"她发出了信号。"}],"contextLadder":[{"level":1,"sentence":"A signal.","context":"basic"}],"phrases":["signal fire"],"synonyms":["sign"],"antonyms":[]}]' },
+      ];
+      expectJson = true;
+      validateShape = (parsed) => {
+        const arr = Array.isArray(parsed) ? parsed : null;
+        if (!arr || arr.length === 0) return "Expected JSON array, got " + typeof parsed;
+        const first = arr[0];
+        if (!first || typeof first !== "object") return "Array element is not an object";
+        if (!("word" in first)) return "Missing 'word' field";
+        if (!("coreMeaning" in first)) return "Missing 'coreMeaning' field";
+        return null;
+      };
+    } else if (target === "deepModel") {
+      testTimeoutMs = 60_000;
+      messages = [
+        { role: "user", content: 'Return JSON only, no markdown fences. Deep analysis for word "diverge": {"schemaAnalysis":{"coreSchema":"path","coreImageText":"branching road","metaphoricalExtensions":["opinions diverge"],"registerVariation":"formal","etymologyChain":["dis-","vergere"],"sceneActivation":["two roads"]},"familyComparison":[{"word":"diverge","pos":"verb","meaning":"to separate"}],"boundaryTests":[{"pair":"diverge vs deviate","distinction":"diverge implies gradual separation"}]}' },
+      ];
+      expectJson = true;
+      validateShape = (parsed) => {
+        if (!parsed || typeof parsed !== "object") return "Expected JSON object, got " + typeof parsed;
+        const obj = parsed as Record<string, unknown>;
+        if (!obj.schemaAnalysis) return "Missing 'schemaAnalysis'";
+        if (!obj.familyComparison) return "Missing 'familyComparison'";
+        if (!obj.boundaryTests) return "Missing 'boundaryTests'";
+        const sa = obj.schemaAnalysis as Record<string, unknown>;
+        if (!sa.coreSchema) return "schemaAnalysis missing 'coreSchema'";
+        return null;
+      };
+    } else {
+      // utilityModel
+      messages = [
+        { role: "user", content: "Translate to Simplified Chinese, output plain text only: A red kite hangs above a quiet field." },
+      ];
+    }
+
+    try {
+      const res = await fetchJson(chatUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${openaiKey}` },
+        body: JSON.stringify({ model, messages, max_tokens: 300 }),
+        timeoutMs: testTimeoutMs,
+      });
+      if (res.status >= 400) {
+        const errBody = res.json as any;
+        const msg = errBody?.error?.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
+        return c.json({ ok: false, target, latencyMs: Date.now() - started, model, error: { message: msg } });
+      }
+      const content = (res.json as any)?.choices?.[0]?.message?.content ?? "";
+      if (!content) {
+        return c.json({ ok: false, target, latencyMs: Date.now() - started, model, error: { message: "Empty response" } });
+      }
+      if (expectJson) {
+        let parsed: unknown;
+        try {
+          const candidate = extractJsonCandidate(content);
+          parsed = JSON.parse(candidate);
+        } catch {
+          return c.json({ ok: false, target, latencyMs: Date.now() - started, model, error: { message: "Invalid JSON response" } });
+        }
+        if (validateShape) {
+          const shapeErr = validateShape(parsed);
+          if (shapeErr) {
+            return c.json({ ok: false, target, latencyMs: Date.now() - started, model, error: { message: `Schema: ${shapeErr}` } });
+          }
+        }
+      }
+      return c.json({ ok: true, target, latencyMs: Date.now() - started, model, result: { sample: content.slice(0, 120) } });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return c.json({ ok: false, target, latencyMs: Date.now() - started, model, error: { message: msg } });
+    }
+  }
 
   if (target === "generalModel") {
     const model = await resolveModel(["general_model"], "gemini-2.5-flash");
@@ -531,7 +736,7 @@ settingRoutes.post("/test", async (c) => {
       generationConfig: { responseMimeType: "application/json" },
     };
     try {
-      const res = await fetchJson(url, { headers, method: "POST", body: JSON.stringify(payload), timeoutMs: 30000 });
+      const res = await fetchJson(url, { headers, method: "POST", body: JSON.stringify(payload), timeoutMs: 60000 });
       const upstream = extractUpstreamError(res.json as any);
       if (res.status >= 400 || upstream.message) {
         const msg = upstream.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
@@ -719,6 +924,106 @@ settingRoutes.post("/test", async (c) => {
         requestUrl: url,
         model,
         code: "NETWORK_ERROR",
+      });
+    }
+  }
+
+  // --- OpenAI-compatible test targets ---
+
+  if (target === "openaiBaseUrl" || target === "openaiListModels") {
+    const openaiApiKey = (parsed.data.apiKey ?? (await getSetting("openai_api_key"))).trim();
+    const openaiBaseUrlRaw = (parsed.data.baseUrl ?? (await getSetting("openai_base_url"))).trim();
+
+    if (!openaiBaseUrlRaw) {
+      return c.json({
+        ok: false,
+        target,
+        latencyMs: Date.now() - started,
+        error: { message: "OpenAI Base URL not configured.", hint: "Set the Base URL in AI Providers first." },
+      });
+    }
+
+    const normalizedBase = openaiBaseUrlRaw.replace(/\/+$/, "");
+    const modelsUrl = /\/v1\/?$/i.test(normalizedBase)
+      ? `${normalizedBase}/models`
+      : `${normalizedBase}/v1/models`;
+
+    if (target === "openaiBaseUrl") {
+      try {
+        const res = await fetchJson(modelsUrl, { method: "GET", timeoutMs: 15000 });
+        if (res.status === 200 || res.status === 401 || res.status === 403) {
+          return c.json({
+            ok: true,
+            target,
+            latencyMs: Date.now() - started,
+            requestUrl: modelsUrl,
+            result: {
+              status: res.status,
+              note: res.status === 200 ? "Base URL reachable." : "Base URL reachable (auth required).",
+            },
+          });
+        }
+        return c.json({
+          ok: false, target, latencyMs: Date.now() - started, requestUrl: modelsUrl,
+          error: { message: `HTTP ${res.status}: ${res.text.slice(0, 200)}` },
+        });
+      } catch (e) {
+        return c.json({
+          ok: false, target, latencyMs: Date.now() - started, requestUrl: modelsUrl,
+          error: { message: e instanceof Error ? e.message : String(e) },
+        });
+      }
+    }
+
+    // openaiListModels
+    if (!openaiApiKey) {
+      return c.json({
+        ok: false, target, latencyMs: Date.now() - started,
+        error: { message: "OpenAI API Key not configured.", hint: "Set the API key in AI Providers first." },
+      });
+    }
+
+    try {
+      const res = await fetchJson(modelsUrl, {
+        method: "GET",
+        headers: { "Authorization": `Bearer ${openaiApiKey}` },
+        timeoutMs: 15000,
+      });
+      if (res.status >= 400) {
+        const errBody = res.json as any;
+        const msg = errBody?.error?.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
+        return c.json({
+          ok: false, target, latencyMs: Date.now() - started, requestUrl: modelsUrl,
+          error: { message: msg },
+        });
+      }
+
+      // OpenAI format: { data: [{ id: "model-name" }] }
+      const data = (res.json as any)?.data;
+      const models = Array.isArray(data)
+        ? data.map((m: any) => (typeof m?.id === "string" ? m.id : null)).filter(Boolean)
+        : [];
+
+      // When verify=true, ping each model and filter to usable ones
+      const shouldVerify = parsed.data.verify === true;
+      let finalModels = models as string[];
+      if (shouldVerify && finalModels.length > 0) {
+        const chatPath = /\/v1\/?$/i.test(normalizedBase) ? "chat/completions" : "v1/chat/completions";
+        const chatUrl = `${normalizedBase}/${chatPath}`;
+        finalModels = await verifyOpenaiModels(finalModels, chatUrl, openaiApiKey);
+      }
+
+      return c.json({
+        ok: true,
+        target,
+        latencyMs: Date.now() - started,
+        requestUrl: modelsUrl,
+        result: { modelCount: finalModels.length, models: finalModels, truncated: false, totalListed: models.length, verified: shouldVerify },
+      });
+    } catch (e) {
+      return c.json({
+        ok: false, target, latencyMs: Date.now() - started, requestUrl: modelsUrl,
+        error: { message: e instanceof Error ? e.message : String(e) },
       });
     }
   }

@@ -31,10 +31,14 @@ vi.mock("../../db/index.js", () => ({
   },
 }));
 
-vi.mock("../../services/gemini.js", () => ({
+vi.mock("../../services/ai-router.js", () => ({
   generateCards: (...args: unknown[]) => mockGenerateCards(...args),
   generateDeepLayer: vi.fn(),
   extractWords: vi.fn(),
+}));
+
+vi.mock("../../services/ai-shared.js", () => ({
+  AI_BUSY: "AI_BUSY",
 }));
 
 // Import after mocks

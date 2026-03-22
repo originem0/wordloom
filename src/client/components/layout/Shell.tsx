@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Layers, Settings, Sun, Moon, LogOut } from "lucide-react";
+import { BookOpen, Layers, Cpu, Settings, Sun, Moon, LogOut } from "lucide-react";
 import { apiFetch, apiPost } from "@/client/lib/api";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
@@ -10,6 +10,7 @@ import { TaskPanel } from "./TaskPanel";
 const navItems = [
   { to: "/", icon: BookOpen, label: "Story" },
   { to: "/cards", icon: Layers, label: "Cards" },
+  { to: "/providers", icon: Cpu, label: "AI" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ] as const;
 

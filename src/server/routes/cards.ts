@@ -6,7 +6,8 @@ import {
   generateCards,
   generateDeepLayer,
   extractWords,
-} from "../services/gemini.js";
+} from "../services/ai-router.js";
+import { AI_BUSY } from "../services/ai-shared.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 import {
   generateCardsRequestSchema,
@@ -226,8 +227,8 @@ cardRoutes.post("/generate", async (c) => {
     return c.json(result);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Generation failed";
-    if (msg === "GEMINI_BUSY") {
-      return c.json({ error: "Generator busy", code: "GEMINI_BUSY" }, 429);
+    if (msg === AI_BUSY) {
+      return c.json({ error: "Generator busy", code: "AI_BUSY" }, 429);
     }
     return c.json({ error: "Generation failed", code: "GENERATION_FAILED" }, 500);
   }
@@ -246,8 +247,8 @@ cardRoutes.post("/extract", async (c) => {
     return c.json({ words });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Extraction failed";
-    if (msg === "GEMINI_BUSY") {
-      return c.json({ error: "Generator busy", code: "GEMINI_BUSY" }, 429);
+    if (msg === AI_BUSY) {
+      return c.json({ error: "Generator busy", code: "AI_BUSY" }, 429);
     }
     return c.json({ error: "Extraction failed", code: "EXTRACTION_FAILED" }, 500);
   }
@@ -271,8 +272,8 @@ cardRoutes.post("/:id/deep", async (c) => {
     deep = await generateDeepLayer(row.word);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Deep generation failed";
-    if (msg === "GEMINI_BUSY") {
-      return c.json({ error: "Generator busy", code: "GEMINI_BUSY" }, 429);
+    if (msg === AI_BUSY) {
+      return c.json({ error: "Generator busy", code: "AI_BUSY" }, 429);
     }
     return c.json({ error: "Deep generation failed", code: "GENERATION_FAILED" }, 500);
   }
