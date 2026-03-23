@@ -49,6 +49,13 @@ export function useGenerateDeep() {
   });
 }
 
+export function useMissingDeep() {
+  return useQuery({
+    queryKey: ["cards", "missing-deep"],
+    queryFn: () => apiFetch<{ cards: Array<{ id: number; word: string }>; total: number }>("/api/cards/missing-deep"),
+  });
+}
+
 export function useIncrementUsage() {
   const qc = useQueryClient();
   return useMutation({

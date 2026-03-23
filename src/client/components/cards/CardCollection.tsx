@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Search, Trash2, Loader2 } from "lucide-react";
+import { Search, Trash2, Loader2, Flame } from "lucide-react";
+import { toast } from "sonner";
 import { Input } from "@/client/components/ui/input";
 import { Badge } from "@/client/components/ui/badge";
 import { Button } from "@/client/components/ui/button";
@@ -9,7 +10,8 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/client/components/ui/dialog";
-import { useCards, useDeleteCard } from "@/client/hooks/useCards";
+import { useCards, useDeleteCard, useMissingDeep } from "@/client/hooks/useCards";
+import { apiPost } from "@/client/lib/api";
 import { PrototypeWordCard } from "./PrototypeWordCard";
 import type { Card } from "@/shared/types";
 
@@ -64,6 +66,30 @@ export function CardCollection() {
   });
 
   const deleteCard = useDeleteCard();
+  const missingDeep = useMissingDeep();
+  const [retryingDeep, setRetryingDeep] = useState(false);
+  const [retryProgress, setRetryProgress] = useState({ done: 0, total: 0, ok: 0, fail: 0 });
+
+  const retryAllDeep = useCallback(async () => {
+    const list = missingDeep.data?.cards;
+    if (!list?.length) return;
+    setRetryingDeep(true);
+    setRetryProgress({ done: 0, total: list.length, ok: 0, fail: 0 });
+    let ok = 0;
+    let fail = 0;
+    for (let i = 0; i < list.length; i++) {
+      try {
+        await apiPost(`/api/cards/${list[i].id}/deep`, {});
+        ok++;
+      } catch {
+        fail++;
+      }
+      setRetryProgress({ done: i + 1, total: list.length, ok, fail });
+    }
+    setRetryingDeep(false);
+    missingDeep.refetch();
+    toast.success(`Deep retry done: ${ok} ok, ${fail} failed`);
+  }, [missingDeep]);
 
   const handleDelete = useCallback(
     (e: React.MouseEvent, cardId: number) => {
@@ -107,6 +133,27 @@ export function CardCollection() {
             </Badge>
           ))}
         </div>
+
+        {/* Batch retry deep */}
+        {(missingDeep.data?.total ?? 0) > 0 && (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={retryAllDeep}
+              disabled={retryingDeep}
+              className="shrink-0"
+            >
+              {retryingDeep ? <Loader2 className="size-3.5 animate-spin" /> : <Flame className="size-3.5" />}
+              {retryingDeep
+                ? `Deep ${retryProgress.done}/${retryProgress.total}`
+                : `Retry Deep (${missingDeep.data?.total})`}
+            </Button>
+            {retryingDeep && retryProgress.fail > 0 && (
+              <span className="text-[11px] text-red-500">{retryProgress.fail} failed</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Loading */}

@@ -215,9 +215,18 @@ function DeepLayer({ card }: { card: Card }) {
           )}
 
           {generateDeep.isError && (
-            <p className="text-destructive text-sm">
-              {generateDeep.error.message}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-destructive text-sm">
+                {generateDeep.error.message}
+              </p>
+              <button
+                type="button"
+                onClick={() => generateDeep.mutate(card.id)}
+                className="shrink-0 text-xs text-sky-500 hover:underline"
+              >
+                Retry
+              </button>
+            </div>
           )}
 
           {/* Family Comparison Table */}

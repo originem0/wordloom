@@ -370,6 +370,16 @@ cardRoutes.get("/", async (c) => {
   });
 });
 
+// GET /missing-deep — list card IDs that don't have deep layer yet
+cardRoutes.get("/missing-deep", async (c) => {
+  const rows = await db
+    .select({ id: cards.id, word: cards.word })
+    .from(cards)
+    .where(sql`${cards.familyComparison} IS NULL`)
+    .all();
+  return c.json({ cards: rows, total: rows.length });
+});
+
 // GET /:id — single card
 cardRoutes.get("/:id", async (c) => {
   const id = Number(c.req.param("id"));
