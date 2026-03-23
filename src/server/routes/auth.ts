@@ -4,7 +4,7 @@ import { randomBytes } from "crypto";
 import { db } from "../db/index.js";
 import { sessions } from "../db/schema.js";
 import { eq, lt } from "drizzle-orm";
-import { hashSessionId } from "../middleware/auth.js";
+import { hashSessionId, verifySession } from "../middleware/auth.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 
 export const authRoutes = new Hono();
@@ -56,6 +56,12 @@ authRoutes.post("/login", async (c) => {
   });
 
   return c.json({ ok: true });
+});
+
+authRoutes.get("/me", async (c) => {
+  const session = getCookie(c, "session");
+  const authenticated = session ? await verifySession(session) : false;
+  return c.json({ authenticated });
 });
 
 authRoutes.post("/logout", async (c) => {

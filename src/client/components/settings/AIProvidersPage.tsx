@@ -274,6 +274,10 @@ export function AIProvidersPage() {
       // Gemini TTS models
       pairs.push({ key: "gemini_tts_model", value: draftValue("gemini_tts_model") });
       pairs.push({ key: "gemini_tts_fallback_model", value: draftValue("gemini_tts_fallback_model") });
+      // Usage limits
+      pairs.push({ key: "daily_story_limit", value: draftValue("daily_story_limit") || "20" });
+      pairs.push({ key: "daily_cards_limit", value: draftValue("daily_cards_limit") || "50" });
+      pairs.push({ key: "daily_deep_limit", value: draftValue("daily_deep_limit") || "100" });
 
       for (const pair of pairs) {
         if (pair.skipEmpty && !pair.value.trim()) continue;
@@ -604,6 +608,49 @@ export function AIProvidersPage() {
               {GEMINI_VOICES.map((v) => (<option key={v} value={v}>{v}</option>))}
             </select>
           </div>
+        </div>
+      </SettingRow>
+
+      {/* ══════════ USAGE LIMITS ══════════ */}
+      <SectionHeader>Usage Limits</SectionHeader>
+
+      <SettingRow
+        title="Daily Limits"
+        subtitle="未登录用户每天的 AI 生成限额（按 IP）"
+        value={`Story ${draftValue("daily_story_limit") || "20"} · Cards ${draftValue("daily_cards_limit") || "50"} · Deep ${draftValue("daily_deep_limit") || "100"}`}
+        defaultOpen
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="space-y-1.5">
+            <div className="text-[13px] font-medium">Story 生成</div>
+            <Input
+              value={draftValue("daily_story_limit") || "20"}
+              onChange={(e) => setDraft("daily_story_limit", e.target.value)}
+              placeholder="20"
+              className={`${INPUT_CLASS} font-mono text-sm`}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <div className="text-[13px] font-medium">Cards 生成</div>
+            <Input
+              value={draftValue("daily_cards_limit") || "50"}
+              onChange={(e) => setDraft("daily_cards_limit", e.target.value)}
+              placeholder="50"
+              className={`${INPUT_CLASS} font-mono text-sm`}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <div className="text-[13px] font-medium">Deep 分析</div>
+            <Input
+              value={draftValue("daily_deep_limit") || "100"}
+              onChange={(e) => setDraft("daily_deep_limit", e.target.value)}
+              placeholder="100"
+              className={`${INPUT_CLASS} font-mono text-sm`}
+            />
+          </div>
+        </div>
+        <div className="mt-2 text-[11px] text-muted-foreground/60">
+          已登录管理员不受限额约束。设为 0 则完全禁止未登录用户生成。
         </div>
       </SettingRow>
 

@@ -12,7 +12,7 @@ import { AI_BUSY } from "../services/ai-shared.js";
 import { generateEdgeTtsMp3 } from "../services/edgeTts.js";
 import { pcmToWav } from "../services/tts.js";
 import type { Story, GroundingSource } from "../../shared/types.js";
-import { rateLimit } from "../middleware/rateLimit.js";
+import { rateLimit, dailyLimit } from "../middleware/rateLimit.js";
 import {
   createJob,
   isJobCancelled,
@@ -116,6 +116,13 @@ storyRoutes.post("/generate", async (c) => {
     max: 10,
   });
   if (limited) return limited;
+
+  const dailyLimited = await dailyLimit(c, {
+    key: "daily-story",
+    settingKey: "daily_story_limit",
+    defaultMax: 20,
+  });
+  if (dailyLimited) return dailyLimited;
   const body = await c.req.parseBody();
   const file = body["image"];
   const prompt = typeof body["prompt"] === "string" ? body["prompt"] : "";

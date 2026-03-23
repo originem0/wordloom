@@ -8,7 +8,7 @@ import {
   extractWords,
 } from "../services/ai-router.js";
 import { AI_BUSY } from "../services/ai-shared.js";
-import { rateLimit } from "../middleware/rateLimit.js";
+import { rateLimit, dailyLimit } from "../middleware/rateLimit.js";
 import {
   generateCardsRequestSchema,
   extractWordsRequestSchema,
@@ -215,6 +215,15 @@ cardRoutes.post("/generate", async (c) => {
     return c.json({ error: "No valid words", code: "VALIDATION_ERROR" }, 400);
   }
 
+  // Daily limit — count by number of words, not number of requests
+  const dailyLimited = await dailyLimit(c, {
+    key: "daily-cards",
+    settingKey: "daily_cards_limit",
+    defaultMax: 50,
+    count: normalized.length,
+  });
+  if (dailyLimited) return dailyLimited;
+
   const useAsync = c.req.query("async") === "1";
   if (useAsync) {
     const jobId = await createJob("cards", { words: normalized });
@@ -256,6 +265,13 @@ cardRoutes.post("/extract", async (c) => {
 
 // POST /:id/deep — generate deep layer for a card (lazy)
 cardRoutes.post("/:id/deep", async (c) => {
+  const dailyLimited = await dailyLimit(c, {
+    key: "daily-deep",
+    settingKey: "daily_deep_limit",
+    defaultMax: 100,
+  });
+  if (dailyLimited) return dailyLimited;
+
   const id = Number(c.req.param("id"));
   const row = await db.select().from(cards).where(eq(cards.id, id)).get();
   if (!row) {

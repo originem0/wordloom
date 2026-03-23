@@ -57,8 +57,7 @@ app.get("/api/health", (c) => c.json({ ok: true }));
 // Auth routes (no auth middleware)
 app.route("/api/auth", authRoutes);
 
-// Protected routes
-app.use("/api/*", authMiddleware);
+// Public routes — daily limits enforced inside each route
 const apiRoutes = app
   .route("/api/stories", storyRoutes)
   .route("/api/cards", cardRoutes)

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/client/components/ui/card";
 import { Input } from "@/client/components/ui/input";
 import { Button } from "@/client/components/ui/button";
@@ -7,6 +7,7 @@ import { apiPost } from "@/client/lib/api";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -18,7 +19,8 @@ export function LoginPage() {
 
     try {
       await apiPost("/api/auth/login", { token });
-      navigate("/", { replace: true });
+      const redirect = searchParams.get("redirect") || "/";
+      navigate(redirect, { replace: true });
     } catch (err: any) {
       setError(err.message ?? "登录失败");
     } finally {

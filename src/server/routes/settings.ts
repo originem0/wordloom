@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { getCookie } from "hono/cookie";
 import { z } from "zod";
 import { db } from "../db/index.js";
 import { settings } from "../db/schema.js";
@@ -7,6 +8,7 @@ import { updateSettingsSchema } from "../../shared/validation.js";
 import { generateEdgeTtsMp3 } from "../services/edgeTts.js";
 import { getSetting } from "../services/ai-shared.js";
 import { extractJsonCandidate } from "../services/ai-normalize.js";
+import { authMiddleware, verifySession } from "../middleware/auth.js";
 
 export const settingRoutes = new Hono();
 
@@ -239,13 +241,24 @@ async function verifyOpenaiModels(
   return verified;
 }
 
-// GET / — read all settings (mask API key)
+// Sensitive keys hidden from unauthenticated users
+const SENSITIVE_KEYS = new Set([
+  "gemini_base_url", "openai_base_url",
+]);
+
+// GET / — read all settings (public, but hides sensitive fields for anonymous users)
 settingRoutes.get("/", async (c) => {
   const rows = await db.select().from(settings).all();
+
+  const session = getCookie(c, "session");
+  const isAdmin = session ? await verifySession(session) : false;
 
   const result: Record<string, string> = {};
   for (const row of rows) {
     if (row.key === "gemini_api_key" || row.key === "openai_api_key") {
+      result[row.key] = row.value ? "configured" : "";
+    } else if (!isAdmin && SENSITIVE_KEYS.has(row.key)) {
+      // Hide sensitive config from anonymous users
       result[row.key] = row.value ? "configured" : "";
     } else {
       result[row.key] = row.value;
@@ -255,8 +268,8 @@ settingRoutes.get("/", async (c) => {
   return c.json(result);
 });
 
-// PUT / — upsert a setting
-settingRoutes.put("/", async (c) => {
+// PUT / — upsert a setting (admin only)
+settingRoutes.put("/", authMiddleware, async (c) => {
   const body = await c.req.json();
   const parsed = updateSettingsSchema.safeParse(body);
   if (!parsed.success) {
@@ -277,7 +290,7 @@ settingRoutes.put("/", async (c) => {
 });
 
 // POST /test — test connectivity/model capability using current (or provided) settings
-settingRoutes.post("/test", async (c) => {
+settingRoutes.post("/test", authMiddleware, async (c) => {
   const started = Date.now();
 
   let body: unknown = {};

@@ -41,6 +41,11 @@ vi.mock("../../services/ai-shared.js", () => ({
   AI_BUSY: "AI_BUSY",
 }));
 
+vi.mock("../../middleware/rateLimit.js", () => ({
+  rateLimit: () => null,
+  dailyLimit: async () => null,
+}));
+
 // Import after mocks
 import { Hono } from "hono";
 import { cardRoutes } from "../cards.js";

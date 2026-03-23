@@ -71,9 +71,9 @@ pnpm dev
 
 应用内分为两个配置页面：
 
-### AI Providers（`/providers`）
+### AI Providers（`/providers`）— 需要登录
 
-管理 AI 连接、模型探测和路由分配。
+管理 AI 连接、模型探测和路由分配。此页面需要管理员登录才能访问。
 
 - **双 Provider 支持**：Gemini（官方或中转站）+ OpenAI-compatible（DeepSeek / GLM / Grok / Kimi 等），各自独立的 API Key 和 Base URL
 - **Detect & Verify**：探测中转站实际可用模型，逐个 ping 验证可用性（并发 5，自动过滤不可用模型）
@@ -81,10 +81,11 @@ pnpm dev
 - **Test Routes**：每条路由可单独 ⚡ 测试，也可 Test All Routes；测试使用与实际任务相同强度的 prompt（Story 发真实图片、Cards/Deep 验证 JSON schema、Utility 测翻译）
 - **测试结果持久化**：绿点/红点 + 失败原因保留在 sessionStorage，刷新不丢失
 - **Gemini TTS**：TTS 模型和 voice 配置
+- **Usage Limits**：配置未登录用户每日生成限额（Story / Cards / Deep 独立配置）
 
-### Settings（`/settings`）
+### Settings（`/settings`）— 公开
 
-管理 TTS、语言、外观等偏好。
+管理 TTS、语言、外观等偏好。任何人可访问。
 
 - **TTS Provider**：browser / edge / gemini，primary + fallback；仅显示所选 provider 的配置（voice 等）
 - **Language**：解释性文本语言偏好（简体中文 / English / Bilingual）
@@ -98,6 +99,14 @@ pnpm dev
 - **智能重试**：仅重试暂态错误（502/503/timeout/rate limit），配额超限（RPD/TPD/quota）和认证错误立即失败
 - **Model fallback**：primary 失败后自动尝试 fallback model
 - **日志可追溯**：retry 和 fallback 切换均打印具体错误原因
+
+### 权限与安全
+
+- **公开页面**：Story Studio、Word Forge、Settings — 任何人无需登录即可使用
+- **管理页面**：AI Providers (`/providers`) — 需要管理员登录（保护 API key 和模型配置）
+- **每日生成限额**：未登录用户按 IP 限制每天 AI 调用次数（Story / Cards / Deep 独立计数），已登录管理员不受限制
+- **敏感字段隐藏**：GET /api/settings 对未登录用户隐藏 base URL 等敏感信息
+- **CSRF 防护**：POST/PUT 请求强制检查 Origin header
 
 ### 生成任务机制（Async Jobs）
 
@@ -123,6 +132,9 @@ pnpm dev
 | Gemini TTS Model / Fallback | Gemini 语音朗读模型 | `gemini-2.5-flash-preview-tts` / 空 |
 | API Timeout | 单次 AI 请求超时（deep 自动 ×2） | `60000` ms |
 | Max Retries | AI 请求重试次数 | `3` |
+| Daily Story Limit | 未登录用户每天 Story 生成数 | `20` |
+| Daily Cards Limit | 未登录用户每天 Cards 生成词数 | `50` |
+| Daily Deep Limit | 未登录用户每天 Deep 分析数 | `100` |
 
 **使用中转站示例**：如果你的中转站是 `https://x666.me`，在 AI Providers 中：
 - API Key → 中转站给的 key

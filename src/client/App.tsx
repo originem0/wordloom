@@ -5,6 +5,7 @@ import { queryClient } from "./lib/query-client";
 import { ErrorBoundary } from "./components/layout/ErrorBoundary";
 import { Shell } from "./components/layout/Shell";
 import { LoginPage } from "./components/auth/LoginPage";
+import { AuthGuard } from "./components/auth/AuthGuard";
 import { StoryStudioPage } from "./components/story/StoryStudioPage";
 import { SettingsPage } from "./components/settings/SettingsPage";
 import { AIProvidersPage } from "./components/settings/AIProvidersPage";
@@ -57,7 +58,7 @@ function AppContent() {
               </Suspense>
             }
           />
-          <Route path="providers" element={<AIProvidersPage />} />
+          <Route path="providers" element={<AuthGuard><AIProvidersPage /></AuthGuard>} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
