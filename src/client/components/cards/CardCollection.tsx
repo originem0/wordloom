@@ -265,7 +265,7 @@ export function CardCollection() {
           }}
         >
           <DialogContent
-            className="max-h-[85vh] overflow-y-auto h-auto rounded-lg p-0 border-0 bg-transparent shadow-lg w-[min(900px,calc(100vw-4rem))] max-w-none xl:w-[960px]"
+            className="max-h-[85vh] overflow-y-auto h-auto rounded-lg p-0 border-0 bg-transparent shadow-lg w-[min(900px,calc(100vw-4rem))] max-w-none sm:max-w-none xl:w-[960px]"
             showCloseButton={false}
           >
             <DialogTitle className="sr-only">{selectedCard?.word}</DialogTitle>
