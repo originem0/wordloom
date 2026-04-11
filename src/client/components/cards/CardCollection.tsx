@@ -15,13 +15,13 @@ import { apiPost } from "@/client/lib/api";
 import { PrototypeWordCard } from "./PrototypeWordCard";
 import type { Card } from "@/shared/types";
 
-/** Simple hook: true when viewport ≤ 640px */
+/** Use fullscreen overlay on mobile + tablet portrait (≤ 768px) */
 function useIsMobile() {
   const [mobile, setMobile] = useState(
-    () => typeof window !== "undefined" && window.innerWidth <= 640,
+    () => typeof window !== "undefined" && window.innerWidth <= 768,
   );
   useEffect(() => {
-    const mql = window.matchMedia("(max-width: 640px)");
+    const mql = window.matchMedia("(max-width: 768px)");
     const handler = (e: MediaQueryListEvent) => setMobile(e.matches);
     mql.addEventListener("change", handler);
     return () => mql.removeEventListener("change", handler);
@@ -265,7 +265,7 @@ export function CardCollection() {
           }}
         >
           <DialogContent
-            className="max-h-[85vh] overflow-y-auto max-w-[900px] h-auto rounded-lg p-0 border-0 bg-transparent shadow-lg"
+            className="max-h-[85vh] overflow-y-auto h-auto rounded-lg p-0 border-0 bg-transparent shadow-lg w-[min(900px,calc(100vw-4rem))] max-w-none xl:w-[960px]"
             showCloseButton={false}
           >
             <DialogTitle className="sr-only">{selectedCard?.word}</DialogTitle>

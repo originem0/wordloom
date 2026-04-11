@@ -553,8 +553,8 @@
   font-size: 14px;
 }
 
-/* --- Responsive --- */
-@media (max-width: 640px) {
+/* --- Responsive: mobile + tablet portrait (≤ 768px) --- */
+@media (max-width: 768px) {
   .proto-page {
     padding: 0;
     font-size: 14px;
@@ -660,6 +660,51 @@
   .proto-page .boundary-note {
     font-size: 12px;
     padding: 8px 10px;
+  }
+}
+
+/* --- Responsive: tablet landscape (769–1024px) --- */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .proto-page {
+    padding: 20px 12px;
+  }
+  .proto-page .card {
+    padding: 24px;
+    gap: 16px;
+  }
+  .proto-page .word-header h1 {
+    font-size: 2em;
+  }
+  .proto-page .core-image p {
+    font-size: 14px;
+  }
+  .proto-page .schema-svg {
+    max-height: 150px;
+  }
+  .proto-page .scene p {
+    font-size: 14px;
+  }
+  .proto-page .family-table {
+    font-size: 13px;
+  }
+  .proto-page .family-table th,
+  .proto-page .family-table td {
+    padding: 6px 8px;
+  }
+}
+
+/* --- Responsive: spacious desktop (≥ 1280px) --- */
+@media (min-width: 1280px) {
+  .proto-page .card {
+    max-width: 900px;
+    padding: 32px;
+    gap: 22px;
+  }
+  .proto-page .word-header h1 {
+    font-size: 2.6em;
+  }
+  .proto-page .schema-svg {
+    max-height: 200px;
   }
 }
 
