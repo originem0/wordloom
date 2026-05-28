@@ -7,6 +7,7 @@ import { authMiddleware } from "./middleware/auth.js";
 import { authRoutes } from "./routes/auth.js";
 import { storyRoutes } from "./routes/stories.js";
 import { cardRoutes } from "./routes/cards.js";
+import { chunkRoutes } from "./routes/chunks.js";
 import { settingRoutes } from "./routes/settings.js";
 import { jobRoutes } from "./routes/jobs.js";
 import { readFileSync, existsSync } from "fs";
@@ -61,6 +62,7 @@ app.route("/api/auth", authRoutes);
 const apiRoutes = app
   .route("/api/stories", storyRoutes)
   .route("/api/cards", cardRoutes)
+  .route("/api/chunks", chunkRoutes)
   .route("/api/settings", settingRoutes)
   .route("/api/jobs", jobRoutes);
 

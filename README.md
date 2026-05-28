@@ -17,9 +17,15 @@ AI 驱动的英语学习工具。上传图片生成英语故事，点击生词�
 
 **Word Forge** — 词汇激活卡片生成器
 
-- 三种输入：手动输入单词、粘贴文本 AI 提取生词、从故事中双击点选
-- 重复检测：已有单词不再调用 AI 重新生成，直接返回已有卡片
-- 卡片生成同样走异步 Job 队列，状态由服务端权威返回（queued/running/done/failed/cancelled）
+- **查/造合一**：一个统一搜索框驱动整个模块——输入即过滤已有卡片；当输入的单词在词库中不存在时，自动出现"生成词卡"CTA，回车即可生成
+- **三种生成入口**：直接输入单词（支持逗号/空格分隔最多 10 个词）、粘贴文本 AI 抽取生词、从故事中双击点选
+- **智能搜索路由**：自动识别输入语种
+  - 中文 → 匹配释义（coreMeaning）
+  - 英文 → 匹配单词（word）
+  - 混合/多词短语 → 同时匹配单词和释义
+- **相关性排序**：搜索结果按 `精确匹配 > 前缀匹配 > 子串匹配 > 仅释义命中` 排序，再叠加 usageCount 和 createdAt——输入 `set` 时 `setup` 排前面，`asset/closet` 排后面，永远找得到精确那张
+- **重复检测**：已有单词不再调用 AI 重新生成，直接返回已有卡片
+- **卡片生成走异步 Job 队列**，状态由服务端权威返回（queued/running/done/failed/cancelled）
 - 分层卡片结构：
   - **Surface** — 音标、词性、CEFR 等级、语义核心、WAD/WAP 指标
   - **Middle** — 搭配骨架、语境阶梯（3 级例句）、词源（中文解释）、近反义词、常用短语
@@ -29,8 +35,25 @@ AI 驱动的英语学习工具。上传图片生成英语故事，点击生词�
     - **场景激活 (Scene Activation)**：可折叠。基于单词在特定领域下的典型框架提供沉浸式情景描述与关联词群。
     - **家族对比 (Family Comparison)**：可折叠。横向对比表格显示同源/易混淆词汇的核心区别、情感语域和典型场景，并生成总结式辨析笔记。
     - **边界测试 (Boundary Tests)**：可折叠。带遮挡的交互式填空测验，多词语备选及详尽的正误原因辨析。
-- 卡片集合：搜索、CEFR 筛选、使用追踪
+- 卡片集合：CEFR 筛选、使用追踪、Deep 层批量重试
 - 深层内容懒加载并缓存，不重复调用 AI
+
+**Chunk Forge** — 多词预制组块（Prefabricated Patterns）
+
+词卡处理单个词；Chunk Forge 处理**多词组块**——句子骨架（"with a growing sense of X"）、动词搭配（"attach importance to"）、介词直觉（"for all their X"）、名介结构、话语标记。这些在传统词典里是"句法+词汇"的混合体，AI 给出统一结构化分析。
+
+- **AI 判定三态**：`chunk`（典型组块）/ `borderline`（边界）/ `not_chunk`（自由组合，不入库）
+- **结构化卡片**：
+  - **Form** — 带 slot 占位符的标准形式（如 `with a (growing) sense of X`），slot 填充器示例
+  - **Core meaning + 中文释义 (coreMeaningZh) + 机制描述 (coreMechanic)** — 它"在做什么"的三层表达
+  - **Register / Frequency** — 语域（neutral/formal/spoken/academic/literary）+ 频率（high/mid/low）
+  - **Examples** — 按 register 标注的真实例句（2-3 条）
+  - **Pitfall** — 一句话点明 L1 干扰陷阱
+  - **Contrast** — 最多 3 个易混淆同类 chunk 的精细辨析
+  - **Theoretical anchors** — 理论锚点（idiom principle / formulaic sequence / lexical priming 等）
+- **去重 upsert**：以 `(form, category)` 为唯一键，相同组块重新分析会更新而非新增
+- **空库引导**：库里 0 条时显示 5 个示例 chip（每类一个），点击即填入输入框
+- **同套搜索/排序逻辑**：英文搜 form、中文搜 coreMeaning + coreMeaningZh，相关性排序一致
 
 **移动端适配**
 
@@ -77,7 +100,7 @@ pnpm dev
 
 - **双 Provider 支持**：Gemini（官方或中转站）+ OpenAI-compatible（DeepSeek / GLM / Grok / Kimi 等），各自独立的 API Key 和 Base URL
 - **Detect & Verify**：探测中转站实际可用模型，逐个 ping 验证可用性（并发 5，自动过滤不可用模型）
-- **Model Routing**：Story / Cards / Deep / Utility 四条路由，每条可独立选择 provider + primary model + fallback model
+- **Model Routing**：Story / Cards / Deep / Chunks / Utility 五条路由，每条可独立选择 provider + primary model + fallback model
 - **Test Routes**：每条路由可单独 ⚡ 测试，也可 Test All Routes；测试使用与实际任务相同强度的 prompt（Story 发真实图片、Cards/Deep 验证 JSON schema、Utility 测翻译）
 - **测试结果持久化**：绿点/红点 + 失败原因保留在 sessionStorage，刷新不丢失
 - **Gemini TTS**：TTS 模型和 voice 配置
@@ -127,6 +150,7 @@ pnpm dev
 | Story Model / Fallback | 图片生成故事用的主/备模型 | `gemini-2.5-pro` / 空 |
 | Cards Model / Fallback | 卡片生成（短 JSON）主/备模型 | 继承通用模型 / 空 |
 | Deep Model / Fallback | 深度分析（长 JSON）主/备模型 | 继承通用模型 / 空 |
+| Chunks Model / Fallback | 组块判定 + 结构化分析主/备模型 | 继承通用模型 / 空 |
 | Utility Model / Fallback | 轻量任务（抽词/翻译）主/备模型 | 继承通用模型 / 空 |
 | TTS Provider (Primary / Fallback) | 朗读方式 | `browser` / 空 |
 | Gemini TTS Model / Fallback | Gemini 语音朗读模型 | `gemini-2.5-flash-preview-tts` / 空 |
@@ -150,33 +174,77 @@ src/
 ├── client/                 # React SPA
 │   ├── components/
 │   │   ├── story/          # Story Studio（图片上传、交互式故事、TTS）
-│   │   ├── cards/          # Word Forge（词汇输入、激活卡片、集合视图）
+│   │   ├── cards/          # Word Forge（统一查/造输入、激活卡片、集合视图）
+│   │   ├── chunks/         # Chunk Forge（多词组块判定与卡片）
 │   │   ├── settings/       # SettingsPage + AIProvidersPage + SettingWidgets
-│   │   ├── layout/         # 导航壳（4 tab: Story/Cards/AI/Settings）、错误边界
+│   │   ├── layout/         # 导航壳（5 tab: Story/Cards/Chunks/AI/Settings）、错误边界
 │   │   ├── auth/           # 登录页
 │   │   └── ui/             # shadcn/ui 组件
-│   ├── hooks/              # TanStack Query hooks
+│   ├── hooks/              # TanStack Query hooks（useCards / useChunks / ...）
 │   ├── lib/                # API 客户端、工具函数
 │   └── store/              # Zustand（任务队列、主题）
 ├── server/                 # Hono 后端
-│   ├── routes/             # API 路由（auth, stories, cards, settings, jobs）
+│   ├── routes/             # API 路由（auth, stories, cards, chunks, settings, jobs）
 │   ├── services/
-│   │   ├── ai-router.ts    # Provider 分发（读 {route}_provider 设置）
+│   │   ├── ai-router.ts    # Provider 分发（读 {route}_provider 设置，含 chunks 路由）
 │   │   ├── ai-shared.ts    # Retry/timeout/settings/semaphore/fallback
-│   │   ├── ai-prompts.ts   # Prompt 常量 + 语言指令
-│   │   ├── ai-normalize.ts # JSON 解析 + schema drift 容错
+│   │   ├── ai-prompts.ts   # Prompt 常量 + 语言指令（cards / deep / chunk）
+│   │   ├── ai-normalize.ts # JSON 解析 + schema drift 容错（cards + chunks）
 │   │   ├── gemini.ts       # Gemini SDK 调用
 │   │   ├── openai-compat.ts # OpenAI-compatible raw fetch 调用
 │   │   ├── edge-tts.ts     # Edge TTS
 │   │   └── image.ts        # 图片压缩
-│   ├── middleware/         # 认证（httpOnly cookie + HMAC session）
-│   └── db/                 # Drizzle schema + 连接
+│   ├── middleware/         # 认证（httpOnly cookie + HMAC session）+ rateLimit/dailyLimit
+│   └── db/                 # Drizzle schema + 连接（含 chunks 表）
 └── shared/                 # 前后端共享类型和校验（types.ts, validation.ts）
+
+drizzle/                    # SQL 迁移（0006 含 lower(word)/lower(form) 表达式索引）
+tools/                      # 离线脚本（如 import-chunks.py）
+deploy/systemd/             # systemd 单元文件
 ```
+
+## 搜索与列表性能
+
+针对词库 6000+ 条规模做了一组优化，6000 行下双击单词查重 < 5ms，搜索 < 30ms：
+
+- **表达式索引**：`drizzle/0006_word_form_lower_indexes.sql` 给 `cards.word` 和 `chunks.form` 建 `lower(...)` 表达式索引，所有大小写不敏感等值/前缀查询走索引
+- **相关性排序**：`ORDER BY CASE WHEN exact / prefix / substr / meaning-only END, usageCount DESC, createdAt DESC` 让精确匹配置顶
+- **字段分流**：英文输入只搜词形、中文只搜释义、混合短语两者都搜——彻底消除"输入完整单词被语义释义里的同字串误中"
+- **TanStack Query `placeholderData`**：翻页/改搜索词时旧数据保留，不闪 loading
+- **`React.memo` + 稳定回调**：卡片列表 hover/打开详情/删除时邻卡不重渲
+- **搜索输入 debounce**：300ms 合并连续按键，避免每按键一次请求
 
 ## 部署
 
-### Docker（推荐）
+### Systemd（单机部署推荐）
+
+适合你这种只有一台服务器、宿主机 nginx 直接反代 `127.0.0.1:3001` 的场景。核心思路是：
+
+- `pnpm build` 产出 `dist/`
+- `systemd` 负责守护 `node dist/server/index.js`
+- 数据直接使用仓库内的 `data/` 目录
+
+```bash
+cp .env.example .env
+# 编辑 .env：
+#   AUTH_TOKEN=你的登录密码
+#   AUTH_SECRET=随机字符串（用于 cookie 签名）
+
+pnpm build
+sudo cp deploy/systemd/wordloom.service /etc/systemd/system/wordloom.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now wordloom
+```
+
+常用命令：
+
+```bash
+sudo systemctl restart wordloom
+sudo systemctl status wordloom
+journalctl -u wordloom -n 100 --no-pager
+```
+
+### Docker
 
 ```bash
 cp .env.example .env
@@ -187,7 +255,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-nginx 自动处理反向代理和静态资源缓存。HTTPS 通过 certbot 配置。
+适合你明确想把运行时和宿主机隔离开时使用。注意 Docker 默认会把 SQLite 放进 named volume，不会直接使用仓库里的 `data/` 目录。
 
 ### 手动部署
 

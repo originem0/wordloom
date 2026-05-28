@@ -1,7 +1,7 @@
 // Concurrency-limiting semaphore — generic primitive, not coupled to any service.
 
 export class Semaphore {
-  private queue: (() => void)[] = [];
+  private queue: { fn: () => void; dead: boolean }[] = [];
   private current = 0;
   constructor(
     private max: number,
@@ -17,24 +17,30 @@ export class Semaphore {
       throw new Error("QUEUE_FULL");
     }
     return new Promise((resolve, reject) => {
+      const entry = { fn: resolve, dead: false };
       const timer = setTimeout(() => {
-        const idx = this.queue.indexOf(resolve);
+        entry.dead = true;
+        const idx = this.queue.indexOf(entry);
         if (idx >= 0) this.queue.splice(idx, 1);
         reject(new Error("QUEUE_TIMEOUT"));
       }, this.timeoutMs);
-      const wrapped = () => {
+      entry.fn = () => {
         clearTimeout(timer);
         resolve();
       };
-      this.queue.push(wrapped);
+      this.queue.push(entry);
     });
   }
   release(): void {
     this.current--;
-    const next = this.queue.shift();
-    if (next) {
-      this.current++;
-      next();
+    // Skip entries that timed out while waiting in queue
+    while (this.queue.length > 0) {
+      const next = this.queue.shift()!;
+      if (!next.dead) {
+        this.current++;
+        next.fn();
+        return;
+      }
     }
   }
 }

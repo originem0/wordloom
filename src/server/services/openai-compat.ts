@@ -1,8 +1,9 @@
 import {
   aiCardsResponseSchema,
   aiDeepLayerSchema,
+  aiChunkResponseSchema,
 } from "../../shared/validation.js";
-import type { GroundingSource } from "../../shared/types.js";
+import type { GroundingSource, ChunkGenerateResult } from "../../shared/types.js";
 import {
   Semaphore,
   getSetting,
@@ -10,19 +11,25 @@ import {
   acquireSemaphore,
   type ParsedCard,
 } from "./ai-shared.js";
-import { parseJsonLenient, normalizeCardsPayload } from "./ai-normalize.js";
+import {
+  parseJsonLenient,
+  normalizeCardsPayload,
+  normalizeChunkResponse,
+} from "./ai-normalize.js";
 import {
   STORY_SYSTEM_PROMPT,
   CARDS_PROMPT,
   DEEP_PROMPT,
+  CHUNKS_PROMPT,
   getExplanationLanguageInstruction,
 } from "./ai-prompts.js";
 
 // ---------------------------------------------------------------------------
-// Semaphore — independent from Gemini
+// Semaphores — independent from Gemini, split by route to avoid starvation
 // ---------------------------------------------------------------------------
 
-const openaiSemaphore = new Semaphore(3);
+const openaiSemaphore = new Semaphore(3);      // story, cards, utility
+const openaiDeepSemaphore = new Semaphore(2);   // deep analysis only
 
 // ---------------------------------------------------------------------------
 // Core HTTP helper
@@ -255,7 +262,7 @@ export async function openaiGenerateDeepLayer(
   schemaAnalysis?: unknown;
   boundaryTests: unknown[];
 }> {
-  await acquireSemaphore(openaiSemaphore);
+  await acquireSemaphore(openaiDeepSemaphore);
   try {
     const languageInstruction = await getExplanationLanguageInstruction();
     return await runWithModelFallback({
@@ -323,6 +330,60 @@ export async function openaiGenerateDeepLayer(
         }
 
         return out;
+      },
+    });
+  } finally {
+    openaiDeepSemaphore.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// openaiGenerateChunk — chunk analysis (is_chunk + parse fields)
+// ---------------------------------------------------------------------------
+
+export async function openaiGenerateChunk(input: string): Promise<ChunkGenerateResult> {
+  await acquireSemaphore(openaiSemaphore);
+  try {
+    return await runWithModelFallback({
+      primaryKeys: ["chunks_openai_model"],
+      primaryFallback: "",
+      fallbackKeys: ["chunks_openai_fallback_model"],
+      label: "generateChunk (OpenAI)",
+      run: async (model) => {
+        const text = await openaiChat({
+          model,
+          messages: [
+            {
+              role: "system",
+              content: `${CHUNKS_PROMPT}\n\nRespond in JSON only. No markdown fences, no explanation — just the JSON object.`,
+            },
+            {
+              role: "user",
+              content: `Candidate: ${JSON.stringify(input)}`,
+            },
+          ],
+        });
+
+        let parsed: unknown;
+        try {
+          parsed = parseJsonLenient(text);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new Error(`Failed to parse chunk JSON: ${msg}`);
+        }
+
+        parsed = normalizeChunkResponse(parsed);
+
+        const result = aiChunkResponseSchema.safeParse(parsed);
+        if (!result.success) {
+          const issues = result.error.issues
+            .slice(0, 3)
+            .map((i) => `${i.path.join(".")}: ${i.message}`)
+            .join("; ");
+          throw new Error(`Chunk validation failed: ${issues}`);
+        }
+
+        return result.data as ChunkGenerateResult;
       },
     });
   } finally {

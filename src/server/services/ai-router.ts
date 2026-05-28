@@ -1,9 +1,10 @@
-import type { GroundingSource } from "../../shared/types.js";
+import type { GroundingSource, ChunkGenerateResult } from "../../shared/types.js";
 import { getSetting, type ParsedCard } from "./ai-shared.js";
 import {
   geminiGenerateStory,
   geminiGenerateCards,
   geminiGenerateDeepLayer,
+  geminiGenerateChunk,
   geminiExtractWords,
   geminiTranslateText,
   generateTTS,
@@ -12,6 +13,7 @@ import {
   openaiGenerateStory,
   openaiGenerateCards,
   openaiGenerateDeepLayer,
+  openaiGenerateChunk,
   openaiExtractWords,
   openaiTranslateText,
 } from "./openai-compat.js";
@@ -77,6 +79,14 @@ export async function extractWords(text: string): Promise<string[]> {
     return openaiExtractWords(text);
   }
   return geminiExtractWords(text);
+}
+
+export async function generateChunk(input: string): Promise<ChunkGenerateResult> {
+  const provider = await getProvider("chunks");
+  if (provider === "openai") {
+    return openaiGenerateChunk(input);
+  }
+  return geminiGenerateChunk(input);
 }
 
 export async function translateText(text: string): Promise<string> {

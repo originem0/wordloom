@@ -43,3 +43,10 @@ data/tts/*
 
 # OS
 Thumbs.db
+
+# Local working state
+backups/
+.codex
+.claude/settings.local.json
+tmp/batch-progress.json
+tmp/batch-failed.json

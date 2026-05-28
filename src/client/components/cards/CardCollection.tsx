@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import { createPortal } from "react-dom";
-import { Search, Trash2, Loader2, Flame } from "lucide-react";
+import { Trash2, Loader2, Flame } from "lucide-react";
 import { toast } from "sonner";
-import { Input } from "@/client/components/ui/input";
 import { Badge } from "@/client/components/ui/badge";
 import { Button } from "@/client/components/ui/button";
 import {
@@ -31,9 +30,13 @@ function useIsMobile() {
 
 const CEFR_LEVELS = ["All", "A1", "A2", "B1", "B2", "C1", "C2"] as const;
 
-export function CardCollection() {
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+interface CardCollectionProps {
+  /** External search query — owned by WordForgePage so the unified input drives both
+   *  the generation CTA (WordInput) and this filtered grid. */
+  searchInput: string;
+}
+
+export function CardCollection({ searchInput }: CardCollectionProps) {
   const [cefr, setCefr] = useState<string>("All");
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const isMobile = useIsMobile();
@@ -46,26 +49,23 @@ export function CardCollection() {
     }
   }, [selectedCard, isMobile]);
 
-  // 300ms debounce for search
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 300);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [debouncedSearch, cefr]);
-
   const [page, setPage] = useState(1);
   const limit = 20;
+
+  // Reset to first page whenever the search query or CEFR filter changes.
+  useEffect(() => {
+    setPage(1);
+  }, [searchInput, cefr]);
+
   const { data, isLoading } = useCards({
-    search: debouncedSearch || undefined,
+    search: searchInput || undefined,
     cefr: cefr === "All" ? undefined : cefr,
     page,
     limit,
   });
 
   const deleteCard = useDeleteCard();
+  const { mutate: deleteCardMutate, isPending: deletePending } = deleteCard;
   const missingDeep = useMissingDeep();
   const [retryingDeep, setRetryingDeep] = useState(false);
   const [retryProgress, setRetryProgress] = useState({ done: 0, total: 0, ok: 0, fail: 0 });
@@ -91,17 +91,20 @@ export function CardCollection() {
     toast.success(`Deep retry done: ${ok} ok, ${fail} failed`);
   }, [missingDeep]);
 
+  // Stable callback: closes detail only when the deleted card is the open one.
+  // No `selectedCard` dependency → memoized CardListItems don't re-render
+  // every time the user opens/closes the detail dialog.
   const handleDelete = useCallback(
     (e: React.MouseEvent, cardId: number) => {
       e.stopPropagation();
       if (!window.confirm("确定删除这张词卡吗？")) return;
-      deleteCard.mutate(cardId, {
+      deleteCardMutate(cardId, {
         onSuccess: () => {
-          if (selectedCard?.id === cardId) setSelectedCard(null);
+          setSelectedCard((curr) => (curr?.id === cardId ? null : curr));
         },
       });
     },
-    [deleteCard, selectedCard],
+    [deleteCardMutate],
   );
 
   const cards = data?.cards ?? [];
@@ -110,17 +113,8 @@ export function CardCollection() {
 
   return (
     <div className="space-y-4">
-      {/* Search + CEFR filter */}
+      {/* CEFR filter + batch deep retry */}
       <div className="space-y-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            placeholder="Search cards..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {CEFR_LEVELS.map((level) => (
             <Badge
@@ -174,44 +168,13 @@ export function CardCollection() {
       {cards.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {cards.map((card) => (
-            <div
+            <CardListItem
               key={card.id}
-              className="group cursor-pointer rounded-lg border bg-card p-4 shadow-sm transition-shadow hover:shadow-md"
-              onClick={() => setSelectedCard(card)}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-semibold">{card.word}</span>
-                    {card.cefr && (
-                      <Badge variant="outline" className="text-[10px]">
-                        {card.cefr}
-                      </Badge>
-                    )}
-                  </div>
-                  {card.coreMeaning && (
-                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                      {card.coreMeaning.slice(0, 40)}
-                      {card.coreMeaning.length > 40 ? "..." : ""}
-                    </p>
-                  )}
-                  {card.usageCount > 0 && (
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      Used {card.usageCount}x
-                    </p>
-                  )}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="shrink-0 min-h-8 min-w-8 opacity-100 sm:opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-destructive"
-                  disabled={deleteCard.isPending}
-                  onClick={(e) => handleDelete(e, card.id)}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
-              </div>
-            </div>
+              card={card}
+              onSelect={setSelectedCard}
+              onDelete={handleDelete}
+              deletePending={deletePending}
+            />
           ))}
         </div>
       )}
@@ -281,3 +244,61 @@ export function CardCollection() {
     </div>
   );
 }
+
+// Memoized list item: re-renders only when the card row data or the
+// deletePending flag actually changes. The callbacks are stable refs from
+// the parent (setSelectedCard from useState; handleDelete from useCallback
+// without selectedCard dep), so they don't trigger re-renders.
+interface CardListItemProps {
+  card: Card;
+  onSelect: (card: Card) => void;
+  onDelete: (e: React.MouseEvent, cardId: number) => void;
+  deletePending: boolean;
+}
+
+const CardListItem = memo(function CardListItem({
+  card,
+  onSelect,
+  onDelete,
+  deletePending,
+}: CardListItemProps) {
+  return (
+    <div
+      className="group cursor-pointer rounded-lg border bg-card p-4 shadow-sm transition-shadow hover:shadow-md"
+      onClick={() => onSelect(card)}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="font-semibold">{card.word}</span>
+            {card.cefr && (
+              <Badge variant="outline" className="text-[10px]">
+                {card.cefr}
+              </Badge>
+            )}
+          </div>
+          {card.coreMeaning && (
+            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+              {card.coreMeaning.slice(0, 40)}
+              {card.coreMeaning.length > 40 ? "..." : ""}
+            </p>
+          )}
+          {card.usageCount > 0 && (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Used {card.usageCount}x
+            </p>
+          )}
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="shrink-0 min-h-8 min-w-8 opacity-100 sm:opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+          disabled={deletePending}
+          onClick={(e) => onDelete(e, card.id)}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+});

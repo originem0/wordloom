@@ -102,4 +102,47 @@ describe("Semaphore", () => {
     expect(results).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(peak).toBeLessThanOrEqual(3);
   });
+
+  it("does not leak slots after timeout", async () => {
+    const sem = new Semaphore(1, 50, 50); // max=1, timeout=50ms
+    await sem.acquire(); // slot occupied
+
+    // This will timeout because slot is held
+    await expect(sem.acquire()).rejects.toThrow("QUEUE_TIMEOUT");
+
+    // Release the original slot
+    sem.release();
+
+    // Slot should be available — not leaked
+    await sem.acquire();
+    sem.release();
+  });
+
+  it("does not leak slots when release races with timeout", async () => {
+    const sem = new Semaphore(1, 50, 30); // very short timeout
+    await sem.acquire();
+
+    const results: string[] = [];
+    // Queue up several waiters that will all timeout
+    const waiters = Array.from({ length: 5 }, () =>
+      sem.acquire().then(
+        () => results.push("acquired"),
+        () => results.push("timeout"),
+      ),
+    );
+
+    // Wait for all to timeout
+    await new Promise((r) => setTimeout(r, 60));
+    await Promise.all(waiters);
+
+    sem.release(); // release original
+
+    // All slots should be recovered — acquire must not hang
+    const acquired = await Promise.race([
+      sem.acquire().then(() => true),
+      new Promise<boolean>((r) => setTimeout(() => r(false), 100)),
+    ]);
+    expect(acquired).toBe(true);
+    sem.release();
+  });
 });

@@ -28,6 +28,7 @@ const GEMINI_VOICES = ["Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Aoede"] as
 const ROUTES = [
   { key: "story", label: "Story", subtitle: "图片 → 故事生成", testTarget: "storyModel" },
   { key: "cards", label: "Cards", subtitle: "短 JSON、稳定结构", testTarget: "cardsModel" },
+  { key: "chunks", label: "Chunks", subtitle: "chunk 解析（is_chunk + 槽位 + coreMechanic）", testTarget: "chunksModel" },
   { key: "deep", label: "Deep Analysis", subtitle: "长 JSON、schemaAnalysis、SVG", testTarget: "deepModel" },
   { key: "utility", label: "Utility", subtitle: "抽词、翻译、轻量文本", testTarget: "utilityModel" },
 ] as const;
@@ -37,6 +38,8 @@ const GEMINI_DEFAULTS: Record<string, string> = {
   story_fallback_model: "",
   cards_model: "",
   cards_fallback_model: "",
+  chunks_model: "",
+  chunks_fallback_model: "",
   deep_model: "",
   deep_fallback_model: "",
   utility_model: "",
@@ -56,6 +59,7 @@ function roleCandidates(models: string[], role: string) {
     if (role === "story") return (/pro|vision/i.test(m) ? 20 : 0) + (/flash/i.test(m) ? -2 : 0);
     if (role === "deep") return (/pro|gpt-5/i.test(m) ? 20 : 0) + (/flash/i.test(m) ? -4 : 0);
     if (role === "cards") return (/flash|mini/i.test(m) ? 10 : 0) + (/pro/i.test(m) ? 2 : 0);
+    if (role === "chunks") return (/flash|mini/i.test(m) ? 10 : 0) + (/pro/i.test(m) ? 2 : 0);
     if (role === "utility") return (/flash|mini/i.test(m) ? 12 : 0) + (/pro/i.test(m) ? -2 : 0);
     return (/tts|audio/i.test(m) ? 10 : 0);
   };

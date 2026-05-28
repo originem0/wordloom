@@ -13,6 +13,7 @@ export function useCards(params: { search?: string; cefr?: string; page?: number
       if (params.limit) sp.set("limit", String(params.limit));
       return apiFetch<{ cards: Card[]; total: number; page: number; limit: number }>(`/api/cards?${sp}`);
     },
+    placeholderData: (prev) => prev,
   });
 }
 

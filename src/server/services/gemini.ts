@@ -2,8 +2,9 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import {
   aiCardsResponseSchema,
   aiDeepLayerSchema,
+  aiChunkResponseSchema,
 } from "../../shared/validation.js";
-import type { GroundingSource } from "../../shared/types.js";
+import type { GroundingSource, ChunkGenerateResult } from "../../shared/types.js";
 import {
   Semaphore,
   getSetting,
@@ -11,19 +12,25 @@ import {
   acquireSemaphore,
   type ParsedCard,
 } from "./ai-shared.js";
-import { parseJsonLenient, normalizeCardsPayload } from "./ai-normalize.js";
+import {
+  parseJsonLenient,
+  normalizeCardsPayload,
+  normalizeChunkResponse,
+} from "./ai-normalize.js";
 import {
   STORY_SYSTEM_PROMPT,
   CARDS_PROMPT,
   DEEP_PROMPT,
+  CHUNKS_PROMPT,
   getExplanationLanguageInstruction,
 } from "./ai-prompts.js";
 
 // ---------------------------------------------------------------------------
-// Semaphore — limits concurrent Gemini API calls
+// Semaphores — limits concurrent Gemini API calls
 // ---------------------------------------------------------------------------
 
-const geminiSemaphore = new Semaphore(3);
+const geminiSemaphore = new Semaphore(3);       // story, cards, utility
+const geminiDeepSemaphore = new Semaphore(2);   // deep analysis only
 
 // ---------------------------------------------------------------------------
 // Gemini client
@@ -275,7 +282,7 @@ export async function geminiGenerateDeepLayer(
   schemaAnalysis?: unknown;
   boundaryTests: unknown[];
 }> {
-  await acquireSemaphore(geminiSemaphore);
+  await acquireSemaphore(geminiDeepSemaphore);
   try {
     const languageInstruction = await getExplanationLanguageInstruction();
     return await runWithModelFallback({
@@ -349,6 +356,56 @@ export async function geminiGenerateDeepLayer(
         }
 
         return out;
+      },
+    });
+  } finally {
+    geminiDeepSemaphore.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// geminiGenerateChunk — chunk analysis (is_chunk + parse fields)
+// ---------------------------------------------------------------------------
+
+export async function geminiGenerateChunk(input: string): Promise<ChunkGenerateResult> {
+  await acquireSemaphore(geminiSemaphore);
+  try {
+    return await runWithModelFallback({
+      primaryKeys: ["chunks_model", "general_model"],
+      primaryFallback: "gemini-2.5-flash",
+      fallbackKeys: ["chunks_fallback_model", "general_fallback_model"],
+      label: "generateChunk",
+      run: async (model) => {
+        const ai = await getClient();
+        const response = await ai.models.generateContent({
+          model,
+          contents: `${CHUNKS_PROMPT}\n\nCandidate: ${JSON.stringify(input)}`,
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
+
+        const text = response.text ?? "{}";
+        let parsed: unknown;
+        try {
+          parsed = parseJsonLenient(text);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new Error(`Failed to parse chunk JSON: ${msg}`);
+        }
+
+        parsed = normalizeChunkResponse(parsed);
+
+        const result = aiChunkResponseSchema.safeParse(parsed);
+        if (!result.success) {
+          const issues = result.error.issues
+            .slice(0, 3)
+            .map((i) => `${i.path.join(".")}: ${i.message}`)
+            .join("; ");
+          throw new Error(`Chunk validation failed: ${issues}`);
+        }
+
+        return result.data as ChunkGenerateResult;
       },
     });
   } finally {

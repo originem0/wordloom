@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { cards } from "../db/schema.js";
-import { eq, desc, like, or, sql, count } from "drizzle-orm";
+import { and, eq, desc, like, or, sql, count } from "drizzle-orm";
 import {
   generateCards,
   generateDeepLayer,
@@ -239,7 +239,8 @@ cardRoutes.post("/generate", async (c) => {
     if (msg === AI_BUSY) {
       return c.json({ error: "Generator busy", code: "AI_BUSY" }, 429);
     }
-    return c.json({ error: "Generation failed", code: "GENERATION_FAILED" }, 500);
+    console.error("[cards/generate] error:", msg);
+    return c.json({ error: msg, code: "GENERATION_FAILED" }, 500);
   }
 });
 
@@ -291,7 +292,8 @@ cardRoutes.post("/:id/deep", async (c) => {
     if (msg === AI_BUSY) {
       return c.json({ error: "Generator busy", code: "AI_BUSY" }, 429);
     }
-    return c.json({ error: "Deep generation failed", code: "GENERATION_FAILED" }, 500);
+    console.error(`[cards/${id}/deep] error:`, msg);
+    return c.json({ error: msg, code: "GENERATION_FAILED" }, 500);
   }
 
   // Merge familyBoundaryNote into schemaAnalysis blob (no new DB column)
@@ -320,20 +322,44 @@ cardRoutes.post("/:id/deep", async (c) => {
 });
 
 // GET / — list cards with optional search, CEFR filter, pagination
+//
+// Search routing:
+//   - CJK input        → substring match on coreMeaning (释义)
+//   - Pure ASCII word  → substring on word, ranked: exact > prefix > substring
+//   - Mixed / phrase   → substring on both
+// Relevance order (when searching): exact > prefix > substring > meaning-only,
+// then usageCount desc, then createdAt desc.
 cardRoutes.get("/", async (c) => {
-  const search = c.req.query("search");
+  const search = c.req.query("search")?.trim() || undefined;
   const cefr = c.req.query("cefr");
   const page = Math.max(1, Number(c.req.query("page") || "1"));
   const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") || "20")));
   const offset = (page - 1) * limit;
 
+  const lowerSearch = search?.toLowerCase() ?? "";
+  const substrPattern = `%${lowerSearch}%`;
+  const prefixPattern = `${lowerSearch}%`;
+
   // Build WHERE conditions
   const conditions = [];
   if (search) {
-    const pattern = `%${search}%`;
-    conditions.push(
-      or(like(cards.word, pattern), like(cards.coreMeaning, pattern))!,
-    );
+    const hasCJK = /[\u4e00-\u9fff]/.test(search);
+    const isAsciiWord = /^[a-zA-Z0-9'-]+$/.test(search);
+
+    if (hasCJK) {
+      conditions.push(like(cards.coreMeaning, `%${search}%`)!);
+    } else if (isAsciiWord) {
+      // Substring on word — the ORDER BY below ranks exact > prefix > substring
+      // so "set" surfaces `set, setup, setting` before `asset, closet, sunset`.
+      conditions.push(sql`lower(${cards.word}) LIKE ${substrPattern}`);
+    } else {
+      conditions.push(
+        or(
+          sql`lower(${cards.word}) LIKE ${substrPattern}`,
+          like(cards.coreMeaning, `%${search}%`),
+        )!,
+      );
+    }
   }
   if (cefr) {
     conditions.push(eq(cards.cefr, cefr));
@@ -344,7 +370,7 @@ cardRoutes.get("/", async (c) => {
       ? undefined
       : conditions.length === 1
         ? conditions[0]
-        : sql`${conditions[0]} AND ${conditions[1]}`;
+        : and(...conditions);
 
   // Count total
   const countResult = where
@@ -352,11 +378,25 @@ cardRoutes.get("/", async (c) => {
     : await db.select({ total: count() }).from(cards).get();
   const total = Number(countResult?.total ?? 0);
 
+  // Relevance order when searching; recency otherwise.
+  const orderBy = search
+    ? sql`
+        CASE
+          WHEN lower(${cards.word}) = ${lowerSearch} THEN 0
+          WHEN lower(${cards.word}) LIKE ${prefixPattern} THEN 1
+          WHEN lower(${cards.word}) LIKE ${substrPattern} THEN 2
+          ELSE 3
+        END,
+        ${cards.usageCount} DESC,
+        ${cards.createdAt} DESC
+      `
+    : desc(cards.createdAt);
+
   // Fetch page
   const query = db
     .select()
     .from(cards)
-    .orderBy(desc(cards.createdAt))
+    .orderBy(orderBy)
     .limit(limit)
     .offset(offset);
 

@@ -103,6 +103,7 @@ const settingTestSchema = z
       "listModels",
       "storyModel",
       "cardsModel",
+      "chunksModel",
       "deepModel",
       "utilityModel",
       "ttsModel",
@@ -500,8 +501,8 @@ settingRoutes.post("/test", authMiddleware, async (c) => {
   };
 
   // --- OpenAI-compatible model tests ---
-  // When provider=openai, handle storyModel/cardsModel/deepModel/utilityModel via chat completions
-  const modelTestTargets = ["storyModel", "cardsModel", "deepModel", "utilityModel", "generalModel"];
+  // When provider=openai, handle storyModel/cardsModel/chunksModel/deepModel/utilityModel via chat completions
+  const modelTestTargets = ["storyModel", "cardsModel", "chunksModel", "deepModel", "utilityModel", "generalModel"];
   if (parsed.data.provider === "openai" && modelTestTargets.includes(target)) {
     const openaiKey = (parsed.data.apiKey ?? (await getSetting("openai_api_key"))).trim();
     const openaiBase = (parsed.data.baseUrl ?? (await getSetting("openai_base_url"))).trim().replace(/\/+$/, "");
@@ -541,6 +542,19 @@ settingRoutes.post("/test", authMiddleware, async (c) => {
         if (!first || typeof first !== "object") return "Array element is not an object";
         if (!("word" in first)) return "Missing 'word' field";
         if (!("coreMeaning" in first)) return "Missing 'coreMeaning' field";
+        return null;
+      };
+    } else if (target === "chunksModel") {
+      messages = [
+        { role: "user", content: 'Return JSON only, no markdown fences. Judge whether "make a difference" is a chunk and produce: {"verdict":"chunk","confidence":0.95,"reason":"reusable delexical V+N","payload":{"form":"make a difference","category":"verb-collocation","coreMeaning":"produce a noticeable effect","register":"neutral","frequency":"high","slots":[],"examples":[{"sentence":"She made a real difference.","register":"neutral"}]}}' },
+      ];
+      expectJson = true;
+      validateShape = (parsed) => {
+        if (!parsed || typeof parsed !== "object") return "Expected JSON object, got " + typeof parsed;
+        const obj = parsed as Record<string, unknown>;
+        if (!("verdict" in obj)) return "Missing 'verdict' field";
+        if (!("confidence" in obj)) return "Missing 'confidence' field";
+        if (!("payload" in obj)) return "Missing 'payload' field";
         return null;
       };
     } else if (target === "deepModel") {
@@ -735,6 +749,40 @@ settingRoutes.post("/test", authMiddleware, async (c) => {
         return fail("Cards probe returned unexpected JSON shape.", { requestUrl: url, model, rawText: text.slice(0, 220) });
       }
       return c.json({ ok: true, ...baseRequest, latencyMs: Date.now() - started, requestUrl: url, model, result: { mode: "json-cards", stableJson: true } });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return fail(msg, { requestUrl: url, model, code: "NETWORK_ERROR" });
+    }
+  }
+
+  if (target === "chunksModel") {
+    const model = await resolveModel(["chunks_model", "general_model"], "gemini-2.5-flash");
+    const url = `${requestRoot}/models/${encodeURIComponent(model)}:generateContent`;
+    const payload = {
+      contents: [{ role: "user", parts: [{ text: 'Return JSON only, no markdown fences. Analyze "make a difference" as a chunk and respond: {"verdict":"chunk","confidence":0.9,"reason":"V+N collocation","payload":{"form":"make a difference","category":"verb-collocation","coreMeaning":"produce a noticeable effect","register":"neutral","frequency":"high","slots":[],"examples":[{"sentence":"She made a real difference.","register":"neutral"}]}}' }] }],
+      generationConfig: { responseMimeType: "application/json" },
+    };
+    try {
+      const res = await fetchJson(url, { headers, method: "POST", body: JSON.stringify(payload), timeoutMs: 30000 });
+      const upstream = extractUpstreamError(res.json as any);
+      if (res.status >= 400 || upstream.message) {
+        const msg = upstream.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
+        return fail(msg, { status: res.status, requestUrl: url, model, upstream });
+      }
+      const text = extractGeminiText(res.json as any);
+      const candidate = extractJsonCandidate(text);
+      let parsedJson: any;
+      try {
+        parsedJson = JSON.parse(candidate);
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        return fail(`JSON.parse failed: ${reason}`, { requestUrl: url, model, rawText: text.slice(0, 220) });
+      }
+      const okShape = parsedJson && typeof parsedJson === "object" && "verdict" in parsedJson && "confidence" in parsedJson && "payload" in parsedJson;
+      if (!okShape) {
+        return fail("Chunks probe returned unexpected JSON shape (missing verdict/confidence/payload).", { requestUrl: url, model, rawText: text.slice(0, 220) });
+      }
+      return c.json({ ok: true, ...baseRequest, latencyMs: Date.now() - started, requestUrl: url, model, result: { mode: "json-chunks", verdict: parsedJson.verdict } });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return fail(msg, { requestUrl: url, model, code: "NETWORK_ERROR" });

@@ -25,7 +25,8 @@ const API_BASE = "http://localhost:3001";
 const WORDS_FILE = resolve(__dirname, "words_by_cefr.md");
 const PROGRESS_FILE = resolve(__dirname, "batch-progress.json");
 const FAILED_FILE = resolve(__dirname, "batch-failed.json");
-const INTERVAL_MS = 2 * 60 * 1000; // 2 minutes between words
+const INTERVAL_MS = 15 * 1000; // 15 seconds between batches
+const BATCH_SIZE = 5; // words per request
 
 // Read AUTH_TOKEN from .env
 function getAuthToken(): string {
@@ -186,7 +187,10 @@ function saveFailed(entries: FailedEntry[]) {
 async function login(token: string): Promise<string> {
   const res = await fetch(`${API_BASE}/api/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Origin": API_BASE,
+    },
     body: JSON.stringify({ token }),
   });
   if (!res.ok) {
@@ -216,38 +220,32 @@ async function getExistingWords(session: string): Promise<Set<string>> {
 }
 
 async function generateCard(
-  word: string,
+  words: string[],
   session: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: string[]; failed: Array<{ word: string; error: string }> }> {
   const res = await fetch(`${API_BASE}/api/cards/generate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "Origin": API_BASE,
       ...(session ? { Cookie: `session=${session}` } : {}),
     },
-    body: JSON.stringify({ words: [word] }),
+    body: JSON.stringify({ words }),
   });
 
   const body = await res.json() as Record<string, unknown>;
 
   if (!res.ok) {
-    return { ok: false, error: (body.error as string) ?? `HTTP ${res.status}` };
+    const errMsg = (body.error as string) ?? `HTTP ${res.status}`;
+    return { ok: [], failed: words.map(w => ({ word: w, error: errMsg })) };
   }
 
-  const success = body.success as unknown[];
-  const failed = body.failed as Array<{ word: string; error: string }>;
+  const success = (body.success ?? []) as Array<{ word: string }>;
+  const failed = (body.failed ?? []) as Array<{ word: string; error: string }>;
+  const existing = (body.existing ?? []) as Array<{ word: string }>;
 
-  if (failed?.length > 0) {
-    return { ok: false, error: failed[0].error };
-  }
-  if (body.message === "All words already exist") {
-    return { ok: true }; // Already exists, treat as success
-  }
-  if (success?.length > 0) {
-    return { ok: true };
-  }
-
-  return { ok: false, error: "Unknown response" };
+  const okWords = [...success.map(s => s.word), ...existing.map(e => e.word)];
+  return { ok: okWords, failed };
 }
 
 // ---------------------------------------------------------------------------
@@ -310,56 +308,76 @@ async function main() {
     return;
   }
 
-  // Process
+  // Process in batches
   let successCount = 0;
   let failCount = 0;
+  let consecutiveBusy = 0;
 
-  for (let i = 0; i < queue.length; i++) {
-    const { word, cefr } = queue[i];
-    const num = i + 1;
-    const total = queue.length;
+  for (let i = 0; i < queue.length; i += BATCH_SIZE) {
+    const batch = queue.slice(i, i + BATCH_SIZE);
+    const batchWords = batch.map(e => e.word);
+    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(queue.length / BATCH_SIZE);
     const start = Date.now();
 
     try {
-      const result = await generateCard(word, session);
+      const result = await generateCard(batchWords, session);
       const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 
-      if (result.ok) {
-        successCount++;
-        console.log(`[${num}/${total}] ✓ ${word} (${cefr}) — ${elapsed}s`);
-        done.add(word.toLowerCase());
-        saveProgress(done);
-      } else {
-        failCount++;
-        console.log(`[${num}/${total}] ✗ ${word} (${cefr}) — ${result.error}`);
-        failedEntries.push({
-          word,
-          cefr,
-          error: result.error ?? "unknown",
-          timestamp: new Date().toISOString(),
-        });
-        saveFailed(failedEntries);
-        // Still add to done so we don't retry automatically
-        done.add(word.toLowerCase());
+      if (result.ok.length > 0) {
+        consecutiveBusy = 0;
+        for (const w of result.ok) {
+          successCount++;
+          done.add(w.toLowerCase());
+        }
         saveProgress(done);
       }
+
+      const busyFails = result.failed.filter(f => f.error.includes("busy") || f.error.includes("AI_BUSY"));
+      const realFails = result.failed.filter(f => !f.error.includes("busy") && !f.error.includes("AI_BUSY"));
+
+      if (busyFails.length > 0 && result.ok.length === 0) {
+        consecutiveBusy++;
+        console.log(`[batch ${batchNum}/${totalBatches}] ⏳ busy (${batchWords.join(", ")}) — streak: ${consecutiveBusy}`);
+        // Re-queue busy words
+        queue.push(...busyFails.map(f => batch.find(b => b.word.toLowerCase() === f.word.toLowerCase())!).filter(Boolean));
+        if (consecutiveBusy >= 3) {
+          const extraWait = 3 * 60 * 1000;
+          console.log(`  ↳ ${consecutiveBusy} consecutive busy — cooling down ${extraWait / 1000}s...`);
+          await new Promise((r) => setTimeout(r, extraWait));
+          consecutiveBusy = 0;
+        }
+      } else {
+        consecutiveBusy = 0;
+      }
+
+      for (const f of realFails) {
+        failCount++;
+        failedEntries.push({ word: f.word, cefr: batch.find(b => b.word === f.word)?.cefr ?? "?", error: f.error, timestamp: new Date().toISOString() });
+        done.add(f.word.toLowerCase());
+      }
+      if (realFails.length > 0) {
+        saveFailed(failedEntries);
+        saveProgress(done);
+      }
+
+      const cefrTag = batch[0].cefr;
+      console.log(`[batch ${batchNum}/${totalBatches}] ✓ ${result.ok.length}ok ${result.failed.length}fail (${cefrTag}) — ${elapsed}s — ${batchWords.join(", ")}`);
+
     } catch (e) {
-      failCount++;
       const msg = e instanceof Error ? e.message : String(e);
-      console.log(`[${num}/${total}] ✗ ${word} (${cefr}) — ${msg}`);
-      failedEntries.push({
-        word,
-        cefr,
-        error: msg,
-        timestamp: new Date().toISOString(),
-      });
+      console.log(`[batch ${batchNum}/${totalBatches}] ✗ ${msg}`);
+      for (const entry of batch) {
+        failCount++;
+        failedEntries.push({ word: entry.word, cefr: entry.cefr, error: msg, timestamp: new Date().toISOString() });
+        done.add(entry.word.toLowerCase());
+      }
       saveFailed(failedEntries);
-      done.add(word.toLowerCase());
       saveProgress(done);
     }
 
-    // Wait between words (skip after last one)
-    if (i < queue.length - 1) {
+    // Wait between batches (skip after last)
+    if (i + BATCH_SIZE < queue.length) {
       process.stdout.write(`  ↳ Waiting ${INTERVAL_MS / 1000}s...`);
       await new Promise((r) => setTimeout(r, INTERVAL_MS));
       process.stdout.write("\r" + " ".repeat(40) + "\r");

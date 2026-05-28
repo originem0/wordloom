@@ -112,3 +112,86 @@ export interface CardGenerateResult {
   failed: { word: string; error: string }[];
   existing?: Card[];
 }
+
+// --- Chunks ---
+// A "chunk" is a multi-word prefabricated pattern (sentence stems, delexical
+// collocations, noun+prep, discourse markers, preposition schemas). Independent
+// from word-level Cards: no IPA / POS / etymology / SVG schema.
+
+export type ChunkCategory =
+  | "prep-intuition"
+  | "sentence-stem"
+  | "verb-collocation"
+  | "noun-prep"
+  | "discourse-marker";
+
+export type ChunkRegister =
+  | "neutral"
+  | "formal"
+  | "spoken"
+  | "academic"
+  | "literary";
+
+export type ChunkFrequency = "high" | "mid" | "low";
+
+export type TheoreticalAnchor =
+  | "idiom-principle"
+  | "formulaic-sequence"
+  | "lexical-priming"
+  | "cognitive-chunk"
+  | "grammaticalized-lexis";
+
+export interface ChunkSlot {
+  placeholder: string; // "X" / "sb" / "V-ing"
+  type: string;        // "abstract noun" / "verb infinitive"
+  fillers: string[];   // ["dread", "relief"]
+}
+
+export interface ChunkExample {
+  sentence: string;
+  register: ChunkRegister;
+}
+
+export interface ChunkContrast {
+  form: string;
+  diff: string;
+}
+
+export interface Chunk {
+  id: number;
+  form: string;
+  category: ChunkCategory;
+  coreMeaning: string;
+  coreMeaningZh: string | null;
+  coreMechanic: string | null;
+  register: ChunkRegister;
+  frequency: ChunkFrequency;
+  slots: ChunkSlot[];
+  examples: ChunkExample[];
+  pitfall: string | null;
+  contrast: ChunkContrast[] | null;
+  theoreticalAnchors: TheoreticalAnchor[] | null;
+  usageCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ChunkVerdict = "chunk" | "borderline" | "not_chunk";
+
+export type ChunkPayload = Omit<
+  Chunk,
+  "id" | "usageCount" | "createdAt" | "updatedAt"
+>;
+
+export interface ChunkGenerateResult {
+  verdict: ChunkVerdict;
+  confidence: number;
+  reason: string;
+  payload: ChunkPayload | null;
+  /** Set when verdict is "chunk" or "borderline" and the row was upserted. */
+  chunk?: Chunk;
+  /** True if a chunk with the same (form, category) already existed and was
+   * updated rather than newly created. UI uses this to warn the user that
+   * they have already analyzed this chunk before. */
+  wasExisting?: boolean;
+}

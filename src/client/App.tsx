@@ -19,7 +19,16 @@ const WordForgePage = lazy(() =>
   })).catch(() => {
     // After a deploy, old chunk filenames are gone. Reload to get fresh HTML.
     window.location.reload();
-    return { default: () => null };
+    return { default: () => <></> };
+  }),
+);
+
+const ChunkForgePage = lazy(() =>
+  import("./components/chunks/ChunkForgePage").then((m) => ({
+    default: m.ChunkForgePage,
+  })).catch(() => {
+    window.location.reload();
+    return { default: () => <></> };
   }),
 );
 
@@ -55,6 +64,19 @@ function AppContent() {
                 }
               >
                 <WordForgePage />
+              </Suspense>
+            }
+          />
+          <Route path="chunks"
+            element={
+              <Suspense
+                fallback={
+                  <div className="flex items-center justify-center p-12">
+                    <div className="size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  </div>
+                }
+              >
+                <ChunkForgePage />
               </Suspense>
             }
           />

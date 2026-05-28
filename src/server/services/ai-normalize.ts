@@ -210,3 +210,188 @@ export function normalizeCardsPayload(parsed: unknown): unknown {
   if (Array.isArray(payload)) return payload.map(normalizeCardObject);
   return payload;
 }
+
+// ---------------------------------------------------------------------------
+// Chunks normalization — coerce enums and fill defaults
+// ---------------------------------------------------------------------------
+
+function normalizeVerdict(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const v = value.trim().toLowerCase().replace(/[\s_-]+/g, "_");
+  if (v === "chunk" || v === "is_chunk" || v === "yes" || v === "valid") return "chunk";
+  if (v === "not_chunk" || v === "no" || v === "invalid" || v === "reject") return "not_chunk";
+  if (v === "borderline" || v === "maybe" || v === "unclear" || v === "weak") return "borderline";
+  return value;
+}
+
+function normalizeChunkCategory(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const v = value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+  const allowed = [
+    "prep-intuition",
+    "sentence-stem",
+    "verb-collocation",
+    "noun-prep",
+    "discourse-marker",
+  ];
+  if (allowed.includes(v)) return v;
+  // synonym tolerance
+  if (v === "preposition" || v === "preposition-intuition" || v === "prep") return "prep-intuition";
+  if (v === "stem" || v === "sentence-builder" || v === "template") return "sentence-stem";
+  if (v === "collocation" || v === "v-n" || v === "verb-noun") return "verb-collocation";
+  if (v === "noun-preposition" || v === "n-prep" || v === "n-p") return "noun-prep";
+  if (v === "connector" || v === "discourse" || v === "marker") return "discourse-marker";
+  return value;
+}
+
+function normalizeChunkRegister(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const v = value.trim().toLowerCase();
+  const allowed = ["neutral", "formal", "spoken", "academic", "literary"];
+  if (allowed.includes(v)) return v;
+  if (v === "informal" || v === "colloquial" || v === "oral" || v === "conversational") return "spoken";
+  if (v === "scholarly" || v === "scientific" || v === "technical") return "academic";
+  if (v === "poetic" || v === "literary-style") return "literary";
+  if (v === "standard" || v === "general") return "neutral";
+  return value;
+}
+
+function normalizeChunkFrequency(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const v = value.trim().toLowerCase();
+  if (v === "high" || v === "mid" || v === "low") return v;
+  if (v === "medium" || v === "moderate" || v === "middle") return "mid";
+  if (v === "very high" || v === "very-high" || v === "frequent") return "high";
+  if (v === "very low" || v === "very-low" || v === "rare" || v === "uncommon") return "low";
+  return value;
+}
+
+function normalizeTheoreticalAnchor(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const v = value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+  const allowed = [
+    "idiom-principle",
+    "formulaic-sequence",
+    "lexical-priming",
+    "cognitive-chunk",
+    "grammaticalized-lexis",
+  ];
+  if (allowed.includes(v)) return v;
+  if (v === "sinclair" || v === "sinclair-idiom") return "idiom-principle";
+  if (v === "wray" || v === "formulaic") return "formulaic-sequence";
+  if (v === "hoey" || v === "priming") return "lexical-priming";
+  if (v === "miller" || v === "chunk" || v === "7-plus-minus-2") return "cognitive-chunk";
+  if (v === "lewis" || v === "lexical-approach") return "grammaticalized-lexis";
+  return value;
+}
+
+function normalizeChunkExamples(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const sentence =
+        (typeof item.sentence === "string" ? item.sentence : undefined) ??
+        (typeof item.text === "string" ? item.text : undefined) ??
+        (typeof item.example === "string" ? item.example : undefined);
+      if (!sentence) return null;
+      const register = normalizeChunkRegister(item.register) ?? "neutral";
+      return { sentence, register };
+    })
+    .filter(Boolean);
+}
+
+function normalizeChunkSlots(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const placeholder =
+        (typeof item.placeholder === "string" ? item.placeholder : undefined) ??
+        (typeof item.name === "string" ? item.name : undefined) ??
+        (typeof item.slot === "string" ? item.slot : undefined);
+      if (!placeholder) return null;
+      const type =
+        (typeof item.type === "string" ? item.type : undefined) ??
+        (typeof item.kind === "string" ? item.kind : undefined) ??
+        "";
+      const fillers = coerceStringArray(item.fillers) ?? coerceStringArray(item.examples) ?? [];
+      return { placeholder, type, fillers };
+    })
+    .filter(Boolean);
+}
+
+function normalizeChunkContrast(value: unknown): unknown {
+  if (value == null) return null;
+  if (!Array.isArray(value)) return value;
+  const arr = value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const form =
+        (typeof item.form === "string" ? item.form : undefined) ??
+        (typeof item.chunk === "string" ? item.chunk : undefined) ??
+        (typeof item.pattern === "string" ? item.pattern : undefined);
+      if (!form) return null;
+      const diff =
+        (typeof item.diff === "string" ? item.diff : undefined) ??
+        (typeof item.difference === "string" ? item.difference : undefined) ??
+        (typeof item.note === "string" ? item.note : undefined) ??
+        "";
+      return { form, diff };
+    })
+    .filter(Boolean);
+  return arr.length ? arr : null;
+}
+
+export function normalizeChunkPayload(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const out: Record<string, unknown> = { ...value };
+
+  // Field aliases
+  if (out.meaning && !out.coreMeaning) out.coreMeaning = out.meaning;
+  if (out.definition && !out.coreMeaning) out.coreMeaning = out.definition;
+  if (out.anchors && !out.theoreticalAnchors) out.theoreticalAnchors = out.anchors;
+
+  out.category = normalizeChunkCategory(out.category);
+  out.register = normalizeChunkRegister(out.register);
+  out.frequency = normalizeChunkFrequency(out.frequency);
+
+  out.examples = normalizeChunkExamples(out.examples);
+  out.slots = out.slots == null ? [] : normalizeChunkSlots(out.slots);
+  out.contrast = normalizeChunkContrast(out.contrast);
+
+  if (Array.isArray(out.theoreticalAnchors)) {
+    const arr = out.theoreticalAnchors
+      .map(normalizeTheoreticalAnchor)
+      .filter((v): v is string => typeof v === "string");
+    out.theoreticalAnchors = arr.length ? arr : null;
+  } else if (out.theoreticalAnchors === undefined) {
+    out.theoreticalAnchors = null;
+  }
+
+  if (out.pitfall === undefined || out.pitfall === "") out.pitfall = null;
+  if (out.coreMeaningZh === undefined || out.coreMeaningZh === "") out.coreMeaningZh = null;
+  if (out.coreMechanic === undefined || out.coreMechanic === "") out.coreMechanic = null;
+
+  return out;
+}
+
+export function normalizeChunkResponse(parsed: unknown): unknown {
+  if (!isRecord(parsed)) return parsed;
+
+  const out: Record<string, unknown> = { ...parsed };
+  out.verdict = normalizeVerdict(out.verdict);
+  if (typeof out.confidence === "string") {
+    const n = coerceNumber(out.confidence);
+    if (n != null) out.confidence = Math.max(0, Math.min(1, n));
+  }
+  if (typeof out.reason !== "string") out.reason = String(out.reason ?? "");
+
+  if (out.verdict === "not_chunk") {
+    out.payload = null;
+  } else if (out.payload != null) {
+    out.payload = normalizeChunkPayload(out.payload);
+  }
+
+  return out;
+}

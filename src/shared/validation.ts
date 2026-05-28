@@ -115,3 +115,86 @@ export const updateSettingsSchema = z.object({
   key: z.string().min(1),
   value: z.string(),
 });
+
+// --- Chunks ---
+
+export const chunkCategoryEnum = z.enum([
+  "prep-intuition",
+  "sentence-stem",
+  "verb-collocation",
+  "noun-prep",
+  "discourse-marker",
+]);
+
+export const chunkRegisterEnum = z.enum([
+  "neutral",
+  "formal",
+  "spoken",
+  "academic",
+  "literary",
+]);
+
+export const chunkFrequencyEnum = z.enum(["high", "mid", "low"]);
+
+export const theoreticalAnchorEnum = z.enum([
+  "idiom-principle",
+  "formulaic-sequence",
+  "lexical-priming",
+  "cognitive-chunk",
+  "grammaticalized-lexis",
+]);
+
+export const generateChunkRequestSchema = z.object({
+  input: z.string().min(1).max(200),
+});
+
+export const aiChunkPayloadSchema = z.object({
+  form: z.string().min(1),
+  category: chunkCategoryEnum,
+  coreMeaning: z.string().min(1),
+  coreMeaningZh: z.string().nullable().optional(),
+  coreMechanic: z.string().nullable().optional(),
+  register: chunkRegisterEnum,
+  frequency: chunkFrequencyEnum,
+  slots: z
+    .array(
+      z.object({
+        placeholder: z.string(),
+        type: z.string(),
+        fillers: z.array(z.string()).optional().default([]),
+      }),
+    )
+    .optional()
+    .default([]),
+  examples: z
+    .array(
+      z.object({
+        sentence: z.string(),
+        register: chunkRegisterEnum,
+      }),
+    )
+    .min(1),
+  pitfall: z.string().nullable().optional(),
+  contrast: z
+    .array(
+      z.object({
+        form: z.string(),
+        diff: z.string(),
+      }),
+    )
+    .nullable()
+    .optional(),
+  theoreticalAnchors: z
+    .array(theoreticalAnchorEnum)
+    .nullable()
+    .optional(),
+});
+
+export const aiChunkResponseSchema = z.object({
+  verdict: z.enum(["chunk", "borderline", "not_chunk"]),
+  confidence: z.number().min(0).max(1),
+  reason: z.string(),
+  payload: aiChunkPayloadSchema.nullable(),
+});
+
+export const updateChunkSchema = aiChunkPayloadSchema.partial();
