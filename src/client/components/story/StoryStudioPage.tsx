@@ -78,6 +78,16 @@ function StoryStudioInner() {
     [submitCards, navigate],
   );
 
+  // Multi-word chunk from a story expression → hand off to Chunk Forge, prefilled.
+  const handleChunkClick = useCallback(
+    (phrase: string) => {
+      const trimmed = phrase.trim();
+      if (!trimmed) return;
+      navigate(`/chunks?prefill=${encodeURIComponent(trimmed)}`);
+    },
+    [navigate],
+  );
+
   const handleDelete = async (id: number) => {
     if (!window.confirm("确定删除这条故事吗？对应图片和 TTS 缓存也会被清理。")) return;
     await deleteMutation.mutateAsync(id);
@@ -153,7 +163,11 @@ function StoryStudioInner() {
       {/* ---- Active story ---- */}
       {activeStory && (
         <section>
-          <StoryView story={activeStory} onWordClick={handleWordClick} />
+          <StoryView
+            story={activeStory}
+            onWordClick={handleWordClick}
+            onChunkClick={handleChunkClick}
+          />
         </section>
       )}
 

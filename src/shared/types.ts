@@ -4,11 +4,60 @@ export interface GroundingSource {
   web?: { uri: string; title: string };
 }
 
+/**
+ * Structured teaching artifact produced by the new story prompt.
+ * One AI call yields description + translation + scene frame + expression list.
+ */
+export type StoryExpressionType =
+  | "collocation"
+  | "idiom"
+  | "sentence-pattern"
+  | "phrasal-verb"
+  | "single-word";
+
+export type StoryRegister =
+  | "neutral"
+  | "formal"
+  | "literary"
+  | "spoken";
+
+export interface StoryKeyExpression {
+  phrase: string;
+  headword: string;
+  type: StoryExpressionType;
+  zh: string;
+  register: StoryRegister;
+  whyUseful: string;
+  inText: boolean;
+  /** Set when this came from PREFERRED_VOCAB injected into the prompt. */
+  fromVocab: number | null;
+  /** Server-filled: id of an existing card whose word matches the headword. */
+  existingCardId?: number | null;
+}
+
+export interface StorySceneFrame {
+  subjects: string[];
+  actions: string[];
+  setting: string;
+  mood: string;
+}
+
+export interface StoryArtifact {
+  title: string;
+  description: string;
+  translation: string;
+  sceneFrame: StorySceneFrame;
+  keyExpressions: StoryKeyExpression[];
+}
+
 export interface Story {
   id: number;
   imagePath: string;
   prompt: string;
+  /** Plain text fallback / TTS source (mirrors artifact.description when available). */
   story: string;
+  /** Structured artifact for the new UI. Null on legacy rows. */
+  artifact: StoryArtifact | null;
   sources: GroundingSource[];
   createdAt: number;
 }

@@ -50,6 +50,13 @@
       "when": 1780000000000,
       "tag": "0006_word_form_lower_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1780020000000,
+      "tag": "0007_story_artifact",
+      "breakpoints": true
     }
   ]
 }

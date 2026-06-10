@@ -253,6 +253,9 @@ function normalizeChunkRegister(value: unknown): unknown {
   if (v === "scholarly" || v === "scientific" || v === "technical") return "academic";
   if (v === "poetic" || v === "literary-style") return "literary";
   if (v === "standard" || v === "general") return "neutral";
+  // Unknown register: return as-is so downstream zod can flag the top-level
+  // chunk.register. Example-level registers are coerced to neutral at their
+  // call site (normalizeChunkExamples), where leniency is intended.
   return value;
 }
 
@@ -295,7 +298,12 @@ function normalizeChunkExamples(value: unknown): unknown {
         (typeof item.text === "string" ? item.text : undefined) ??
         (typeof item.example === "string" ? item.example : undefined);
       if (!sentence) return null;
-      const register = normalizeChunkRegister(item.register) ?? "neutral";
+      const r = normalizeChunkRegister(item.register);
+      const register =
+        typeof r === "string" &&
+        ["neutral", "formal", "spoken", "academic", "literary"].includes(r)
+          ? r
+          : "neutral";
       return { sentence, register };
     })
     .filter(Boolean);
@@ -394,4 +402,140 @@ export function normalizeChunkResponse(parsed: unknown): unknown {
   }
 
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Story artifact
+// ---------------------------------------------------------------------------
+
+const STORY_EXPR_TYPES = new Set([
+  "collocation",
+  "idiom",
+  "sentence-pattern",
+  "phrasal-verb",
+  "single-word",
+]);
+
+const STORY_REGISTERS = new Set([
+  "neutral",
+  "formal",
+  "literary",
+  "spoken",
+]);
+
+function normalizeStoryExpression(value: unknown): unknown | null {
+  if (!isRecord(value)) return null;
+  const out = { ...value };
+
+  const phrase =
+    typeof out.phrase === "string"
+      ? out.phrase
+      : typeof out.text === "string"
+        ? out.text
+        : "";
+  if (!phrase.trim()) return null;
+  out.phrase = phrase.trim();
+
+  // Headword: fall back to phrase's most-letter-y token.
+  let headword =
+    typeof out.headword === "string" && out.headword.trim()
+      ? out.headword.trim()
+      : "";
+  if (!headword) {
+    const tokens = phrase
+      .toLowerCase()
+      .split(/[^a-z'-]+/)
+      .filter((t) => t.length > 1 && !/^(a|an|the|to|of|in|on|at|by|for|with|sb|sth|one|s)$/.test(t));
+    headword = tokens[0] ?? phrase.toLowerCase();
+  }
+  out.headword = headword;
+
+  out.type = STORY_EXPR_TYPES.has(String(out.type)) ? out.type : "collocation";
+  out.register = STORY_REGISTERS.has(String(out.register)) ? out.register : "neutral";
+
+  out.zh = typeof out.zh === "string" ? out.zh : String(out.zh ?? "");
+  out.whyUseful =
+    typeof out.whyUseful === "string"
+      ? out.whyUseful
+      : typeof out.why === "string"
+        ? out.why
+        : "";
+
+  out.inText = out.inText === true;
+
+  const fromVocab = coerceNumber(out.fromVocab);
+  out.fromVocab = fromVocab != null && fromVocab > 0 ? fromVocab : null;
+
+  // existingCardId is filled server-side after this normalize step.
+  if (out.existingCardId !== undefined) {
+    const eid = coerceNumber(out.existingCardId);
+    out.existingCardId = eid != null && eid > 0 ? eid : null;
+  }
+
+  return out;
+}
+
+function normalizeSceneFrame(value: unknown): unknown {
+  const def = { subjects: [], actions: [], setting: "", mood: "" };
+  if (!isRecord(value)) return def;
+  return {
+    subjects: coerceStringArray(value.subjects) ?? [],
+    actions: coerceStringArray(value.actions) ?? [],
+    setting: typeof value.setting === "string" ? value.setting : "",
+    mood: typeof value.mood === "string" ? value.mood : "",
+  };
+}
+
+/**
+ * Normalize a possibly-loose model output into a StoryArtifact shape.
+ * Returns null if essential fields (description) are missing — the caller
+ * should fall back to building a minimal artifact from plain text.
+ */
+export function normalizeStoryArtifact(parsed: unknown): unknown | null {
+  if (!isRecord(parsed)) return null;
+  const out = { ...parsed };
+
+  // description is the only must-have field.
+  const description =
+    typeof out.description === "string"
+      ? out.description
+      : typeof out.story === "string"
+        ? out.story
+        : typeof out.text === "string"
+          ? out.text
+          : "";
+  if (!description.trim()) return null;
+
+  out.title = typeof out.title === "string" ? out.title : "";
+  out.description = description.trim();
+  out.translation =
+    typeof out.translation === "string" ? out.translation.trim() : "";
+
+  out.sceneFrame = normalizeSceneFrame(out.sceneFrame);
+
+  const exprArr = Array.isArray(out.keyExpressions)
+    ? out.keyExpressions
+    : Array.isArray(out.expressions)
+      ? out.expressions
+      : [];
+  out.keyExpressions = exprArr
+    .map(normalizeStoryExpression)
+    .filter((e): e is Record<string, unknown> => e !== null)
+    .slice(0, 8); // hard cap — prompt asks for 5-8, defend against over-generation
+
+  return out;
+}
+
+/**
+ * Build a minimal artifact from a plain-text description (used when JSON
+ * parsing fails entirely — keeps the UI working with just the paragraph).
+ */
+export function buildFallbackStoryArtifact(description: string): unknown {
+  return {
+    title: "",
+    description: description.trim(),
+    translation: "",
+    sceneFrame: { subjects: [], actions: [], setting: "", mood: "" },
+    keyExpressions: [],
+  };
 }

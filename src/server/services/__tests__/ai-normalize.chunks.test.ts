@@ -187,6 +187,38 @@ describe("normalizeChunkPayload — enum coercion", () => {
   });
 });
 
+describe("normalizeChunkPayload — example register coercion", () => {
+  // Unlike the top-level chunk.register (which fails loud), an out-of-enum
+  // register on an *example* must not reject the whole chunk. Models routinely
+  // emit a life-domain ("social", "news", "work") here because the prompt asks
+  // for one example per domain. Regression test for the 27%-drop bug.
+  it("coerces an unknown example register (life-domain) to neutral", () => {
+    const out = normalizeChunkPayload(
+      basePayload({
+        examples: [
+          { sentence: "The new rule poses a threat to small shops.", register: "news" },
+          { sentence: "I felt it took its toll on me.", register: "emotional" },
+          { sentence: "We met the team's needs on time.", register: "formal" },
+        ],
+      }),
+    ) as { examples: Array<{ sentence: string; register: string }> };
+    expect(out.examples.map((e) => e.register)).toEqual([
+      "neutral", // "news"      → unknown → neutral
+      "neutral", // "emotional" → unknown → neutral
+      "formal", // valid enum   → preserved
+    ]);
+  });
+
+  it("still maps known register synonyms on examples (informal → spoken)", () => {
+    const out = normalizeChunkPayload(
+      basePayload({
+        examples: [{ sentence: "Yeah, that works for me.", register: "informal" }],
+      }),
+    ) as { examples: Array<{ register: string }> };
+    expect(out.examples[0].register).toBe("spoken");
+  });
+});
+
 describe("normalizeChunkPayload — field defaults & aliases", () => {
   it("missing slots becomes []", () => {
     const p = basePayload();

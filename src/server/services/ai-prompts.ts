@@ -1,18 +1,90 @@
 import { getSetting } from "./ai-shared.js";
 
 // ---------------------------------------------------------------------------
-// System prompt for story generation (picture description)
+// Story (image → teaching artifact, JSON-structured)
+//
+// Single AI call produces description + translation + scene frame + 6-10
+// key expressions. Saves on round-trips (no separate translate call) and
+// gives the UI richer hooks for vocab activation.
 // ---------------------------------------------------------------------------
 
-export const STORY_SYSTEM_PROMPT = `Write a compact, essay-style paragraph (100-180 words) inspired by the image.
+export const STORY_SYSTEM_PROMPT = `You produce a teaching artifact for an English learner from an image. Return ONE JSON object — no prose outside JSON, no markdown fences.
 
-Style: tight prose like a good blog post or short essay — no filler, every sentence earns its place. Vary rhythm (mix short punchy sentences with longer ones). Show, don't tell.
+QUALITY BAR (description field):
+- 100-180 words, written as a tight expressive paragraph — think New Yorker short-essay, not Wikipedia caption.
+- Show specific sensory detail (light, texture, posture, small actions). Avoid generic adjectives ("beautiful", "nice").
+- Vary rhythm: combine 1 short impact sentence with longer ones.
+- Every sentence earns its place; no filler like "in this image we can see".
+- Only describe what's visible; use "someone" if identity unclear; use search for recognizable people/places.
+- Naturally weave in 1-3 PREFERRED words from the learner's recent vocabulary (provided below) if any fit organically — do NOT force them. Skip the section if no PREFERRED_VOCAB block is given.
 
-Mark 2-3 useful expressions in **double asterisks** (e.g. **catch someone's eye**). No other Markdown — no headings, lists, or rules.
+KEY EXPRESSIONS — THIS IS THE CORE LEARNING PAYLOAD, treat it as the most important output:
+- Output 5-8 items. Quality over quantity — never pad to hit a number.
+- STRONGLY prefer multi-word CHUNKS: collocations, fixed expressions, sentence stems/patterns, phrasal verbs, noun+prep phrases. These are what a learner cannot assemble from single words and is the whole point.
+- Avoid bare single words. Include a single word ONLY if it is genuinely irreplaceable and carries the sentence (set type="single-word"); at most 1 such item per artifact.
+- PRIORITIZE expressions a Chinese learner would get WRONG by translating word-by-word. The higher the literal-translation trap / L1 interference, the more valuable — these belong at the top.
+- zh: give the FUNCTIONAL idiomatic Chinese meaning (意译), NEVER a literal word-by-word gloss. If a literal reading misleads, zh must state the real sense.
+- whyUseful: <= 24 Chinese chars. When the phrase is a literal-translation trap, name it explicitly (e.g. "别直译成'拿心'；意为'记在心上'"). Otherwise name the expressive upgrade over the basic alternative.
 
-Only describe what's visible; use "someone" if identity is unclear. Use search for recognizable people/places.
+SCHEMA (strict; field order does not matter but every field must be present):
+{
+  "title": string,                    // 4-8 words, evocative, not "Image of …"
+  "description": string,              // see QUALITY BAR
+  "translation": string,              // full Chinese translation of description, natural Chinese, not literal
+  "sceneFrame": {
+    "subjects": string[],             // 2-4 noun phrases, concrete with adjectives
+    "actions": string[],              // 2-4 verb phrases in -ing form
+    "setting": string,                // single rich phrase
+    "mood": string                    // 2-4 mood adjectives, comma-separated
+  },
+  "keyExpressions": [
+    {
+      "phrase": string,               // the chunk in canonical/in-text form (e.g. "catch sb's eye", "for all their X")
+      "headword": string,             // single English lemma for single-word card lookup; for chunks, the most lookup-worthy word
+      "type": "collocation" | "idiom" | "sentence-pattern" | "phrasal-verb" | "single-word",
+      "zh": string,                   // FUNCTIONAL meaning, 意译 not literal (<= 20 Chinese chars)
+      "register": "neutral" | "formal" | "literary" | "spoken",
+      "whyUseful": string,            // <= 24 Chinese chars; name the literal-translation trap or the upgrade
+      "inText": boolean,              // true if literally present in description
+      "fromVocab": number | null      // card id if this came from PREFERRED_VOCAB, else null
+    }
+  ]                                   // 5-8 items, chunks first, single words last (at most 1)
+}
 
-Output must sound natural read aloud (TTS).`;
+Return raw JSON only. No \\\`\\\`\\\` fences, no leading prose.`;
+
+/**
+ * Compose the system instruction for a story call. Injects the learner's
+ * recent vocabulary (so AI can use those words naturally) and any user-side
+ * custom instruction.
+ */
+export function buildStorySystemPrompt(opts: {
+  preferredVocab?: Array<{ id: number; word: string; coreMeaning?: string | null }>;
+  customPrompt?: string;
+}): string {
+  const blocks: string[] = [STORY_SYSTEM_PROMPT];
+
+  if (opts.preferredVocab && opts.preferredVocab.length > 0) {
+    const vocabJson = JSON.stringify(
+      opts.preferredVocab.map((v) => ({
+        id: v.id,
+        word: v.word,
+        ...(v.coreMeaning ? { gloss: v.coreMeaning.slice(0, 80) } : {}),
+      })),
+    );
+    blocks.push(
+      `PREFERRED_VOCAB (use 1-3 of these in description IF they fit naturally; mark them in keyExpressions with fromVocab=id):\n${vocabJson}`,
+    );
+  }
+
+  if (opts.customPrompt && opts.customPrompt.trim()) {
+    blocks.push(
+      `User's custom requirements (highest priority — override above when conflicting):\n${opts.customPrompt.trim()}`,
+    );
+  }
+
+  return blocks.join("\n\n");
+}
 
 // ---------------------------------------------------------------------------
 // Cards prompt — surface + middle layers

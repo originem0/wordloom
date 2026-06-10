@@ -33,6 +33,8 @@ data/*.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
+data/*.bak*
+data/*.db.bak*
 
 # Uploaded images
 data/images/*
@@ -50,3 +52,7 @@ backups/
 .claude/settings.local.json
 tmp/batch-progress.json
 tmp/batch-failed.json
+
+# Python tooling caches (tools/*.py)
+__pycache__/
+*.pyc

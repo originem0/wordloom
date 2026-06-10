@@ -5,6 +5,9 @@ export const stories = sqliteTable("stories", {
   imagePath: text("image_path").notNull(),
   prompt: text("prompt").default(""),
   story: text("story").notNull(),
+  /** JSON: StoryArtifact (description / translation / sceneFrame / keyExpressions).
+   *  Nullable so legacy rows generated before this column was added still load. */
+  artifact: text("artifact"),
   sources: text("sources"), // JSON string: GroundingSource[]
   createdAt: integer("created_at").notNull(),
 });

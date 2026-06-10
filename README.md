@@ -4,14 +4,18 @@ AI 驱动的英语学习工具。上传图片生成英语故事，点击生词�
 
 ## 功能
 
-**Story Studio** — 图片 → 英语故事 → 语音朗读
+**Story Studio** — 图片 → 结构化教学 artifact → 语音朗读
 
-- 上传图片，AI 生成 100-180 词的紧凑散文风格短文（tight prose, every sentence earns its place）
+- 上传图片，AI **一次调用**产出结构化教学 artifact：标题 + 100-180 词紧凑散文短文（tight prose, every sentence earns its place）+ 全文中文翻译 + 看图说话脚手架 + 表达精选
+- **表达精选（核心学习负载）**：从故事中提炼 6-10 条**多词组块**（搭配 / 习语 / 句型 / 短语动词 / 名介结构），优先收录中国学习者最易**逐字直译踩坑**的表达——L1 干扰越强越靠前；每条带中文释义、语域、一句话点明"陷阱或升级点"
+  - 联动词库：headword 命中已有词卡 → "查看已有词卡"；否则一键"生成新词卡"（多词组块送入 Chunk Forge、单词进 Word Forge）
+  - 喂入最近学过的词（PREFERRED_VOCAB）时，AI 在描述里自然融入并标记"你刚学的"
+- **看图说话脚手架**：拆出场景框架（主体 / 动作 / 场景 / 氛围），供口语描述练习
+- 全文中文翻译随 artifact 一并产出，省一次翻译往返；旧故事无 artifact 时自动回退纯文本
 - 故事文本可交互：双击单词生成词汇卡片；已有卡片自动跳转，不重复生成
 - 故事文本框支持一键复制
 - 自定义指令折叠面板：支持多行输入，默认收起不占空间
 - TTS：浏览器离线朗读 / Edge TTS（免费）/ Gemini TTS（AI 语音）
-- 一键翻译为中文
 - Google Search Grounding 自动补充真实信息
 - 生成任务走异步 Job 队列（`jobId` + 轮询），避免"前端先失败、后端晚成功"的错觉
 
@@ -188,8 +192,8 @@ src/
 │   ├── services/
 │   │   ├── ai-router.ts    # Provider 分发（读 {route}_provider 设置，含 chunks 路由）
 │   │   ├── ai-shared.ts    # Retry/timeout/settings/semaphore/fallback
-│   │   ├── ai-prompts.ts   # Prompt 常量 + 语言指令（cards / deep / chunk）
-│   │   ├── ai-normalize.ts # JSON 解析 + schema drift 容错（cards + chunks）
+│   │   ├── ai-prompts.ts   # Prompt 常量 + 语言指令（story / cards / deep / chunk）
+│   │   ├── ai-normalize.ts # JSON 解析 + schema drift 容错（story artifact + cards + chunks）
 │   │   ├── gemini.ts       # Gemini SDK 调用
 │   │   ├── openai-compat.ts # OpenAI-compatible raw fetch 调用
 │   │   ├── edge-tts.ts     # Edge TTS

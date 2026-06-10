@@ -4,7 +4,11 @@ import {
   aiDeepLayerSchema,
   aiChunkResponseSchema,
 } from "../../shared/validation.js";
-import type { GroundingSource, ChunkGenerateResult } from "../../shared/types.js";
+import type {
+  GroundingSource,
+  ChunkGenerateResult,
+  StoryArtifact,
+} from "../../shared/types.js";
 import {
   Semaphore,
   getSetting,
@@ -16,14 +20,22 @@ import {
   parseJsonLenient,
   normalizeCardsPayload,
   normalizeChunkResponse,
+  normalizeStoryArtifact,
+  buildFallbackStoryArtifact,
 } from "./ai-normalize.js";
 import {
-  STORY_SYSTEM_PROMPT,
+  buildStorySystemPrompt,
   CARDS_PROMPT,
   DEEP_PROMPT,
   CHUNKS_PROMPT,
   getExplanationLanguageInstruction,
 } from "./ai-prompts.js";
+
+export interface PreferredVocabItem {
+  id: number;
+  word: string;
+  coreMeaning?: string | null;
+}
 
 // ---------------------------------------------------------------------------
 // Semaphores — limits concurrent Gemini API calls
@@ -55,7 +67,8 @@ export async function geminiGenerateStory(
   imageBuffer: Buffer,
   mimeType: string,
   prompt: string,
-): Promise<{ story: string; sources: GroundingSource[] }> {
+  preferredVocab: PreferredVocabItem[] = [],
+): Promise<{ artifact: StoryArtifact; sources: GroundingSource[] }> {
   await acquireSemaphore(geminiSemaphore);
   try {
     return await runWithModelFallback({
@@ -67,10 +80,10 @@ export async function geminiGenerateStory(
       run: async (model) => {
         const ai = await getClient();
 
-        let systemInstruction = STORY_SYSTEM_PROMPT;
-        if (prompt) {
-          systemInstruction += `\n\n**User's Custom Requirements (PRIORITY):**\n${prompt}`;
-        }
+        const systemInstruction = buildStorySystemPrompt({
+          preferredVocab,
+          customPrompt: prompt,
+        });
 
         const response = await ai.models.generateContent({
           model,
@@ -84,7 +97,7 @@ export async function geminiGenerateStory(
                     data: imageBuffer.toString("base64"),
                   },
                 },
-                { text: "Describe this image following the instructions." },
+                { text: "Describe this image following the instructions. Return ONLY the JSON object." },
               ],
             },
           ],
@@ -94,7 +107,21 @@ export async function geminiGenerateStory(
           },
         });
 
-        const story = response.text ?? "";
+        const raw = response.text ?? "";
+
+        // Tolerant parse: JSON → normalize → graceful fallback to plain text.
+        let artifact: StoryArtifact;
+        try {
+          const parsed = parseJsonLenient(raw);
+          const normalized = normalizeStoryArtifact(parsed);
+          if (normalized) {
+            artifact = normalized as StoryArtifact;
+          } else {
+            artifact = buildFallbackStoryArtifact(raw) as StoryArtifact;
+          }
+        } catch {
+          artifact = buildFallbackStoryArtifact(raw) as StoryArtifact;
+        }
 
         const sources: GroundingSource[] = [];
         const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
@@ -111,7 +138,7 @@ export async function geminiGenerateStory(
           }
         }
 
-        return { story, sources };
+        return { artifact, sources };
       },
     });
   } finally {

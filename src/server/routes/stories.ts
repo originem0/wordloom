@@ -4,14 +4,19 @@ import { randomUUID, createHash } from "crypto";
 import { mkdir, readFile, readdir, unlink, writeFile } from "fs/promises";
 import { join } from "path";
 import { db } from "../db/index.js";
-import { stories } from "../db/schema.js";
-import { eq, desc, sql } from "drizzle-orm";
+import { stories, cards } from "../db/schema.js";
+import { eq, desc, sql, inArray } from "drizzle-orm";
 import { compressImage } from "../services/image.js";
 import { generateStory, generateTTS, translateText } from "../services/ai-router.js";
 import { AI_BUSY } from "../services/ai-shared.js";
+import type { PreferredVocabItem } from "../services/gemini.js";
 import { generateEdgeTtsMp3 } from "../services/edgeTts.js";
 import { pcmToWav } from "../services/tts.js";
-import type { Story, GroundingSource } from "../../shared/types.js";
+import type {
+  Story,
+  StoryArtifact,
+  GroundingSource,
+} from "../../shared/types.js";
 import { rateLimit, dailyLimit } from "../middleware/rateLimit.js";
 import {
   createJob,
@@ -31,7 +36,7 @@ await mkdir(TTS_CACHE_DIR, { recursive: true });
 
 export const storyRoutes = new Hono();
 
-/** Parse a story DB row into the API shape (JSON-decode sources). */
+/** Parse a story DB row into the API shape (JSON-decode sources + artifact). */
 function toStory(row: typeof stories.$inferSelect): Story {
   let sources: GroundingSource[] = [];
   if (row.sources) {
@@ -41,14 +46,90 @@ function toStory(row: typeof stories.$inferSelect): Story {
       /* ignore malformed JSON */
     }
   }
+  let artifact: StoryArtifact | null = null;
+  if (row.artifact) {
+    try {
+      artifact = JSON.parse(row.artifact) as StoryArtifact;
+    } catch {
+      /* legacy or malformed — fall through */
+    }
+  }
   return {
     id: row.id,
     imagePath: row.imagePath,
     prompt: row.prompt ?? "",
     story: row.story,
+    artifact,
     sources,
     createdAt: row.createdAt,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Vocabulary Push: pull learner's recent / under-used cards to inject into
+// the prompt, then post-match keyExpressions back to card ids.
+// ---------------------------------------------------------------------------
+
+const VOCAB_PUSH_LIMIT = 12;
+
+/** Recent cards (last 30 days) with low usage — what the learner hasn't deployed yet. */
+async function fetchPreferredVocab(): Promise<PreferredVocabItem[]> {
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const rows = await db
+    .select({
+      id: cards.id,
+      word: cards.word,
+      coreMeaning: cards.coreMeaning,
+      usageCount: cards.usageCount,
+      createdAt: cards.createdAt,
+    })
+    .from(cards)
+    .where(sql`${cards.createdAt} >= ${thirtyDaysAgo}`)
+    .orderBy(cards.usageCount, desc(cards.createdAt))
+    .limit(VOCAB_PUSH_LIMIT)
+    .all();
+  return rows.map((r) => ({
+    id: r.id,
+    word: r.word,
+    coreMeaning: r.coreMeaning ?? null,
+  }));
+}
+
+/** Match single-word expressions' headword against the cards table; fill existingCardId.
+ *  Multi-word chunks are NOT looked up here — they belong to Chunk Forge, and the
+ *  UI routes them there instead of to single-word cards. */
+async function attachExistingCardIds(artifact: StoryArtifact): Promise<void> {
+  if (!artifact.keyExpressions?.length) return;
+
+  // Default everything to null; only single-word items can resolve to a card.
+  for (const expr of artifact.keyExpressions) {
+    expr.existingCardId = null;
+  }
+
+  const singleWordHeads = Array.from(
+    new Set(
+      artifact.keyExpressions
+        .filter((e) => e.type === "single-word")
+        .map((e) => e.headword?.toLowerCase().trim())
+        .filter((h): h is string => !!h),
+    ),
+  );
+  if (singleWordHeads.length === 0) return;
+
+  const found = await db
+    .select({ id: cards.id, word: cards.word })
+    .from(cards)
+    .where(inArray(sql`lower(${cards.word})`, singleWordHeads))
+    .all();
+  const map = new Map(found.map((r) => [r.word.toLowerCase(), r.id]));
+
+  for (const expr of artifact.keyExpressions) {
+    if (expr.type !== "single-word") continue;
+    const head = expr.headword?.toLowerCase().trim();
+    if (head && map.has(head)) {
+      expr.existingCardId = map.get(head) ?? null;
+    }
+  }
 }
 
 type StoryJobInput = {
@@ -61,7 +142,16 @@ async function createStoryRecord(input: StoryJobInput): Promise<Story> {
   const { prompt, mimeType, imageBuffer } = input;
 
   const result = await compressImage(imageBuffer, mimeType);
-  const generated = await generateStory(result.buffer, result.mimeType, prompt);
+  const preferredVocab = await fetchPreferredVocab();
+  const generated = await generateStory(
+    result.buffer,
+    result.mimeType,
+    prompt,
+    preferredVocab,
+  );
+
+  // Post-process: link keyExpression.headword to any existing card.
+  await attachExistingCardIds(generated.artifact);
 
   const filename = `${randomUUID()}.jpg`;
   const imagePath = `data/images/${filename}`;
@@ -73,7 +163,8 @@ async function createStoryRecord(input: StoryJobInput): Promise<Story> {
     .values({
       imagePath,
       prompt,
-      story: generated.story,
+      story: generated.artifact.description,
+      artifact: JSON.stringify(generated.artifact),
       sources: JSON.stringify(generated.sources),
       createdAt: now,
     })

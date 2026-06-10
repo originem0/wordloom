@@ -1,12 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ModuleErrorBoundary } from "@/client/components/layout/ErrorBoundary";
 import { ChunkInput } from "./ChunkInput";
 import { ChunkCollection } from "./ChunkCollection";
 
 function ChunkForgeInner() {
-  // Lift "prefill" state so empty-state suggestions in ChunkCollection
-  // can populate ChunkInput's textarea.
-  const [prefill, setPrefill] = useState("");
+  // Lift "prefill" state so empty-state suggestions in ChunkCollection,
+  // and the ?prefill= URL param (e.g. coming from Story's key expressions),
+  // can both populate ChunkInput's textarea.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [prefill, setPrefill] = useState(() => searchParams.get("prefill") || "");
+
+  // Consume the URL param once on mount so a refresh doesn't re-trigger it.
+  useEffect(() => {
+    if (!searchParams.get("prefill")) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("prefill");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 md:space-y-8 md:p-6">

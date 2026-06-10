@@ -1,4 +1,8 @@
-import type { GroundingSource, ChunkGenerateResult } from "../../shared/types.js";
+import type {
+  GroundingSource,
+  ChunkGenerateResult,
+  StoryArtifact,
+} from "../../shared/types.js";
 import { getSetting, type ParsedCard } from "./ai-shared.js";
 import {
   geminiGenerateStory,
@@ -8,6 +12,7 @@ import {
   geminiExtractWords,
   geminiTranslateText,
   generateTTS,
+  type PreferredVocabItem,
 } from "./gemini.js";
 import {
   openaiGenerateStory,
@@ -40,12 +45,13 @@ export async function generateStory(
   imageBuffer: Buffer,
   mimeType: string,
   prompt: string,
-): Promise<{ story: string; sources: GroundingSource[] }> {
+  preferredVocab: PreferredVocabItem[] = [],
+): Promise<{ artifact: StoryArtifact; sources: GroundingSource[] }> {
   const provider = await getProvider("story");
   if (provider === "openai") {
-    return openaiGenerateStory(imageBuffer, mimeType, prompt);
+    return openaiGenerateStory(imageBuffer, mimeType, prompt, preferredVocab);
   }
-  return geminiGenerateStory(imageBuffer, mimeType, prompt);
+  return geminiGenerateStory(imageBuffer, mimeType, prompt, preferredVocab);
 }
 
 export async function generateCards(

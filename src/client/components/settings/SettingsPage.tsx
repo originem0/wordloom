@@ -317,8 +317,30 @@ export function SettingsPage() {
 
       {/* ══════════ ABOUT ══════════ */}
       <SectionHeader>About</SectionHeader>
-      <div className="py-3 text-[13px] leading-6 text-muted-foreground/70">
-        <span className="font-medium text-foreground">WordLoom</span> — AI-powered English learning workspace: generate compact image-based stories, listen with TTS, double-click words into cards, and explore deep vocabulary analysis in one loop.
+      <div className="space-y-2 py-3 text-[13px] leading-6 text-muted-foreground/80">
+        <p>
+          <span className="font-medium text-foreground">WordLoom</span> ——
+          以"习得 → 部署"为闭环的英语学习工作台。
+        </p>
+        <ul className="space-y-1 pl-1">
+          <li>
+            <span className="font-medium text-foreground">Story Studio</span>：
+            上传图片，AI 产出一份「教学素材包」——高质量描述、中文翻译、看图说话脚手架，以及
+            5-8 个可直接激活的地道表达（优先多词组块，标注直译陷阱）。
+          </li>
+          <li>
+            <span className="font-medium text-foreground">Word Forge</span>：
+            查/造合一的词卡工坊——搜得到就用，搜不到一键生成；分层卡片含音标、词源、认知意象与边界测试。
+          </li>
+          <li>
+            <span className="font-medium text-foreground">Chunk Forge</span>：
+            多词组块词典——AI 判定搭配/句型/习语，结构化呈现槽位、语域与 L1 干扰陷阱。
+          </li>
+        </ul>
+        <p className="text-muted-foreground/60">
+          三个模块共享同一词库：故事里学到的表达可一键沉淀为词卡或组块，下次写作时
+          AI 会优先复现你尚未用过的词。
+        </p>
       </div>
 
       {/* ── Sticky bottom save bar ── */}
