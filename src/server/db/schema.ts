@@ -60,13 +60,17 @@ export const sessions = sqliteTable("sessions", {
 
 export const jobs = sqliteTable("jobs", {
   id: text("id").primaryKey(),
-  type: text("type").notNull(), // story | cards | chunks
+  type: text("type").notNull(), // story | cards | chunks | practice
   status: text("status").notNull(), // queued | running | done | failed | cancelled
   input: text("input").notNull(), // JSON payload
   result: text("result"), // JSON payload
   error: text("error"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
+  // Added to match jobs.ts service, which writes these (the column was missing,
+  // breaking every async job at runtime). Nullable: set on running/finish.
+  startedAt: integer("started_at"),
+  completedAt: integer("completed_at"),
 });
 
 // ---------------------------------------------------------------------------
@@ -106,4 +110,28 @@ export const chunks = sqliteTable("chunks", {
   index("chunks_created_at_idx").on(table.createdAt),
   index("chunks_category_idx").on(table.category),
   unique("chunks_form_category_unique").on(table.form, table.category),
+]);
+
+// ---------------------------------------------------------------------------
+// Practices: AI-generated picture-description prompts. The image + question are
+// persisted (re-doable); each answer/feedback round is ephemeral (not stored).
+// ---------------------------------------------------------------------------
+
+export const practices = sqliteTable("practices", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  imagePath: text("image_path").notNull(),
+  // User-entered topic; "" when left free.
+  topic: text("topic").default(""),
+  // Art-style preset for the image (documentary/cinematic/watercolor/retro-film/anime).
+  style: text("style").default("documentary"),
+  // AI-expanded English scene prompt fed to the image model; also grading ground-truth.
+  visualPrompt: text("visual_prompt").notNull(),
+  sceneFrame: text("scene_frame"), // JSON: StorySceneFrame
+  targetWords: text("target_words"), // JSON: string[] — legacy, unused (column kept for compat)
+  suggestedChunks: text("suggested_chunks"), // JSON: { form, example }[]
+  starterLine: text("starter_line"),
+  taskBrief: text("task_brief"),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  index("practices_created_at_idx").on(table.createdAt),
 ]);
