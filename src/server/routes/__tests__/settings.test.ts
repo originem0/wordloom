@@ -261,3 +261,41 @@ describe("settings /test endpoint — OpenAI model tests token budget", () => {
     expect(body.error.message).not.toBe("Invalid JSON response");
   });
 });
+
+describe("settings PUT — masked-literal write guard", () => {
+  async function putSetting(key: string, value: string): Promise<{ status: number; body: any }> {
+    const app = buildApp();
+    const res = await app.request("/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, value }),
+    });
+    return { status: res.status, body: await res.json() };
+  }
+
+  it("rejects saving the GET mask literal to sensitive keys", async () => {
+    // The GET handler masks base URLs / API keys as "configured" for anonymous
+    // readers; echoing that back through save must not destroy the real value.
+    for (const key of ["gemini_base_url", "image_base_url", "gemini_api_key"]) {
+      const { status, body } = await putSetting(key, "configured");
+      expect(status).toBe(400);
+      expect(body.code).toBe("MASKED_LITERAL");
+    }
+  });
+
+  it("still saves real values and clears to sensitive keys", async () => {
+    const real = await putSetting("image_base_url", "https://img.example.com/v1");
+    expect(real.status).toBe(200);
+    expect(real.body.ok).toBe(true);
+
+    const cleared = await putSetting("image_base_url", "");
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.ok).toBe(true);
+  });
+
+  it("allows 'configured' as a value for non-sensitive keys", async () => {
+    const { status, body } = await putSetting("explanation_language", "configured");
+    expect(status).toBe(200);
+    expect(body.ok).toBe(true);
+  });
+});

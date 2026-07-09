@@ -295,6 +295,8 @@ export function AIProvidersPage() {
 
       for (const pair of pairs) {
         if (pair.skipEmpty && !pair.value.trim()) continue;
+        // Never echo the anonymous-GET mask back into the DB (server rejects it too).
+        if (pair.value.trim() === "configured") continue;
         await updateSetting.mutateAsync({ key: pair.key, value: pair.value.trim() });
       }
       toast.success("AI provider settings saved");
@@ -533,12 +535,12 @@ export function AIProvidersPage() {
       <SectionHeader>Image Generation</SectionHeader>
 
       <p className="px-1 pt-1 text-[11px] leading-relaxed text-muted-foreground/70">
-        看图说话出题用。生图网关常与文本中转站不同——可单独配 key/URL；留空则回退上面的 OpenAI 配置。生图较慢且贵，请配合下方 Usage Limits。
+        看图说话出题用。生图网关常与文本中转站不同——配置 Base URL 即启用独立生图网关；Base URL 留空则整套回退上面的 OpenAI 配置（此时这里的 key 不生效，避免 key 与网关错配）。生图较慢且贵，请配合下方 Usage Limits。
       </p>
 
       <SettingRow
         title="API Key"
-        subtitle="生图网关的 key；留空回退 OpenAI key"
+        subtitle="生图网关的 key；仅在配置了下方 Base URL 时使用，留空借用 OpenAI key"
         right={<Badge variant="outline" className="rounded-md text-[10px]">{hasImageKey ? "saved" : "inherit"}</Badge>}
         defaultOpen={!hasImageKey}
       >
@@ -553,7 +555,7 @@ export function AIProvidersPage() {
 
       <SettingRow
         title="Base URL"
-        subtitle="留空回退 OpenAI Base URL"
+        subtitle="留空 = 整套回退 OpenAI（URL+key）"
         value={draftValue("image_base_url") || "(inherit OpenAI)"}
       >
         <Input

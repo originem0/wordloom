@@ -15,7 +15,6 @@ import type {
 import {
   Semaphore,
   getSetting,
-  getFirstSetting,
   runWithModelFallback,
   acquireSemaphore,
   type ParsedCard,
@@ -462,24 +461,50 @@ ${text}`,
 
 // ---------------------------------------------------------------------------
 // Image generation (gpt-image-2 etc.) — may live on a SEPARATE gateway from the
-// text endpoint, so it has its own key/base-url settings that fall back to the
-// text OpenAI ones when blank.
+// text endpoint. Setting image_base_url opts in to that gateway; when it is
+// blank the FULL openai pair is used and image_api_key is ignored.
 // ---------------------------------------------------------------------------
 
 const openaiImageSemaphore = new Semaphore(2);
 
+/** Key must follow URL — an image-gateway key sent to the text gateway 401s
+ *  ("Invalid token"), so the key/URL pair resolves together, never crossed. */
+export function resolveImageConfig(cfg: {
+  imageKey: string;
+  imageUrl: string;
+  openaiKey: string;
+  openaiUrl: string;
+}): { apiKey: string; baseUrl: string } {
+  if (cfg.imageUrl) {
+    return { apiKey: cfg.imageKey || cfg.openaiKey, baseUrl: cfg.imageUrl };
+  }
+  return { apiKey: cfg.openaiKey, baseUrl: cfg.openaiUrl };
+}
+
 async function getImageConfig(): Promise<{ apiKey: string; imagesUrl: string }> {
-  const apiKey = await getFirstSetting(["image_api_key", "openai_api_key"]);
-  if (!apiKey)
+  const [imageKey, imageUrl, openaiKey, openaiUrl] = await Promise.all([
+    getSetting("image_api_key"),
+    getSetting("image_base_url"),
+    getSetting("openai_api_key"),
+    getSetting("openai_base_url"),
+  ]);
+  const resolved = resolveImageConfig({
+    imageKey: imageKey.trim(),
+    imageUrl: imageUrl.trim(),
+    openaiKey: openaiKey.trim(),
+    openaiUrl: openaiUrl.trim(),
+  });
+
+  if (!resolved.apiKey)
     throw new Error("Image API Key not configured. Set it in AI Providers (Image Generation).");
 
-  const baseUrl = (await getFirstSetting(["image_base_url", "openai_base_url"])).replace(/\/+$/, "");
+  const baseUrl = resolved.baseUrl.replace(/\/+$/, "");
   if (!baseUrl)
     throw new Error("Image Base URL not configured. Set it in AI Providers (Image Generation).");
 
   // Normalize: if base already ends with /v1, don't double it
   const imagesPath = /\/v1\/?$/i.test(baseUrl) ? "images/generations" : "v1/images/generations";
-  return { apiKey, imagesUrl: `${baseUrl}/${imagesPath}` };
+  return { apiKey: resolved.apiKey, imagesUrl: `${baseUrl}/${imagesPath}` };
 }
 
 /** Generate one image and return it as a Buffer (caller compresses + persists). */

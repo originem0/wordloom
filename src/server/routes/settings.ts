@@ -279,6 +279,17 @@ settingRoutes.put("/", authMiddleware, async (c) => {
 
   const { key, value } = parsed.data;
 
+  // The GET handler above masks api keys / base URLs as the literal "configured"
+  // for anonymous readers. A client that echoes a masked read back through save
+  // silently destroys the real value (this actually happened to gemini_base_url
+  // and image_base_url), so refuse the mask literal at the write boundary.
+  if (value.trim() === "configured" && (SENSITIVE_KEYS.has(key) || key.endsWith("_api_key"))) {
+    return c.json({
+      error: 'Refusing to save the masked placeholder "configured" — reload the page while logged in and re-enter the real value',
+      code: "MASKED_LITERAL",
+    }, 400);
+  }
+
   await db
     .insert(settings)
     .values({ key, value })
