@@ -111,6 +111,10 @@ export function AIProvidersPage() {
       gemini_base_url: settings.gemini_base_url ?? "",
       openai_api_key: "",
       openai_base_url: settings.openai_base_url ?? "",
+      image_api_key: "",
+      image_base_url: settings.image_base_url ?? "",
+      image_model: settings.image_model ?? "",
+      image_fallback_model: settings.image_fallback_model ?? "",
       gemini_tts_voice: settings.gemini_tts_voice ?? GEMINI_DEFAULTS.gemini_tts_voice,
     };
     // Route providers
@@ -137,6 +141,7 @@ export function AIProvidersPage() {
 
   const hasGeminiKey = settings?.gemini_api_key === "configured";
   const hasOpenaiKey = settings?.openai_api_key === "configured";
+  const hasImageKey = settings?.image_api_key === "configured";
 
   // Auto-detect models on first load
   useEffect(() => {
@@ -262,6 +267,10 @@ export function AIProvidersPage() {
         { key: "gemini_base_url", value: draftValue("gemini_base_url") },
         { key: "openai_api_key", value: drafts.openai_api_key ?? "", skipEmpty: true },
         { key: "openai_base_url", value: draftValue("openai_base_url") },
+        { key: "image_api_key", value: drafts.image_api_key ?? "", skipEmpty: true },
+        { key: "image_base_url", value: draftValue("image_base_url") },
+        { key: "image_model", value: draftValue("image_model") },
+        { key: "image_fallback_model", value: draftValue("image_fallback_model") },
         { key: "gemini_tts_voice", value: draftValue("gemini_tts_voice") },
       ];
       for (const r of ROUTES) {
@@ -282,6 +291,7 @@ export function AIProvidersPage() {
       pairs.push({ key: "daily_story_limit", value: draftValue("daily_story_limit") || "20" });
       pairs.push({ key: "daily_cards_limit", value: draftValue("daily_cards_limit") || "50" });
       pairs.push({ key: "daily_deep_limit", value: draftValue("daily_deep_limit") || "100" });
+      pairs.push({ key: "daily_image_limit", value: draftValue("daily_image_limit") || "5" });
 
       for (const pair of pairs) {
         if (pair.skipEmpty && !pair.value.trim()) continue;
@@ -375,8 +385,9 @@ export function AIProvidersPage() {
     // Check API key drafts
     if (drafts.gemini_api_key?.trim()) return true;
     if (drafts.openai_api_key?.trim()) return true;
+    if (drafts.image_api_key?.trim()) return true;
     // Check all other keys
-    const keys = Object.keys(drafts).filter((k) => k !== "gemini_api_key" && k !== "openai_api_key");
+    const keys = Object.keys(drafts).filter((k) => k !== "gemini_api_key" && k !== "openai_api_key" && k !== "image_api_key");
     return keys.some((k) => (drafts[k] ?? "") !== (settings[k] ?? GEMINI_DEFAULTS[k] ?? ""));
   }, [initialized, settings, drafts]);
 
@@ -518,6 +529,68 @@ export function AIProvidersPage() {
         </Button>
       </div>
 
+      {/* ══════════ IMAGE GENERATION ══════════ */}
+      <SectionHeader>Image Generation</SectionHeader>
+
+      <p className="px-1 pt-1 text-[11px] leading-relaxed text-muted-foreground/70">
+        看图说话出题用。生图网关常与文本中转站不同——可单独配 key/URL；留空则回退上面的 OpenAI 配置。生图较慢且贵，请配合下方 Usage Limits。
+      </p>
+
+      <SettingRow
+        title="API Key"
+        subtitle="生图网关的 key；留空回退 OpenAI key"
+        right={<Badge variant="outline" className="rounded-md text-[10px]">{hasImageKey ? "saved" : "inherit"}</Badge>}
+        defaultOpen={!hasImageKey}
+      >
+        <Input
+          type="password"
+          placeholder={hasImageKey ? "Saved — type to replace" : "留空则用 OpenAI-Compatible 的 key"}
+          value={drafts.image_api_key ?? ""}
+          onChange={(e) => setDraft("image_api_key", e.target.value)}
+          className={INPUT_CLASS}
+        />
+      </SettingRow>
+
+      <SettingRow
+        title="Base URL"
+        subtitle="留空回退 OpenAI Base URL"
+        value={draftValue("image_base_url") || "(inherit OpenAI)"}
+      >
+        <Input
+          value={draftValue("image_base_url")}
+          onChange={(e) => setDraft("image_base_url", e.target.value)}
+          placeholder="https://your-image-gateway/v1"
+          className={`${INPUT_CLASS} font-mono text-sm`}
+        />
+      </SettingRow>
+
+      <SettingRow
+        title="Model"
+        subtitle="生图模型，如 gpt-image-2"
+        value={draftValue("image_model") || "gpt-image-2"}
+      >
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <div className="text-[13px] font-medium text-foreground">Primary Model</div>
+            <Input
+              value={draftValue("image_model")}
+              onChange={(e) => setDraft("image_model", e.target.value)}
+              placeholder="gpt-image-2"
+              className={`${INPUT_CLASS} font-mono text-sm`}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <div className="text-[13px] font-medium text-foreground">Fallback Model</div>
+            <Input
+              value={draftValue("image_fallback_model")}
+              onChange={(e) => setDraft("image_fallback_model", e.target.value)}
+              placeholder="Optional"
+              className={`${INPUT_CLASS} font-mono text-sm`}
+            />
+          </div>
+        </div>
+      </SettingRow>
+
       {/* ══════════ MODEL ROUTING ══════════ */}
       <SectionHeader>Model Routing</SectionHeader>
 
@@ -621,10 +694,10 @@ export function AIProvidersPage() {
       <SettingRow
         title="Daily Limits"
         subtitle="未登录用户每天的 AI 生成限额（按 IP）"
-        value={`Story ${draftValue("daily_story_limit") || "20"} · Cards ${draftValue("daily_cards_limit") || "50"} · Deep ${draftValue("daily_deep_limit") || "100"}`}
+        value={`Story ${draftValue("daily_story_limit") || "20"} · Cards ${draftValue("daily_cards_limit") || "50"} · Deep ${draftValue("daily_deep_limit") || "100"} · Image ${draftValue("daily_image_limit") || "5"}`}
         defaultOpen
       >
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <div className="text-[13px] font-medium">Story 生成</div>
             <Input
@@ -649,6 +722,15 @@ export function AIProvidersPage() {
               value={draftValue("daily_deep_limit") || "100"}
               onChange={(e) => setDraft("daily_deep_limit", e.target.value)}
               placeholder="100"
+              className={`${INPUT_CLASS} font-mono text-sm`}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <div className="text-[13px] font-medium">Image 出题（生图，贵）</div>
+            <Input
+              value={draftValue("daily_image_limit") || "5"}
+              onChange={(e) => setDraft("daily_image_limit", e.target.value)}
+              placeholder="5"
               className={`${INPUT_CLASS} font-mono text-sm`}
             />
           </div>

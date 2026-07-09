@@ -262,3 +262,127 @@ export async function getExplanationLanguageInstruction(): Promise<string> {
   }
   return "Use Simplified Chinese for explanatory text unless a field explicitly requires English.";
 }
+
+// ---------------------------------------------------------------------------
+// Practice (picture-description) — produce an image-generation brief as a
+// question, then grade the learner's English description against it.
+// ---------------------------------------------------------------------------
+
+export const PRACTICE_BRIEF_PROMPT = `You design a "describe the picture" speaking exercise for a Chinese learner of English. You do NOT draw the image — you produce a brief that (a) tells an image model what to draw and (b) scaffolds the learner so they WANT to talk and can start easily.
+
+Return ONE JSON object — no prose outside JSON, no markdown fences.
+
+THE SCENE must be one a learner is dying to describe. Satisfy ALL of:
+1. Something is HAPPENING — a small action/moment with a hint of "what next?", not a static object (a kid on tiptoe chasing a runaway balloon > "a balloon").
+2. LAYERS — a clear foreground subject + background + one small corner detail, so the eye (and the talking) can wander.
+3. A CURIOSITY HOOK — one slightly unexpected/odd element that makes you ask "why?".
+4. RELATABLE to a Chinese learner's daily life (commute, street food, wet market, family dinner, campus, milk-tea shop, rainy city). Familiar = they have something to say.
+5. OPEN — no single correct reading, low fear of being "wrong".
+Carry a clear MOOD/atmosphere throughout.
+
+TIME: a CURRENT_DATE may be given below. Prefer scenes tied to the current season / an upcoming festival / in-season daily life (spring travel rush, plum-rain season, first day of school, mid-autumn) for freshness. NEVER depict specific news events, politics, disasters, or real public figures.
+
+SAFETY: ordinary and learner-appropriate; no violence/sexual/political content; generic "a person/someone", no brand logos; the image should contain NO text/letters/signs.
+
+VISUAL PROMPT quality (this is what kills the "AI look"): specify a definite light & time of day, a camera viewpoint (eye-level candid / over-the-shoulder / slight high angle), a real composition with a deliberately IMPERFECT, off-center, lived-in feel, and one small messy true-to-life detail. Forbid: over-polished, perfectly symmetrical, glossy stock-photo, hyperreal plastic look. Do NOT name the art medium (it is added separately) — focus on content, light, viewpoint, mood.
+
+CHUNKS — the learner's "how do I start" scaffold. A CHUNK_CANDIDATES list may be given.
+- ALWAYS include 2-3 generic openers that fit ANY picture (sentence stems / discourse markers): e.g. "what strikes me is X", "in the background, X", "it looks as if X". Prefer ones from CHUNK_CANDIDATES; if none fit or the list is empty, write your own natural ones.
+- Optionally add 1-2 content chunks from CHUNK_CANDIDATES ONLY if they genuinely fit this scene; if nothing fits, add none. NEVER force a chunk in.
+- For each, give its form and a short example sentence filled in for THIS scene.
+
+SCHEMA (every field required):
+{
+  "visualPrompt": string,   // ~40-80 words, English, per VISUAL PROMPT quality above; describe what is actually in the scene (it doubles as the grading ground-truth)
+  "sceneFrame": {
+    "subjects": string[],   // 2-4 concrete noun phrases with adjectives
+    "actions": string[],    // 2-4 verb phrases in -ing form
+    "setting": string,      // single rich phrase
+    "mood": string          // 2-4 mood adjectives, comma-separated
+  },
+  "suggestedChunks": [      // 2-4 items, generic openers first
+    { "form": string, "example": string }
+  ],
+  "starterLine": string,    // ONE natural English opening line to continue from, e.g. "This looks like a rainy evening at a tiny noodle shop, and "
+  "taskBrief": string       // ONE line of Simplified Chinese: what to do + a nudge to use an opener (e.g. "用英语描述这个雨夜的小面馆，先用 what strikes me is 开个头")
+}
+
+Return raw JSON only. No \\\`\\\`\\\` fences, no leading prose.`;
+
+/**
+ * Compose the practice-brief instruction. Injects the user's topic, the current
+ * date (for season/festival relevance), and chunk candidates to scaffold with.
+ */
+export function buildPracticeBriefPrompt(opts: {
+  topic?: string;
+  chunkCandidates?: Array<{ form: string; category: string; coreMeaning?: string | null }>;
+  currentDate?: string;
+}): string {
+  const blocks: string[] = [PRACTICE_BRIEF_PROMPT];
+
+  const topic = opts.topic?.trim();
+  blocks.push(
+    topic
+      ? `TOPIC (build the scene around this): ${topic}`
+      : `TOPIC: none given — choose any fresh, describable everyday scene.`,
+  );
+
+  if (opts.currentDate) {
+    blocks.push(`CURRENT_DATE: ${opts.currentDate} (use it for season / festival relevance).`);
+  }
+
+  if (opts.chunkCandidates && opts.chunkCandidates.length > 0) {
+    const list = JSON.stringify(
+      opts.chunkCandidates.map((c) => ({
+        form: c.form,
+        category: c.category,
+        ...(c.coreMeaning ? { meaning: c.coreMeaning.slice(0, 60) } : {}),
+      })),
+    );
+    blocks.push(`CHUNK_CANDIDATES (pick suitable ones per the rules; openers first):\n${list}`);
+  } else {
+    blocks.push(`CHUNK_CANDIDATES: none — write your own natural opener chunks.`);
+  }
+
+  return blocks.join("\n\n");
+}
+
+export const PRACTICE_GRADE_PROMPT = `You are an encouraging but precise English writing coach. A Chinese learner looked at an image and wrote an English description of it. Grade that description.
+
+You are given:
+- SCENE: the ground-truth of what the image shows (trust this as "the picture").
+- SUGGESTED_EXPRESSIONS: chunk scaffolds the exercise offered the learner.
+- DESCRIPTION: what the learner wrote.
+
+Return ONE JSON object — no prose outside JSON, no markdown fences:
+{
+  "overall": string,        // one encouraging line summarising how they did
+  "good": string[],         // 1-4 specific things done well (quote real phrases they used)
+  "improve": [              // 2-5 concrete improvements, most valuable first
+    {
+      "point": string,      // what's off — PRIORITISE: Chinglish / literal-translation (L1) traps, flat wording that has an idiomatic upgrade, and salient things in SCENE they failed to mention
+      "suggestion": string  // the fix: a natural English rewrite or the better expression
+    }
+  ],
+  "usedSuggestions": [      // exactly one entry per SUGGESTED_EXPRESSION, keyed by its form
+    { "form": string, "used": boolean }
+  ]
+}
+
+Write overall / good / improve.point in the learner's explanation language (see Language preference below — default Simplified Chinese). improve.suggestion MUST contain the natural English expression (a short Chinese note may follow).
+Be specific and kind; quote the learner's own words. Do NOT invent errors — if the description is strong, say so and keep "improve" short.`;
+
+// Art-style suffixes appended to the visual prompt before image generation.
+// Medium-specific texture lives here; the brief's visualPrompt stays medium-neutral.
+export const PRACTICE_STYLE_SUFFIX: Record<string, string> = {
+  documentary:
+    "Candid documentary photograph, natural available light, 35mm film grain, slightly imperfect off-center framing, true-to-life and photorealistic, NOT glossy or over-processed.",
+  cinematic:
+    "Cinematic film still, dramatic directional lighting, shallow depth of field, subtle color grading, anamorphic widescreen feel, strong storytelling composition.",
+  watercolor:
+    "Hand-painted watercolor illustration, soft color washes, visible paper texture, warm and gentle, storybook feel.",
+  "retro-film":
+    "Retro analog film snapshot, faded muted colors, heavy grain, occasional light leak, nostalgic 1990s point-and-shoot aesthetic.",
+  anime:
+    "Japanese anime style, hand-drawn cel-shaded characters, soft painterly backgrounds, warm and whimsical Ghibli-like mood.",
+};

@@ -10,6 +10,7 @@ import { cardRoutes } from "./routes/cards.js";
 import { chunkRoutes } from "./routes/chunks.js";
 import { settingRoutes } from "./routes/settings.js";
 import { jobRoutes } from "./routes/jobs.js";
+import { practiceRoutes } from "./routes/practice.js";
 import { readFileSync, existsSync } from "fs";
 
 if (process.env.NODE_ENV === "production") {
@@ -64,7 +65,8 @@ const apiRoutes = app
   .route("/api/cards", cardRoutes)
   .route("/api/chunks", chunkRoutes)
   .route("/api/settings", settingRoutes)
-  .route("/api/jobs", jobRoutes);
+  .route("/api/jobs", jobRoutes)
+  .route("/api/practice", practiceRoutes);
 
 // --- Static file serving (production) ---
 // Serve built client assets

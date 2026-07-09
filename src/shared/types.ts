@@ -244,3 +244,53 @@ export interface ChunkGenerateResult {
    * they have already analyzed this chunk before. */
   wasExisting?: boolean;
 }
+
+// --- Practice (picture-description) ---
+// AI generates an image as a prompt; the learner describes it in English and
+// gets AI feedback. Only the generated image + question are persisted — each
+// answer/feedback round is ephemeral.
+
+export interface Practice {
+  id: number;
+  imagePath: string;
+  /** User-entered topic; empty string when the learner left it free. */
+  topic: string;
+  /** Art-style preset for the image: documentary | cinematic | watercolor | retro-film | anime. */
+  style: string;
+  /** AI-expanded English scene description (before the style suffix) fed to the
+   *  image model. Reused as the grading ground-truth (we don't re-send the image). */
+  visualPrompt: string;
+  /** Scene scaffold (subjects/actions/setting/mood) — reuses Story's shape so the
+   *  same SceneFramePanel renders it. Null on malformed/legacy rows. */
+  sceneFrame: StorySceneFrame | null;
+  /** Chunk/expression scaffolds — lower the "how do I start" barrier. */
+  suggestedChunks: { form: string; example: string }[];
+  /** A ready-made opening line to continue from. Null on legacy rows. */
+  starterLine: string | null;
+  /** One-line Chinese task instruction shown above the answer box. */
+  taskBrief: string | null;
+  createdAt: number;
+}
+
+/** AI output of the "set a question" call (before persistence). */
+export interface PracticeBrief {
+  visualPrompt: string;
+  sceneFrame: StorySceneFrame;
+  taskBrief: string;
+  /** 2-4 chunk scaffolds (generic openers + scene-fit), each with a filled example. */
+  suggestedChunks: { form: string; example: string }[];
+  /** One opening line the learner can continue from. */
+  starterLine: string;
+}
+
+/** AI output of the "grade the description" call — never persisted. */
+export interface PracticeFeedback {
+  /** Encouraging one-line overall verdict. */
+  overall: string;
+  /** Expressions the learner used well. */
+  good: string[];
+  /** Improvement points: L1 literal-translation traps, idiomatic upgrades, omissions. */
+  improve: { point: string; suggestion: string }[];
+  /** Which suggested chunks the learner actually used. */
+  usedSuggestions: { form: string; used: boolean }[];
+}

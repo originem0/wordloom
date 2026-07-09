@@ -2,15 +2,20 @@ import {
   aiCardsResponseSchema,
   aiDeepLayerSchema,
   aiChunkResponseSchema,
+  practiceBriefSchema,
+  practiceFeedbackSchema,
 } from "../../shared/validation.js";
 import type {
   GroundingSource,
   ChunkGenerateResult,
   StoryArtifact,
+  PracticeBrief,
+  PracticeFeedback,
 } from "../../shared/types.js";
 import {
   Semaphore,
   getSetting,
+  getFirstSetting,
   runWithModelFallback,
   acquireSemaphore,
   type ParsedCard,
@@ -24,12 +29,14 @@ import {
 } from "./ai-normalize.js";
 import {
   buildStorySystemPrompt,
+  buildPracticeBriefPrompt,
   CARDS_PROMPT,
   DEEP_PROMPT,
   CHUNKS_PROMPT,
+  PRACTICE_GRADE_PROMPT,
   getExplanationLanguageInstruction,
 } from "./ai-prompts.js";
-import type { PreferredVocabItem } from "./gemini.js";
+import type { PreferredVocabItem, PracticeBriefInput, PracticeGradeInput } from "./gemini.js";
 
 // ---------------------------------------------------------------------------
 // Semaphores — independent from Gemini, split by route to avoid starvation
@@ -47,7 +54,7 @@ async function getOpenaiConfig(): Promise<{ apiKey: string; chatUrl: string }> {
   if (!apiKey)
     throw new Error("OpenAI-compatible API Key not configured. Set it in AI Providers.");
 
-  let baseUrl = (await getSetting("openai_base_url")).trim().replace(/\/+$/, "");
+  const baseUrl = (await getSetting("openai_base_url")).trim().replace(/\/+$/, "");
   if (!baseUrl)
     throw new Error("OpenAI-compatible Base URL not configured. Set it in AI Providers.");
 
@@ -446,6 +453,155 @@ ${text}`,
 
         if (!Array.isArray(parsed)) return [];
         return parsed.filter((w): w is string => typeof w === "string");
+      },
+    });
+  } finally {
+    openaiSemaphore.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Image generation (gpt-image-2 etc.) — may live on a SEPARATE gateway from the
+// text endpoint, so it has its own key/base-url settings that fall back to the
+// text OpenAI ones when blank.
+// ---------------------------------------------------------------------------
+
+const openaiImageSemaphore = new Semaphore(2);
+
+async function getImageConfig(): Promise<{ apiKey: string; imagesUrl: string }> {
+  const apiKey = await getFirstSetting(["image_api_key", "openai_api_key"]);
+  if (!apiKey)
+    throw new Error("Image API Key not configured. Set it in AI Providers (Image Generation).");
+
+  const baseUrl = (await getFirstSetting(["image_base_url", "openai_base_url"])).replace(/\/+$/, "");
+  if (!baseUrl)
+    throw new Error("Image Base URL not configured. Set it in AI Providers (Image Generation).");
+
+  // Normalize: if base already ends with /v1, don't double it
+  const imagesPath = /\/v1\/?$/i.test(baseUrl) ? "images/generations" : "v1/images/generations";
+  return { apiKey, imagesUrl: `${baseUrl}/${imagesPath}` };
+}
+
+/** Generate one image and return it as a Buffer (caller compresses + persists). */
+export async function openaiGenerateImage(prompt: string): Promise<Buffer> {
+  await acquireSemaphore(openaiImageSemaphore);
+  try {
+    return await runWithModelFallback({
+      primaryKeys: ["image_model"],
+      primaryFallback: "gpt-image-2",
+      fallbackKeys: ["image_fallback_model"],
+      label: "generateImage (OpenAI)",
+      timeoutMultiplier: 3, // image generation is slow (~50s observed)
+      run: async (model) => {
+        const { apiKey, imagesUrl } = await getImageConfig();
+        const res = await fetch(imagesUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+          },
+          // size is a hint only — some gateways ignore/approximate it; compressImage normalizes output.
+          body: JSON.stringify({ model, prompt, size: "1024x1024", quality: "high", n: 1 }),
+        });
+
+        const text = await res.text();
+        if (!res.ok) {
+          let errMsg = `HTTP ${res.status}`;
+          try {
+            const body = JSON.parse(text);
+            if (body?.error?.message) errMsg = body.error.message;
+          } catch {
+            if (text.length < 300) errMsg += `: ${text}`;
+          }
+          throw new Error(errMsg);
+        }
+
+        let body: unknown;
+        try {
+          body = JSON.parse(text);
+        } catch {
+          throw new Error("Image API returned non-JSON response");
+        }
+
+        const item = (body as { data?: Array<{ b64_json?: string; url?: string }> })?.data?.[0];
+        if (item?.b64_json) {
+          return Buffer.from(item.b64_json, "base64");
+        }
+        if (item?.url) {
+          const imgRes = await fetch(item.url);
+          if (!imgRes.ok) throw new Error(`Failed to fetch image url: HTTP ${imgRes.status}`);
+          return Buffer.from(await imgRes.arrayBuffer());
+        }
+        throw new Error("Image API response missing data[0].b64_json and url");
+      },
+    });
+  } finally {
+    openaiImageSemaphore.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Practice brief + grading — text calls that reuse the "story" route's model.
+// ---------------------------------------------------------------------------
+
+export async function openaiGeneratePracticeBrief(
+  input: PracticeBriefInput,
+): Promise<PracticeBrief> {
+  await acquireSemaphore(openaiSemaphore);
+  try {
+    return await runWithModelFallback({
+      primaryKeys: ["story_openai_model"],
+      primaryFallback: "",
+      fallbackKeys: ["story_openai_fallback_model"],
+      label: "practiceBrief (OpenAI)",
+      timeoutMultiplier: 1.5,
+      run: async (model) => {
+        const system = buildPracticeBriefPrompt(input);
+        const text = await openaiChat({
+          model,
+          messages: [
+            { role: "system", content: `${system}\n\nRespond in JSON only. No markdown fences.` },
+            { role: "user", content: "Produce the practice brief JSON now." },
+          ],
+        });
+        const parsed = parseJsonLenient(text);
+        const result = practiceBriefSchema.safeParse(parsed);
+        if (!result.success) throw new Error("Practice brief validation failed");
+        return result.data as PracticeBrief;
+      },
+    });
+  } finally {
+    openaiSemaphore.release();
+  }
+}
+
+export async function openaiGradePractice(input: PracticeGradeInput): Promise<PracticeFeedback> {
+  await acquireSemaphore(openaiSemaphore);
+  try {
+    const languageInstruction = await getExplanationLanguageInstruction();
+    return await runWithModelFallback({
+      primaryKeys: ["story_openai_model"],
+      primaryFallback: "",
+      fallbackKeys: ["story_openai_fallback_model"],
+      label: "gradePractice (OpenAI)",
+      run: async (model) => {
+        const text = await openaiChat({
+          model,
+          messages: [
+            {
+              role: "system",
+              content: `${PRACTICE_GRADE_PROMPT}\n\nLanguage preference: ${languageInstruction}\n\nRespond in JSON only. No markdown fences.`,
+            },
+            {
+              role: "user",
+              content: `SCENE: ${input.visualPrompt}\n\nSUGGESTED_EXPRESSIONS: ${JSON.stringify(input.suggestedChunks)}\n\nDESCRIPTION: ${input.description}`,
+            },
+          ],
+        });
+        const parsed = parseJsonLenient(text);
+        const result = practiceFeedbackSchema.safeParse(parsed);
+        if (!result.success) throw new Error("Practice feedback validation failed");
+        return result.data as PracticeFeedback;
       },
     });
   } finally {

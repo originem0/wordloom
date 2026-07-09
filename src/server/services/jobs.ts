@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { jobs } from "../db/schema.js";
 
-export type JobType = "story" | "cards" | "chunks";
+export type JobType = "story" | "cards" | "chunks" | "practice";
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
 type JsonLike = Record<string, unknown> | unknown[];

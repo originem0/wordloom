@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Layers, Puzzle, Cpu, Settings, Sun, Moon, LogOut } from "lucide-react";
+import { BookOpen, Layers, Puzzle, Cpu, Settings, Sun, Moon, LogOut, ImagePlus } from "lucide-react";
 import { apiFetch, apiPost } from "@/client/lib/api";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
@@ -9,6 +9,7 @@ import { TaskPanel } from "./TaskPanel";
 
 const navItems = [
   { to: "/", icon: BookOpen, label: "Story" },
+  { to: "/practice", icon: ImagePlus, label: "Practice" },
   { to: "/cards", icon: Layers, label: "Cards" },
   { to: "/chunks", icon: Puzzle, label: "Chunks" },
   { to: "/providers", icon: Cpu, label: "AI" },

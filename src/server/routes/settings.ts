@@ -244,7 +244,7 @@ async function verifyOpenaiModels(
 
 // Sensitive keys hidden from unauthenticated users
 const SENSITIVE_KEYS = new Set([
-  "gemini_base_url", "openai_base_url",
+  "gemini_base_url", "openai_base_url", "image_base_url",
 ]);
 
 // GET / — read all settings (public, but hides sensitive fields for anonymous users)
@@ -256,7 +256,7 @@ settingRoutes.get("/", async (c) => {
 
   const result: Record<string, string> = {};
   for (const row of rows) {
-    if (row.key === "gemini_api_key" || row.key === "openai_api_key") {
+    if (row.key === "gemini_api_key" || row.key === "openai_api_key" || row.key === "image_api_key") {
       result[row.key] = row.value ? "configured" : "";
     } else if (!isAdmin && SENSITIVE_KEYS.has(row.key)) {
       // Hide sensitive config from anonymous users

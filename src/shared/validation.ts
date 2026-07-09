@@ -198,3 +198,60 @@ export const aiChunkResponseSchema = z.object({
 });
 
 export const updateChunkSchema = aiChunkPayloadSchema.partial();
+
+// --- Practice (picture-description) ---
+
+export const practiceStyleEnum = z.enum([
+  "documentary",
+  "cinematic",
+  "watercolor",
+  "retro-film",
+  "anime",
+]);
+
+export const generatePracticeRequestSchema = z.object({
+  topic: z.string().max(200).optional().default(""),
+  style: practiceStyleEnum.optional().default("documentary"),
+});
+
+export const gradePracticeRequestSchema = z.object({
+  description: z.string().min(1).max(5000),
+});
+
+const practiceSceneFrameSchema = z.object({
+  subjects: z.array(z.string()).optional().default([]),
+  actions: z.array(z.string()).optional().default([]),
+  setting: z.string().optional().default(""),
+  mood: z.string().optional().default(""),
+});
+
+const practiceChunkSchema = z.object({
+  form: z.string(),
+  example: z.string().optional().default(""),
+});
+
+export const practiceBriefSchema = z.object({
+  visualPrompt: z.string().min(1),
+  sceneFrame: practiceSceneFrameSchema.optional().default({
+    subjects: [],
+    actions: [],
+    setting: "",
+    mood: "",
+  }),
+  taskBrief: z.string().optional().default(""),
+  suggestedChunks: z.array(practiceChunkSchema).optional().default([]),
+  starterLine: z.string().optional().default(""),
+});
+
+export const practiceFeedbackSchema = z.object({
+  overall: z.string().optional().default(""),
+  good: z.array(z.string()).optional().default([]),
+  improve: z
+    .array(z.object({ point: z.string(), suggestion: z.string() }))
+    .optional()
+    .default([]),
+  usedSuggestions: z
+    .array(z.object({ form: z.string(), used: z.boolean() }))
+    .optional()
+    .default([]),
+});

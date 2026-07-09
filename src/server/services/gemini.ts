@@ -3,11 +3,15 @@ import {
   aiCardsResponseSchema,
   aiDeepLayerSchema,
   aiChunkResponseSchema,
+  practiceBriefSchema,
+  practiceFeedbackSchema,
 } from "../../shared/validation.js";
 import type {
   GroundingSource,
   ChunkGenerateResult,
   StoryArtifact,
+  PracticeBrief,
+  PracticeFeedback,
 } from "../../shared/types.js";
 import {
   Semaphore,
@@ -25,9 +29,11 @@ import {
 } from "./ai-normalize.js";
 import {
   buildStorySystemPrompt,
+  buildPracticeBriefPrompt,
   CARDS_PROMPT,
   DEEP_PROMPT,
   CHUNKS_PROMPT,
+  PRACTICE_GRADE_PROMPT,
   getExplanationLanguageInstruction,
 } from "./ai-prompts.js";
 
@@ -478,6 +484,79 @@ ${text}`,
 
         if (!Array.isArray(parsed)) return [];
         return parsed.filter((w): w is string => typeof w === "string");
+      },
+    });
+  } finally {
+    geminiSemaphore.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Practice brief + grading — text calls reusing the "story" route's model.
+// ---------------------------------------------------------------------------
+
+export type PracticeBriefInput = {
+  topic: string;
+  chunkCandidates: Array<{ form: string; category: string; coreMeaning?: string | null }>;
+  currentDate: string;
+};
+
+export type PracticeGradeInput = {
+  visualPrompt: string;
+  suggestedChunks: string[];
+  description: string;
+};
+
+export async function geminiGeneratePracticeBrief(
+  input: PracticeBriefInput,
+): Promise<PracticeBrief> {
+  await acquireSemaphore(geminiSemaphore);
+  try {
+    return await runWithModelFallback({
+      primaryKeys: ["story_model"],
+      primaryFallback: "gemini-2.5-pro",
+      fallbackKeys: ["story_fallback_model"],
+      label: "practiceBrief",
+      timeoutMultiplier: 1.5,
+      run: async (model) => {
+        const ai = await getClient();
+        const system = buildPracticeBriefPrompt(input);
+        const response = await ai.models.generateContent({
+          model,
+          contents: `${system}\n\nProduce the practice brief JSON now.`,
+          config: { responseMimeType: "application/json" },
+        });
+        const parsed = parseJsonLenient(response.text ?? "{}");
+        const result = practiceBriefSchema.safeParse(parsed);
+        if (!result.success) throw new Error("Practice brief validation failed");
+        return result.data as PracticeBrief;
+      },
+    });
+  } finally {
+    geminiSemaphore.release();
+  }
+}
+
+export async function geminiGradePractice(input: PracticeGradeInput): Promise<PracticeFeedback> {
+  await acquireSemaphore(geminiSemaphore);
+  try {
+    const languageInstruction = await getExplanationLanguageInstruction();
+    return await runWithModelFallback({
+      primaryKeys: ["story_model"],
+      primaryFallback: "gemini-2.5-pro",
+      fallbackKeys: ["story_fallback_model"],
+      label: "gradePractice",
+      run: async (model) => {
+        const ai = await getClient();
+        const response = await ai.models.generateContent({
+          model,
+          contents: `${PRACTICE_GRADE_PROMPT}\n\nLanguage preference: ${languageInstruction}\n\nSCENE: ${input.visualPrompt}\n\nSUGGESTED_EXPRESSIONS: ${JSON.stringify(input.suggestedChunks)}\n\nDESCRIPTION: ${input.description}`,
+          config: { responseMimeType: "application/json" },
+        });
+        const parsed = parseJsonLenient(response.text ?? "{}");
+        const result = practiceFeedbackSchema.safeParse(parsed);
+        if (!result.success) throw new Error("Practice feedback validation failed");
+        return result.data as PracticeFeedback;
       },
     });
   } finally {
