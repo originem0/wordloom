@@ -48,6 +48,16 @@ export default defineConfig({
   },
   build: {
     outDir: "dist/client",
+    rollupOptions: {
+      output: {
+        // Keep dependency code in a separate chunk so its hash survives app-code
+        // deploys — with immutable asset caching, returning visitors only
+        // re-download the (small) app chunks.
+        manualChunks(id) {
+          if (id.includes("node_modules")) return "vendor";
+        },
+      },
+    },
   },
   server: {
     proxy: {

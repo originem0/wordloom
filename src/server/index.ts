@@ -69,26 +69,41 @@ const apiRoutes = app
   .route("/api/practice", practiceRoutes);
 
 // --- Static file serving (production) ---
-// Serve built client assets
-app.use("/assets/*", serveStatic({ root: "./dist/client" }));
-app.use("/sw.js", serveStatic({ root: "./dist/client" }));
-app.use("/workbox-*", serveStatic({ root: "./dist/client" }));
-app.use("/manifest.json", serveStatic({ root: "./dist/client" }));
-app.use("/manifest.webmanifest", serveStatic({ root: "./dist/client" }));
-app.use("/icon.svg", serveStatic({ root: "./dist/client" }));
-app.use("/icons.svg", serveStatic({ root: "./dist/client" }));
-app.use("/icon-192.png", serveStatic({ root: "./dist/client" }));
-app.use("/icon-512.png", serveStatic({ root: "./dist/client" }));
-app.use("/favicon.svg", serveStatic({ root: "./dist/client" }));
-app.use("/favicon.ico", serveStatic({ root: "./dist/client" }));
-app.use("/favicon-32x32.png", serveStatic({ root: "./dist/client" }));
-app.use("/registerSW.js", serveStatic({ root: "./dist/client" }));
+// One catch-all serveStatic replaces the old per-file routes: the previous
+// "/workbox-*" pattern never matched (Hono has no mid-segment wildcard), so
+// the workbox runtime fell through to the HTML fallback and the service
+// worker could not install at all.
+const staticFiles = serveStatic({ root: "./dist/client" });
+app.use("*", async (c, next) => {
+  if (c.req.method !== "GET" && c.req.method !== "HEAD") return next();
+  const res = await staticFiles(c, next);
+  if (res instanceof Response && res.status === 200) {
+    // Vite content-hashes /assets/* so they can cache forever; everything else
+    // (sw.js, workbox runtime, manifest, icons) must revalidate on every load
+    // or service-worker/manifest updates would never reach the browser.
+    res.headers.set(
+      "Cache-Control",
+      c.req.path.startsWith("/assets/")
+        ? "public, max-age=31536000, immutable"
+        : "no-cache",
+    );
+  }
+  return res;
+});
 
 // SPA fallback: any non-API route returns index.html
 app.get("*", (c) => {
+  // Asset-like paths must 404 instead of falling back: HTML under a .js URL
+  // breaks SW importScripts (wrong MIME) and can get edge-cached by extension.
+  if (/\.\w+$/.test(c.req.path)) {
+    return c.text("Not found", 404);
+  }
   const indexPath = "./dist/client/index.html";
   if (existsSync(indexPath)) {
     const html = readFileSync(indexPath, "utf-8");
+    // index.html references hashed assets — a cached stale copy points at
+    // deleted files and sends the app into the lazy-import reload loop.
+    c.header("Cache-Control", "no-cache");
     return c.html(html);
   }
   return c.text("Not found", 404);
