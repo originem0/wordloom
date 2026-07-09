@@ -520,6 +520,10 @@ settingRoutes.post("/test", authMiddleware, async (c) => {
     let expectJson = false;
     let validateShape: ((parsed: unknown) => string | null) | null = null;
     let testTimeoutMs = 30_000;
+    // Per-target completion budget. The live routes send no max_tokens at all, so
+    // this cap only bounds test cost — it must stay well above the largest expected
+    // answer, or the test truncates valid output and misreports it as bad JSON.
+    let maxTokens = 300;
 
     if (target === "storyModel") {
       testTimeoutMs = 45_000;
@@ -531,6 +535,7 @@ settingRoutes.post("/test", authMiddleware, async (c) => {
         ]},
       ];
     } else if (target === "cardsModel") {
+      maxTokens = 1500;
       messages = [
         { role: "user", content: 'Return JSON only, no markdown fences. Generate a word card for "signal": [{"word":"signal","coreMeaning":"信号","collocations":["signal to"],"examples":[{"level":"B1","sentence":"She gave the signal.","translation":"她发出了信号。"}],"contextLadder":[{"level":1,"sentence":"A signal.","context":"basic"}],"phrases":["signal fire"],"synonyms":["sign"],"antonyms":[]}]' },
       ];
@@ -545,6 +550,7 @@ settingRoutes.post("/test", authMiddleware, async (c) => {
         return null;
       };
     } else if (target === "chunksModel") {
+      maxTokens = 1500;
       messages = [
         { role: "user", content: 'Return JSON only, no markdown fences. Judge whether "make a difference" is a chunk and produce: {"verdict":"chunk","confidence":0.95,"reason":"reusable delexical V+N","payload":{"form":"make a difference","category":"verb-collocation","coreMeaning":"produce a noticeable effect","register":"neutral","frequency":"high","slots":[],"examples":[{"sentence":"She made a real difference.","register":"neutral"}]}}' },
       ];
@@ -559,8 +565,12 @@ settingRoutes.post("/test", authMiddleware, async (c) => {
       };
     } else if (target === "deepModel") {
       testTimeoutMs = 60_000;
+      maxTokens = 3000;
+      // Ask for a minimal reproduction of the shape, not a real analysis: slow
+      // relays generate ~10 tok/s, and a full deep answer (600+ tokens) would
+      // blow the 60s test/nginx window. validateShape checks fields, not depth.
       messages = [
-        { role: "user", content: 'Return JSON only, no markdown fences. Deep analysis for word "diverge": {"schemaAnalysis":{"coreSchema":"path","coreImageText":"branching road","metaphoricalExtensions":["opinions diverge"],"registerVariation":"formal","etymologyChain":["dis-","vergere"],"sceneActivation":["two roads"]},"familyComparison":[{"word":"diverge","pos":"verb","meaning":"to separate"}],"boundaryTests":[{"pair":"diverge vs deviate","distinction":"diverge implies gradual separation"}]}' },
+        { role: "user", content: 'Return JSON only, no markdown fences. This is a wiring test, NOT a real analysis: reproduce EXACTLY this JSON structure for the word "diverge" — same fields, at most ONE item per array, every string under 8 words: {"schemaAnalysis":{"coreSchema":"path","coreImageText":"branching road","metaphoricalExtensions":["opinions diverge"],"registerVariation":"formal","etymologyChain":["dis-","vergere"],"sceneActivation":["two roads"]},"familyComparison":[{"word":"diverge","pos":"verb","meaning":"to separate"}],"boundaryTests":[{"pair":"diverge vs deviate","distinction":"diverge implies gradual separation"}]}' },
       ];
       expectJson = true;
       validateShape = (parsed) => {
@@ -584,7 +594,7 @@ settingRoutes.post("/test", authMiddleware, async (c) => {
       const res = await fetchJson(chatUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${openaiKey}` },
-        body: JSON.stringify({ model, messages, max_tokens: 300 }),
+        body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
         timeoutMs: testTimeoutMs,
       });
       if (res.status >= 400) {
@@ -592,7 +602,20 @@ settingRoutes.post("/test", authMiddleware, async (c) => {
         const msg = errBody?.error?.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
         return c.json({ ok: false, target, latencyMs: Date.now() - started, model, error: { message: msg } });
       }
-      const content = (res.json as any)?.choices?.[0]?.message?.content ?? "";
+      const choice = (res.json as any)?.choices?.[0];
+      const content = choice?.message?.content ?? "";
+      // A JSON answer cut off by the budget would fail parse/shape checks below with
+      // misleading errors ("Invalid JSON response" / "Schema: Missing ...") — report
+      // the truncation itself instead. finish_reason=length is authoritative here.
+      if (expectJson && choice?.finish_reason === "length") {
+        return c.json({
+          ok: false,
+          target,
+          latencyMs: Date.now() - started,
+          model,
+          error: { message: `Output truncated at max_tokens=${maxTokens} (finish_reason=length) — the model needs a bigger test budget (verbose or reasoning model); live generation is uncapped and unaffected.` },
+        });
+      }
       if (!content) {
         return c.json({ ok: false, target, latencyMs: Date.now() - started, model, error: { message: "Empty response" } });
       }

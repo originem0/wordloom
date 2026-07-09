@@ -186,3 +186,78 @@ describe("settings /test endpoint", () => {
     expect(body.result.audioBase64Length).toBe(4);
   });
 });
+
+describe("settings /test endpoint — OpenAI model tests token budget", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const VALID_DEEP_JSON = JSON.stringify({
+    schemaAnalysis: {
+      coreSchema: "path",
+      coreImageText: "branching road",
+      metaphoricalExtensions: ["opinions diverge"],
+      registerVariation: "formal",
+      etymologyChain: ["dis-", "vergere"],
+      sceneActivation: ["two roads"],
+    },
+    familyComparison: [{ word: "diverge", pos: "verb", meaning: "to separate" }],
+    boundaryTests: [{ pair: "diverge vs deviate", distinction: "gradual separation" }],
+  });
+
+  function openaiChatResponse(content: string, finishReason: string) {
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content }, finish_reason: finishReason }],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  async function requestModelTest(app: Hono, target: string): Promise<any> {
+    const res = await app.request("/settings/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target,
+        provider: "openai",
+        baseUrl: "https://gw.example.com/v1",
+        apiKey: "test-key",
+        model: "test-model",
+      }),
+    });
+    return res.json();
+  }
+
+  it("deepModel test sends a large enough max_tokens for the deep JSON schema", async () => {
+    const mockFetch = vi.fn(async () => openaiChatResponse(VALID_DEEP_JSON, "stop"));
+    globalThis.fetch = mockFetch as any;
+
+    const body = await requestModelTest(buildApp(), "deepModel");
+    expect(body.ok).toBe(true);
+
+    const [, init] = mockFetch.mock.calls[0] as any[];
+    const sent = JSON.parse((init as any).body);
+    // Real deep responses run 600+ tokens (verbose/pretty-printing models more);
+    // the old global 300 cap truncated them into invalid JSON.
+    expect(sent.max_tokens).toBeGreaterThanOrEqual(2000);
+  });
+
+  it("deepModel test reports truncation when finish_reason=length instead of Invalid JSON", async () => {
+    const truncated = VALID_DEEP_JSON.slice(0, 120); // cut mid-JSON
+    const mockFetch = vi.fn(async () => openaiChatResponse(truncated, "length"));
+    globalThis.fetch = mockFetch as any;
+
+    const body = await requestModelTest(buildApp(), "deepModel");
+    expect(body.ok).toBe(false);
+    expect(body.error.message).toMatch(/truncated/i);
+    expect(body.error.message).toMatch(/max_tokens/);
+    expect(body.error.message).not.toBe("Invalid JSON response");
+  });
+});
