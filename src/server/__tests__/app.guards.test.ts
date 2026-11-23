@@ -348,6 +348,17 @@ describe("response hardening", () => {
     expect(directive(csp, "connect-src")).toContain("https://cloudflareinsights.com");
   });
 
+  // Generated images and speech are gone, and they were the only thing that
+  // made blob: URLs or played media. An allowance nothing uses is only an
+  // opening for injected content.
+  it("allows no blob: content, and media only by the default rule", async () => {
+    const csp = (await req("/api/health")).headers.get("content-security-policy") ?? "";
+    expect(csp).not.toContain("blob:");
+    expect(directive(csp, "img-src").sort()).toEqual(["'self'", "data:"]);
+    expect(directive(csp, "media-src")).toEqual([]);
+    expect(directive(csp, "default-src")).toEqual(["'self'"]);
+  });
+
   it("does not echo internal error text to the client", async () => {
     const res = await req("/api/cards/extract", {
       method: "POST",

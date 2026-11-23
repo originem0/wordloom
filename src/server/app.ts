@@ -33,8 +33,9 @@ app.use(
       scriptSrc: ["'self'", "https://static.cloudflareinsights.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:", "blob:"],
-      mediaSrc: ["'self'", "blob:"],
+      // data: carries a card's schema drawing: model-written SVG, only ever
+      // shown through <img> (client/lib/svg.ts). Nothing makes blob: URLs.
+      imgSrc: ["'self'", "data:"],
       connectSrc: ["'self'", "https://cloudflareinsights.com"],
       workerSrc: ["'self'"],
       manifestSrc: ["'self'"],
