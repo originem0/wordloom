@@ -406,26 +406,6 @@ cardRoutes.get("/:id", async (c) => {
   return c.json(toCard(row));
 });
 
-// PATCH /:id/usage — increment usage count
-cardRoutes.patch("/:id/usage", async (c) => {
-  const id = Number(c.req.param("id"));
-  const row = await db.select().from(cards).where(eq(cards.id, id)).get();
-  if (!row) {
-    return c.json({ error: "Card not found", code: "NOT_FOUND" }, 404);
-  }
-
-  await db
-    .update(cards)
-    .set({
-      usageCount: row.usageCount + 1,
-      updatedAt: Date.now(),
-    })
-    .where(eq(cards.id, id));
-
-  const updated = await db.select().from(cards).where(eq(cards.id, id)).get();
-  return c.json(toCard(updated!));
-});
-
 // DELETE /:id — delete a card
 cardRoutes.delete("/:id", async (c) => {
   const id = Number(c.req.param("id"));

@@ -292,11 +292,6 @@ const CardListItem = memo(function CardListItem({
               {card.coreMeaning.length > 40 ? "..." : ""}
             </p>
           )}
-          {card.usageCount > 0 && (
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              Used {card.usageCount}x
-            </p>
-          )}
         </div>
         <AdminOnly>
           <Button

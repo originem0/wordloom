@@ -57,15 +57,6 @@ export function useMissingDeep() {
   });
 }
 
-export function useIncrementUsage() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (cardId: number) =>
-      apiFetch<Card>(`/api/cards/${cardId}/usage`, { method: "PATCH" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["cards"] }),
-  });
-}
-
 export function useDeleteCard() {
   const qc = useQueryClient();
   return useMutation({

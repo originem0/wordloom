@@ -2,7 +2,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { WordCard } from "../WordCard";
 import { PrototypeWordCard } from "../PrototypeWordCard";
 import type { Card } from "@/shared/types";
 
@@ -10,9 +9,9 @@ vi.mock("@/client/hooks/useCards", () => ({
   useGenerateDeep: () => ({ mutate: vi.fn(), isPending: false, isError: false, data: null }),
 }));
 
-// Deep-layer fields are model output, and the model's input (the "word") comes
-// from anonymous visitors. Everything below is what a prompt-injected response
-// could store in the card.
+// Deep-layer fields are model output, and what the model reads (a word, or a
+// passage pasted in for extraction) can come from anywhere. Everything below
+// is what a prompt-injected response could store in the card.
 const HOSTILE_SVG =
   '<svg onload=alert(1) viewBox="0 0 600 180" xmlns="http://www.w3.org/2000/svg">' +
   "<script>window.__pwned = 1</script>" +
@@ -63,25 +62,22 @@ function hostileCard(): Card {
   } as unknown as Card;
 }
 
-describe.each([
-  ["PrototypeWordCard", (card: Card) => <PrototypeWordCard card={card} />],
-  ["WordCard", (card: Card) => <WordCard card={card} />],
-])("%s treats model output as text, never as markup", (_name, renderCard) => {
+describe("PrototypeWordCard treats model output as text, never as markup", () => {
   it("does not materialise HTML embedded in a scene example", () => {
-    const { container } = render(renderCard(hostileCard()));
+    const { container } = render(<PrototypeWordCard card={hostileCard()} />);
     expect(container.querySelector("img[onerror]")).toBeNull();
     expect(container.textContent).toContain('<img src=x onerror="alert(3)">');
   });
 
   it("still renders **bold** emphasis in a scene example", () => {
-    const { container } = render(renderCard(hostileCard()));
+    const { container } = render(<PrototypeWordCard card={hostileCard()} />);
     const strong = Array.from(container.querySelectorAll("strong")).map((el) => el.textContent);
     expect(strong).toContain("obscured");
     expect(container.textContent).not.toContain("**");
   });
 
   it("does not materialise HTML embedded in the family boundary note", () => {
-    const { container } = render(renderCard(hostileCard()));
+    const { container } = render(<PrototypeWordCard card={hostileCard()} />);
     expect(container.querySelector("img[onerror]")).toBeNull();
     expect(container.textContent).toContain("second line <img src=x");
   });

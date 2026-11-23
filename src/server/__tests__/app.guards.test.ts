@@ -191,13 +191,6 @@ describe("generation and its bookkeeping are admin-only", () => {
     expect(await res.json()).toEqual({ words: ["alpha"] });
   });
 
-  it("a usage counter cannot be bumped without a session", async () => {
-    const card = await seedCard();
-    expect((await req(`/api/cards/${card.id}/usage`, { method: "PATCH" })).status).toBe(401);
-    const row = await db.select().from(cards).where(eq(cards.id, card.id)).get();
-    expect(row?.usageCount).toBe(0);
-  });
-
   it("a job cannot be polled or cancelled without a session, even by its id", async () => {
     const now = Date.now();
     await db.insert(jobs).values({
