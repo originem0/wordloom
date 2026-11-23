@@ -8,9 +8,6 @@ import {
   openaiGenerateCards,
   openaiGenerateDeepLayer,
   openaiGenerateStory,
-  openaiGenerateImage,
-  openaiGeneratePracticeBrief,
-  openaiGradePractice,
 } from "../openai-compat.js";
 
 // Real settings table (in-memory), real retry/timeout/semaphore code. Only the
@@ -33,7 +30,6 @@ async function configure(extra: Record<string, string> = {}) {
     cards_openai_model: "m",
     deep_openai_model: "m",
     story_openai_model: "m",
-    image_model: "m",
     api_timeout_ms: "5000",
     api_max_retries: "1",
     ...extra,
@@ -110,32 +106,10 @@ describe("a timed-out provider call is cancelled, not abandoned", () => {
     ["cards", () => openaiGenerateCards(["word"])],
     ["deep", () => openaiGenerateDeepLayer("word")],
     ["story", () => openaiGenerateStory(img, "image/jpeg", "")],
-    ["image", () => openaiGenerateImage("a harbour")],
-    ["practice brief", () => openaiGeneratePracticeBrief({ topic: "", chunkCandidates: [], currentDate: "2026-01-01" })],
-    ["practice grade", () => openaiGradePractice({ visualPrompt: "v", suggestedChunks: [], description: "d" })],
   ])("%s hands its request an abort signal", async (_name, invoke) => {
     await configure();
     const call = invoke().catch((e: unknown) => e);
     await vi.waitFor(() => expect(hangingFetch).toHaveBeenCalled());
-    expect(hangingFetch.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
-    await vi.advanceTimersByTimeAsync(60_000);
-    await call;
-  });
-
-  it("the image download that follows a URL-style image response is cancellable too", async () => {
-    await configure();
-    const fetchMock = vi.fn((url: string, init?: FetchInit) => {
-      if (url.endsWith("/images/generations")) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ data: [{ url: "https://cdn.test/a.png" }] }), { status: 200 }),
-        );
-      }
-      return hangingFetch(url, init);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const call = openaiGenerateImage("a harbour").catch((e: unknown) => e);
-    await vi.waitFor(() => expect(hangingFetch).toHaveBeenCalledTimes(1));
-    expect(hangingFetch.mock.calls[0][0]).toBe("https://cdn.test/a.png");
     expect(hangingFetch.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
     await vi.advanceTimersByTimeAsync(60_000);
     await call;

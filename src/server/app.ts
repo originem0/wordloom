@@ -10,7 +10,6 @@ import { storyRoutes } from "./routes/stories.js";
 import { cardRoutes } from "./routes/cards.js";
 import { settingRoutes } from "./routes/settings.js";
 import { jobRoutes } from "./routes/jobs.js";
-import { practiceRoutes } from "./routes/practice.js";
 import { readFileSync, existsSync } from "fs";
 
 // App assembly lives here (not in index.ts) so tests can import the fully
@@ -108,8 +107,7 @@ export const apiRoutes = app
   .route("/api/stories", storyRoutes)
   .route("/api/cards", cardRoutes)
   .route("/api/settings", settingRoutes)
-  .route("/api/jobs", jobRoutes)
-  .route("/api/practice", practiceRoutes);
+  .route("/api/jobs", jobRoutes);
 
 // --- Static file serving (production) ---
 // One catch-all serveStatic replaces the old per-file routes: the previous

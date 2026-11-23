@@ -11,9 +11,6 @@ vi.mock("../../services/ai-router.js", () => ({
   generateCards: vi.fn(),
   generateDeepLayer: (word: string) => mockDeep(word),
   extractWords: vi.fn(),
-  generatePracticeImage: vi.fn(),
-  generatePracticeBrief: vi.fn(),
-  gradePracticeDescription: vi.fn(),
 }));
 
 import { eq } from "drizzle-orm";

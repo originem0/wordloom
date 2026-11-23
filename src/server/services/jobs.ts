@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { jobs } from "../db/schema.js";
 
-export type JobType = "story" | "cards" | "practice";
+export type JobType = "story" | "cards";
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
 // Anything JSON.stringify can take. (The old Record<string, unknown> alias

@@ -1,10 +1,10 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import { queryClient } from "../lib/query-client";
-import type { Story, CardGenerateResult, Practice } from "../../shared/types";
+import type { Story, CardGenerateResult } from "../../shared/types";
 
 export type TaskStatus = "running" | "done" | "failed" | "cancelled";
-export type TaskType = "story" | "cards" | "practice";
+export type TaskType = "story" | "cards";
 
 type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
@@ -22,7 +22,7 @@ export interface Task {
   label: string;
   status: TaskStatus;
   error?: string;
-  result?: Story | CardGenerateResult | Practice;
+  result?: Story | CardGenerateResult;
   createdAt: number;
   jobId?: string;
 }
@@ -37,7 +37,7 @@ const POLL_RETRY_MS = 2500;
 const MAX_POLL_FAILURES = 120;
 
 function taskNoun(type: TaskType): string {
-  return type === "story" ? "故事" : type === "practice" ? "出题" : "单词卡";
+  return type === "story" ? "故事" : "单词卡";
 }
 
 function failTask(taskId: string, type: TaskType, error: string) {
@@ -128,14 +128,6 @@ async function pollJob(taskId: string) {
       return;
     }
 
-    if (task.type === "practice") {
-      const result = job.result as Practice;
-      updateTask(taskId, { status: "done", result, label: "出题完成" });
-      queryClient.invalidateQueries({ queryKey: ["practices"] });
-      toast.success("出题完成");
-      return;
-    }
-
     const result = job.result as CardGenerateResult;
     const doneLabel = cardsDoneLabel(result);
     updateTask(taskId, { status: "done", result, label: doneLabel });
@@ -173,7 +165,6 @@ export const useTaskStore = create<{
   tasks: Task[];
   submitStory: (image: File, prompt: string) => string;
   submitCards: (words: string[]) => string;
-  submitPractice: (topic: string, style: string) => string;
   cancelTask: (id: string) => Promise<void> | void;
   removeTask: (id: string) => void;
   clearDone: () => void;
@@ -289,61 +280,6 @@ export const useTaskStore = create<{
         } else {
           updateTask(id, { status: "failed", error: err.message });
           toast.error(`单词卡生成失败: ${err.message}`);
-        }
-      })
-      .finally(() => submitControllers.delete(id));
-
-    return id;
-  },
-
-  submitPractice(topic: string, style: string) {
-    const id = genId();
-    const ac = new AbortController();
-    submitControllers.set(id, ac);
-
-    set((s) => ({
-      tasks: [
-        {
-          id,
-          type: "practice" as const,
-          label: "出题中",
-          status: "running" as const,
-          createdAt: Date.now(),
-        },
-        ...s.tasks,
-      ],
-    }));
-
-    fetch("/api/practice/generate?async=1", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, style }),
-      credentials: "include",
-      signal: ac.signal,
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || `HTTP ${res.status}`);
-        }
-
-        const body = (await res.json()) as { jobId?: string; status?: string } | Practice;
-        if ("jobId" in body && body.jobId) {
-          startPolling(id, body.jobId);
-          return;
-        }
-
-        // fallback for unexpected sync response
-        updateTask(id, { status: "done", result: body as Practice, label: "出题完成" });
-        queryClient.invalidateQueries({ queryKey: ["practices"] });
-        toast.success("出题完成");
-      })
-      .catch((err) => {
-        if (err.name === "AbortError") {
-          updateTask(id, { status: "cancelled" });
-        } else {
-          updateTask(id, { status: "failed", error: err.message });
-          toast.error(`出题失败: ${err.message}`);
         }
       })
       .finally(() => submitControllers.delete(id));

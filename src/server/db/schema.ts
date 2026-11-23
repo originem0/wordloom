@@ -60,7 +60,7 @@ export const sessions = sqliteTable("sessions", {
 
 export const jobs = sqliteTable("jobs", {
   id: text("id").primaryKey(),
-  type: text("type").notNull(), // story | cards | practice (rows from before the refactor may say chunks)
+  type: text("type").notNull(), // story | cards (rows from before the refactor may say chunks or practice)
   status: text("status").notNull(), // queued | running | done | failed | cancelled
   input: text("input").notNull(), // JSON payload
   result: text("result"), // JSON payload
@@ -119,6 +119,11 @@ export const chunks = sqliteTable("chunks", {
 // ---------------------------------------------------------------------------
 // Practices: AI-generated picture-description prompts. The image + question are
 // persisted (re-doable); each answer/feedback round is ephemeral (not stored).
+//
+// Data kept, code removed: the page, routes, prompts and image generation that
+// used this table are gone. The definition stays so the rows survive and
+// drizzle-kit does not generate a DROP TABLE. The images the rows point at are
+// still on disk under data/images/.
 // ---------------------------------------------------------------------------
 
 export const practices = sqliteTable("practices", {

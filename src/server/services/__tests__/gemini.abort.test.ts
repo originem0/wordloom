@@ -27,8 +27,6 @@ import {
   geminiGenerateCards,
   geminiGenerateDeepLayer,
   geminiExtractWords,
-  geminiGeneratePracticeBrief,
-  geminiGradePractice,
 } from "../gemini.js";
 
 // The SDK cancels the HTTP request through config.abortSignal; a call that
@@ -47,8 +45,6 @@ describe("every Gemini call can be cancelled by the timeout", () => {
     ["cards", () => geminiGenerateCards(["word"])],
     ["deep", () => geminiGenerateDeepLayer("word")],
     ["extract", () => geminiExtractWords("some text")],
-    ["practice brief", () => geminiGeneratePracticeBrief({ topic: "", chunkCandidates: [], currentDate: "2026-01-01" })],
-    ["practice grade", () => geminiGradePractice({ visualPrompt: "v", suggestedChunks: [], description: "d" })],
   ])("%s passes an abort signal to the SDK", async (_name, invoke) => {
     await invoke().catch(() => undefined);
     expect(mockGenerateContent).toHaveBeenCalled();

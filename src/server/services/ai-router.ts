@@ -1,9 +1,4 @@
-import type {
-  GroundingSource,
-  StoryArtifact,
-  PracticeBrief,
-  PracticeFeedback,
-} from "../../shared/types.js";
+import type { GroundingSource, StoryArtifact } from "../../shared/types.js";
 import { getSetting, type ParsedCard } from "./ai-shared.js";
 import {
   geminiGenerateStory,
@@ -11,12 +6,8 @@ import {
   geminiGenerateDeepLayer,
   geminiExtractWords,
   geminiTranslateText,
-  geminiGeneratePracticeBrief,
-  geminiGradePractice,
   generateTTS,
   type PreferredVocabItem,
-  type PracticeBriefInput,
-  type PracticeGradeInput,
 } from "./gemini.js";
 import {
   openaiGenerateStory,
@@ -24,9 +15,6 @@ import {
   openaiGenerateDeepLayer,
   openaiExtractWords,
   openaiTranslateText,
-  openaiGenerateImage,
-  openaiGeneratePracticeBrief,
-  openaiGradePractice,
 } from "./openai-compat.js";
 
 // Re-export TTS — always Gemini, not routed
@@ -99,26 +87,4 @@ export async function translateText(text: string): Promise<string> {
     return openaiTranslateText(text);
   }
   return geminiTranslateText(text);
-}
-
-// ---------------------------------------------------------------------------
-// Practice (picture-description)
-// ---------------------------------------------------------------------------
-
-/** Image generation is OpenAI-compatible only (the user's key is an image gateway). */
-export async function generatePracticeImage(prompt: string): Promise<Buffer> {
-  return openaiGenerateImage(prompt);
-}
-
-/** Brief + grading reuse the "story" route's provider/model — closest task. */
-export async function generatePracticeBrief(input: PracticeBriefInput): Promise<PracticeBrief> {
-  const provider = await getProvider("story");
-  if (provider === "openai") return openaiGeneratePracticeBrief(input);
-  return geminiGeneratePracticeBrief(input);
-}
-
-export async function gradePracticeDescription(input: PracticeGradeInput): Promise<PracticeFeedback> {
-  const provider = await getProvider("story");
-  if (provider === "openai") return openaiGradePractice(input);
-  return geminiGradePractice(input);
 }

@@ -8,7 +8,6 @@ import {
   ChevronDown,
   Layers,
   BookOpen,
-  ImagePlus,
   Ban,
 } from "lucide-react";
 import { useTaskStore, type Task } from "@/client/store/tasks";
@@ -17,8 +16,6 @@ import { Button } from "@/client/components/ui/button";
 function TaskIcon({ type }: { type: Task["type"] }) {
   if (type === "story")
     return <BookOpen className="size-3.5 shrink-0 text-muted-foreground" />;
-  if (type === "practice")
-    return <ImagePlus className="size-3.5 shrink-0 text-muted-foreground" />;
   return <Layers className="size-3.5 shrink-0 text-muted-foreground" />;
 }
 

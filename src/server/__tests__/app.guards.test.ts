@@ -16,14 +16,11 @@ vi.mock("../services/ai-router.js", () => ({
   generateCards: (words: string[]) => mockCards(words),
   generateDeepLayer: vi.fn(),
   extractWords: (text: string) => mockExtract(text),
-  generatePracticeImage: vi.fn(),
-  generatePracticeBrief: vi.fn(),
-  gradePracticeDescription: vi.fn(async () => ({ overall: "ok" })),
 }));
 
 import { app } from "../app.js";
 import { db } from "../db/index.js";
-import { cards, jobs, sessions, settings, stories, practices } from "../db/schema.js";
+import { cards, jobs, sessions, settings, stories } from "../db/schema.js";
 import { hashSessionId } from "../middleware/auth.js";
 import { eq } from "drizzle-orm";
 
@@ -67,7 +64,7 @@ beforeEach(async () => {
   process.env.AUTH_TOKEN = "secret-token";
   process.env.AUTH_SECRET = "secret";
   delete process.env.ALLOWED_ORIGINS;
-  for (const t of [cards, jobs, sessions, settings, stories, practices]) {
+  for (const t of [cards, jobs, sessions, settings, stories]) {
     await db.delete(t);
   }
   mockExtract.mockClear();
@@ -87,9 +84,8 @@ describe("anonymous visitors cannot destroy or rewrite library data", () => {
     expect(await db.select().from(cards).where(eq(cards.id, card.id)).get()).toBeTruthy();
   });
 
-  it("DELETE on stories and practices is refused", async () => {
+  it("DELETE on stories is refused", async () => {
     expect((await req("/api/stories/1", { method: "DELETE" })).status).toBe(401);
-    expect((await req("/api/practice/1", { method: "DELETE" })).status).toBe(401);
   });
 
   it("a write route nobody remembered to whitelist is refused by default", async () => {
@@ -129,8 +125,6 @@ describe("generation and its bookkeeping are admin-only", () => {
     ["POST", "/api/cards/generate"],
     ["POST", "/api/cards/extract"],
     ["POST", "/api/cards/1/deep"],
-    ["POST", "/api/practice/generate"],
-    ["POST", "/api/practice/1/grade"],
   ])("%s %s is refused without a session", async (method, path) => {
     const res = await req(path, {
       method,
@@ -270,6 +264,47 @@ describe("response hardening", () => {
     expect(res.status).toBe(400);
     const text = await res.text();
     expect(text).not.toMatch(/JSON|Unexpected|position|SyntaxError/i);
+  });
+});
+
+describe("reading settings", () => {
+  // The image_* rows stand for a feature that is gone: nothing reads them any
+  // more, but they are still in the table.
+  async function seedSettings() {
+    const rows = {
+      gemini_api_key: "g-secret",
+      image_api_key: "i-secret",
+      openai_base_url: "https://gw.internal/v1",
+      image_base_url: "https://img.internal/v1",
+      explanation_language: "zh",
+    };
+    await db.insert(settings).values(Object.entries(rows).map(([key, value]) => ({ key, value })));
+  }
+
+  async function readSettings(cookie?: string) {
+    const res = await req("/api/settings", cookie ? { headers: { cookie } } : {});
+    return (await res.json()) as Record<string, string>;
+  }
+
+  it("never returns a stored api key, not even to the admin", async () => {
+    await seedSettings();
+    for (const body of [await readSettings(), await readSettings(await adminCookie())]) {
+      expect(body).toMatchObject({ gemini_api_key: "configured", image_api_key: "configured" });
+      expect(JSON.stringify(body)).not.toContain("secret");
+    }
+  });
+
+  it("hides base URLs from visitors and shows them to the admin", async () => {
+    await seedSettings();
+    expect(await readSettings()).toMatchObject({
+      openai_base_url: "configured",
+      image_base_url: "configured",
+      explanation_language: "zh",
+    });
+    expect(await readSettings(await adminCookie())).toMatchObject({
+      openai_base_url: "https://gw.internal/v1",
+      image_base_url: "https://img.internal/v1",
+    });
   });
 });
 

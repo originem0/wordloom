@@ -1,5 +1,5 @@
 import { Link, Outlet, NavLink, useNavigate } from "react-router-dom";
-import { BookOpen, Layers, Cpu, Settings, Sun, Moon, LogIn, LogOut, ImagePlus } from "lucide-react";
+import { BookOpen, Layers, Cpu, Settings, Sun, Moon, LogIn, LogOut } from "lucide-react";
 import { apiPost } from "@/client/lib/api";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
@@ -9,7 +9,6 @@ import { TaskPanel } from "./TaskPanel";
 
 const navItems = [
   { to: "/", icon: BookOpen, label: "Story" },
-  { to: "/practice", icon: ImagePlus, label: "Practice" },
   { to: "/cards", icon: Layers, label: "Cards" },
   { to: "/providers", icon: Cpu, label: "AI" },
   { to: "/settings", icon: Settings, label: "Settings" },

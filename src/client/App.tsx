@@ -23,15 +23,6 @@ const WordForgePage = lazy(() =>
   }),
 );
 
-const PracticePage = lazy(() =>
-  import("./components/practice/PracticePage").then((m) => ({
-    default: m.PracticePage,
-  })).catch(() => {
-    window.location.reload();
-    return { default: () => <></> };
-  }),
-);
-
 function AppContent() {
   const theme = useAppStore((s) => s.theme);
 
@@ -64,19 +55,6 @@ function AppContent() {
                 }
               >
                 <WordForgePage />
-              </Suspense>
-            }
-          />
-          <Route path="practice"
-            element={
-              <Suspense
-                fallback={
-                  <div className="flex items-center justify-center p-12">
-                    <div className="size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                  </div>
-                }
-              >
-                <PracticePage />
               </Suspense>
             }
           />

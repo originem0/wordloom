@@ -8,10 +8,12 @@ import { settingTestRoutes } from "./settingsTest.js";
 
 export const settingRoutes = new Hono();
 
-// Sensitive keys hidden from unauthenticated users
-const SENSITIVE_KEYS = new Set([
-  "gemini_base_url", "openai_base_url", "image_base_url",
-]);
+// Matched by suffix, not by a list of names: rows outlive the feature that
+// wrote them (image_api_key is still in the table after image generation was
+// removed), and a key that fell off a list would be served in the clear.
+const isApiKey = (key: string) => key.endsWith("_api_key");
+// Hidden from unauthenticated users
+const isBaseUrl = (key: string) => key.endsWith("_base_url");
 
 // GET / — read all settings (public, but hides sensitive fields for anonymous users)
 settingRoutes.get("/", async (c) => {
@@ -22,9 +24,9 @@ settingRoutes.get("/", async (c) => {
 
   const result: Record<string, string> = {};
   for (const row of rows) {
-    if (row.key === "gemini_api_key" || row.key === "openai_api_key" || row.key === "image_api_key") {
+    if (isApiKey(row.key)) {
       result[row.key] = row.value ? "configured" : "";
-    } else if (!isAdmin && SENSITIVE_KEYS.has(row.key)) {
+    } else if (!isAdmin && isBaseUrl(row.key)) {
       // Hide sensitive config from anonymous users
       result[row.key] = row.value ? "configured" : "";
     } else {
@@ -49,7 +51,7 @@ settingRoutes.put("/", authMiddleware, async (c) => {
   // for anonymous readers. A client that echoes a masked read back through save
   // silently destroys the real value (this actually happened to gemini_base_url
   // and image_base_url), so refuse the mask literal at the write boundary.
-  if (value.trim() === "configured" && (SENSITIVE_KEYS.has(key) || key.endsWith("_api_key"))) {
+  if (value.trim() === "configured" && (isBaseUrl(key) || isApiKey(key))) {
     return c.json({
       error: 'Refusing to save the masked placeholder "configured" — reload the page while logged in and re-enter the real value',
       code: "MASKED_LITERAL",
