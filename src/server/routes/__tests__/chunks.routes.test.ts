@@ -159,6 +159,7 @@ vi.mock("../../services/ai-shared.js", () => ({
 
 vi.mock("../../middleware/rateLimit.js", () => ({
   rateLimit: () => null,
+  dailyLimit: async () => null,
 }));
 
 // ---------------------------------------------------------------------------

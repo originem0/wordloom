@@ -15,14 +15,7 @@ import { AI_BUSY } from "../services/ai-shared.js";
 import { PRACTICE_STYLE_SUFFIX } from "../services/ai-prompts.js";
 import type { Practice, StorySceneFrame } from "../../shared/types.js";
 import { rateLimit, dailyLimit } from "../middleware/rateLimit.js";
-import {
-  createJob,
-  isJobCancelled,
-  setJobCancelled,
-  setJobDone,
-  setJobFailed,
-  setJobRunning,
-} from "../services/jobs.js";
+import { createJob, runJob } from "../services/jobs.js";
 import {
   generatePracticeRequestSchema,
   gradePracticeRequestSchema,
@@ -127,7 +120,7 @@ async function createPracticeRecord(input: PracticeJobInput): Promise<Practice> 
   // 2) image call: draw the scene with the chosen art-style suffix (slow)
   const styleSuffix = PRACTICE_STYLE_SUFFIX[input.style] ?? PRACTICE_STYLE_SUFFIX.documentary;
   const rawImage = await generatePracticeImage(`${brief.visualPrompt} ${styleSuffix}`);
-  const compressed = await compressImage(rawImage, "image/png");
+  const compressed = await compressImage(rawImage);
 
   const filename = `${randomUUID()}.jpg`;
   const imagePath = `data/images/${filename}`;
@@ -150,32 +143,6 @@ async function createPracticeRecord(input: PracticeJobInput): Promise<Practice> 
     .returning();
 
   return toPractice(inserted[0]);
-}
-
-async function runPracticeJob(jobId: string, input: PracticeJobInput) {
-  await setJobRunning(jobId);
-  try {
-    if (await isJobCancelled(jobId)) {
-      await setJobCancelled(jobId);
-      return;
-    }
-
-    const practice = await createPracticeRecord(input);
-
-    if (await isJobCancelled(jobId)) {
-      await setJobCancelled(jobId);
-      return;
-    }
-
-    await setJobDone(jobId, practice as unknown as Record<string, unknown>);
-  } catch (err) {
-    if (await isJobCancelled(jobId)) {
-      await setJobCancelled(jobId);
-      return;
-    }
-    const msg = err instanceof Error ? err.message : "Practice generation failed";
-    await setJobFailed(jobId, msg);
-  }
 }
 
 // POST /generate — create a picture-description question (image gen is slow → async)
@@ -201,7 +168,7 @@ practiceRoutes.post("/generate", async (c) => {
   const useAsync = c.req.query("async") === "1";
   if (useAsync) {
     const jobId = await createJob("practice", { topic, style });
-    void runPracticeJob(jobId, { topic, style });
+    void runJob(jobId, () => createPracticeRecord({ topic, style }));
     return c.json({ jobId, status: "queued" }, 202);
   }
 
@@ -233,6 +200,15 @@ practiceRoutes.post("/:id/grade", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "Invalid request", code: "INVALID_REQUEST" }, 400);
   }
+
+  // Grading runs on the story model; the per-minute limit alone still allowed
+  // ~28k anonymous calls a day.
+  const dailyLimited = await dailyLimit(c, {
+    key: "daily-grade",
+    settingKey: "daily_grade_limit",
+    defaultMax: 50,
+  });
+  if (dailyLimited) return dailyLimited;
 
   try {
     const feedback = await gradePracticeDescription({

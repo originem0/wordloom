@@ -4,20 +4,13 @@ import { chunks } from "../db/schema.js";
 import { and, count, desc, eq, like, or, sql } from "drizzle-orm";
 import { generateChunk } from "../services/ai-router.js";
 import { AI_BUSY } from "../services/ai-shared.js";
-import { rateLimit } from "../middleware/rateLimit.js";
+import { rateLimit, dailyLimit } from "../middleware/rateLimit.js";
 import {
   generateChunkRequestSchema,
   updateChunkSchema,
 } from "../../shared/validation.js";
 import type { Chunk, ChunkGenerateResult, ChunkPayload } from "../../shared/types.js";
-import {
-  createJob,
-  isJobCancelled,
-  setJobCancelled,
-  setJobDone,
-  setJobFailed,
-  setJobRunning,
-} from "../services/jobs.js";
+import { createJob, runJob } from "../services/jobs.js";
 
 export const chunkRoutes = new Hono();
 
@@ -120,32 +113,6 @@ async function generateChunkPayload(input: string): Promise<ChunkGenerateResult>
   return { ...result, chunk, wasExisting };
 }
 
-async function runChunksJob(jobId: string, input: string) {
-  await setJobRunning(jobId);
-  try {
-    if (await isJobCancelled(jobId)) {
-      await setJobCancelled(jobId);
-      return;
-    }
-
-    const result = await generateChunkPayload(input);
-
-    if (await isJobCancelled(jobId)) {
-      await setJobCancelled(jobId);
-      return;
-    }
-
-    await setJobDone(jobId, result as unknown as Record<string, unknown>);
-  } catch (err) {
-    if (await isJobCancelled(jobId)) {
-      await setJobCancelled(jobId);
-      return;
-    }
-    const msg = err instanceof Error ? err.message : "Chunk generation failed";
-    await setJobFailed(jobId, msg);
-  }
-}
-
 // ---------------------------------------------------------------------------
 // POST /generate — analyze + (maybe) persist a candidate chunk
 // ---------------------------------------------------------------------------
@@ -169,10 +136,17 @@ chunkRoutes.post("/generate", async (c) => {
     return c.json({ error: "Empty input", code: "VALIDATION_ERROR" }, 400);
   }
 
+  const dailyLimited = await dailyLimit(c, {
+    key: "daily-chunks",
+    settingKey: "daily_chunks_limit",
+    defaultMax: 30,
+  });
+  if (dailyLimited) return dailyLimited;
+
   const useAsync = c.req.query("async") === "1";
   if (useAsync) {
     const jobId = await createJob("chunks", { input });
-    void runChunksJob(jobId, input);
+    void runJob(jobId, () => generateChunkPayload(input));
     return c.json({ jobId, status: "queued" }, 202);
   }
 

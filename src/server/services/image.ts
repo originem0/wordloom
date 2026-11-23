@@ -2,7 +2,6 @@ import sharp from "sharp";
 
 export async function compressImage(
   buffer: Buffer,
-  _mimeType: string,
 ): Promise<{ buffer: Buffer; mimeType: string }> {
   const image = sharp(buffer);
   const metadata = await image.metadata();

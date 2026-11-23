@@ -44,6 +44,7 @@ vi.mock("../../services/ai-shared.js", () => ({
 vi.mock("../../middleware/rateLimit.js", () => ({
   rateLimit: () => null,
   dailyLimit: async () => null,
+  UTILITY_DAILY_LIMIT: { key: "daily-utility", settingKey: "daily_utility_limit", defaultMax: 100 },
 }));
 
 // Import after mocks
@@ -75,8 +76,7 @@ describe("POST /cards/generate — deduplication", () => {
       body: JSON.stringify({ words: ["hello", "world"] }),
     });
 
-    const body = await res.json();
-    expect(body.message).toBe("All words already exist");
+    expect(await res.json()).toMatchObject({ message: "All words already exist" });
     expect(mockGenerateCards).not.toHaveBeenCalled();
   });
 
@@ -108,8 +108,7 @@ describe("POST /cards/generate — deduplication", () => {
       body: JSON.stringify({ words: ["HELLO", "hello"] }),
     });
 
-    const body = await res.json();
-    expect(body.message).toBe("All words already exist");
+    expect(await res.json()).toMatchObject({ message: "All words already exist" });
     expect(mockGenerateCards).not.toHaveBeenCalled();
   });
 });

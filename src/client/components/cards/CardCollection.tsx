@@ -13,6 +13,7 @@ import { useCards, useDeleteCard, useMissingDeep } from "@/client/hooks/useCards
 import { apiPost } from "@/client/lib/api";
 import { PrototypeWordCard } from "./PrototypeWordCard";
 import type { Card } from "@/shared/types";
+import { AdminOnly } from "@/client/components/auth/AdminOnly";
 
 /** Use fullscreen overlay on mobile + tablet portrait (≤ 768px) */
 function useIsMobile() {
@@ -49,13 +50,21 @@ export function CardCollection({ searchInput }: CardCollectionProps) {
     }
   }, [selectedCard, isMobile]);
 
-  const [page, setPage] = useState(1);
   const limit = 20;
 
-  // Reset to first page whenever the search query or CEFR filter changes.
-  useEffect(() => {
-    setPage(1);
-  }, [searchInput, cefr]);
+  // A page number only means something for the search/filter it was reached
+  // under, so it is stored together with that combination and read back as 1
+  // whenever the combination differs. Resetting it from an effect instead ran
+  // one render late: every filter change first fetched the old page number
+  // under the new filter, then fetched page 1.
+  const filterKey = JSON.stringify([searchInput, cefr]);
+  const [paging, setPaging] = useState({ filterKey, page: 1 });
+  const page = paging.filterKey === filterKey ? paging.page : 1;
+  const setPage = (update: (current: number) => number) =>
+    setPaging((prev) => ({
+      filterKey,
+      page: update(prev.filterKey === filterKey ? prev.page : 1),
+    }));
 
   const { data, isLoading } = useCards({
     search: searchInput || undefined,
@@ -289,15 +298,17 @@ const CardListItem = memo(function CardListItem({
             </p>
           )}
         </div>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="shrink-0 min-h-8 min-w-8 opacity-100 sm:opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-destructive"
-          disabled={deletePending}
-          onClick={(e) => onDelete(e, card.id)}
-        >
-          <Trash2 className="size-3.5" />
-        </Button>
+        <AdminOnly>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="shrink-0 min-h-8 min-w-8 opacity-100 sm:opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+            disabled={deletePending}
+            onClick={(e) => onDelete(e, card.id)}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </AdminOnly>
       </div>
     </div>
   );

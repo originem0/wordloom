@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/client/components/ui
 import { Input } from "@/client/components/ui/input";
 import { Button } from "@/client/components/ui/button";
 import { apiPost } from "@/client/lib/api";
+import { queryClient } from "@/client/lib/query-client";
+import { AUTH_QUERY_KEY } from "@/client/hooks/useAuth";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -19,10 +21,11 @@ export function LoginPage() {
 
     try {
       await apiPost("/api/auth/login", { token });
+      await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
       const redirect = searchParams.get("redirect") || "/";
       navigate(redirect, { replace: true });
-    } catch (err: any) {
-      setError(err.message ?? "登录失败");
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "登录失败");
     } finally {
       setLoading(false);
     }

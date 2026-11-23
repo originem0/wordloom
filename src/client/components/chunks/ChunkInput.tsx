@@ -6,6 +6,7 @@ import { Button } from "@/client/components/ui/button";
 import { useGenerateChunk, useDeleteChunk } from "@/client/hooks/useChunks";
 import type { ChunkGenerateResult } from "@/shared/types";
 import { ChunkCardBody } from "./ChunkCardBody";
+import { AdminOnly } from "@/client/components/auth/AdminOnly";
 
 interface ChunkInputProps {
   /** When set, fills the input and focuses it. Cleared by `onPrefillConsumed`. */
@@ -14,28 +15,42 @@ interface ChunkInputProps {
 }
 
 export function ChunkInput({ prefill, onPrefillConsumed }: ChunkInputProps) {
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(prefill ?? "");
   const [result, setResult] = useState<ChunkGenerateResult | null>(null);
+  const [seenPrefill, setSeenPrefill] = useState(prefill ?? "");
   const generate = useGenerateChunk();
   const del = useDeleteChunk();
   const navigate = useNavigate();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Consume external prefill (e.g. clicked from empty-state suggestion)
-  useEffect(() => {
-    if (prefill && prefill !== input) {
+  // Consume external prefill (e.g. clicked from empty-state suggestion).
+  // The text swap happens while rendering, so the new prefill is on screen in
+  // the same paint; only the parts that touch the outside world (focus, telling
+  // the parent) are left to the effect.
+  if ((prefill ?? "") !== seenPrefill) {
+    setSeenPrefill(prefill ?? "");
+    if (prefill) {
       setInput(prefill);
       setResult(null);
-      // Focus + move caret to end on the next tick
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (el) {
-          el.focus();
-          el.setSelectionRange(prefill.length, prefill.length);
-        }
-      });
-      onPrefillConsumed?.();
     }
+  }
+
+  useEffect(() => {
+    if (!prefill) return;
+    // Focus + move caret to end on the next tick
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(prefill.length, prefill.length);
+      }
+    });
+    // Always report back, even when the prefill equals what is already typed:
+    // the parent only clears its copy on this call, and a copy left behind
+    // makes the next click on the same suggestion a no-op.
+    onPrefillConsumed?.();
+    // Deliberately keyed on the prefill alone: the callback is a fresh closure
+    // on every parent render and must not re-trigger consumption.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill]);
 
@@ -252,24 +267,27 @@ function ChunkResultView({
         <Button type="button" onClick={onReset}>
           Add another
         </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onDiscard}
-          disabled={deleting}
-        >
-          {deleting ? (
-            <>
-              <Loader2 className="mr-2 size-4 animate-spin" />
-              Removing…
-            </>
-          ) : (
-            <>
-              <Trash2 className="mr-2 size-4" />
-              {isBorderline ? "Skip" : "Discard"}
-            </>
-          )}
-        </Button>
+        {/* Discard deletes the stored chunk — admin only. Visitors just move on. */}
+        <AdminOnly>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onDiscard}
+            disabled={deleting}
+          >
+            {deleting ? (
+              <>
+                <Loader2 className="mr-2 size-4 animate-spin" />
+                Removing…
+              </>
+            ) : (
+              <>
+                <Trash2 className="mr-2 size-4" />
+                {isBorderline ? "Skip" : "Discard"}
+              </>
+            )}
+          </Button>
+        </AdminOnly>
       </div>
     </div>
   );

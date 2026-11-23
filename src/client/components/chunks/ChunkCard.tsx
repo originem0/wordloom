@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Heart } from "lucide-react";
 import type { Chunk } from "@/shared/types";
-import { getCategoryColor, getCategoryLabel, renderForm } from "./ChunkCardBody";
+import { getCategoryColor, getCategoryLabel, renderForm } from "./chunkMeta";
 
 interface ChunkCardProps {
   chunk: Chunk;

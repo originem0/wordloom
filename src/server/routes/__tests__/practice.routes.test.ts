@@ -86,11 +86,7 @@ vi.mock("../../middleware/rateLimit.js", () => ({
 
 vi.mock("../../services/jobs.js", () => ({
   createJob: vi.fn(async () => "job-1"),
-  isJobCancelled: vi.fn(async () => false),
-  setJobCancelled: vi.fn(async () => undefined),
-  setJobDone: vi.fn(async () => undefined),
-  setJobFailed: vi.fn(async () => undefined),
-  setJobRunning: vi.fn(async () => undefined),
+  runJob: vi.fn(async () => undefined),
 }));
 
 // ---------------------------------------------------------------------------

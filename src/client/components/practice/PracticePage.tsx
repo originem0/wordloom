@@ -7,6 +7,7 @@ import { PracticeView } from "./PracticeView";
 import { usePractices } from "@/client/hooks/usePractice";
 import { useTaskStore } from "@/client/store/tasks";
 import type { Practice } from "@/shared/types";
+import { AdminOnly } from "@/client/components/auth/AdminOnly";
 
 const STYLE_OPTIONS = [
   { key: "documentary", label: "纪实摄影" },
@@ -150,17 +151,19 @@ function PracticeInner() {
                       {timeAgo(p.createdAt)}
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="shrink-0 min-h-8 min-w-8 text-muted-foreground hover:text-destructive"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(p.id);
-                    }}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
+                  <AdminOnly>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="shrink-0 min-h-8 min-w-8 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(p.id);
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </AdminOnly>
                 </CardContent>
               </Card>
             ))}

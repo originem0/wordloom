@@ -3,6 +3,7 @@ import { db } from "../db/index.js";
 import { jobs } from "../db/schema.js";
 import { eq, desc } from "drizzle-orm";
 import { parseJob, setJobCancelled } from "../services/jobs.js";
+import { authMiddleware } from "../middleware/auth.js";
 
 export const jobRoutes = new Hono();
 
@@ -31,7 +32,9 @@ jobRoutes.post("/:id/cancel", async (c) => {
   return c.json(parseJob(updated!));
 });
 
-jobRoutes.get("/", async (c) => {
+// The list exposes every visitor's inputs and results — admin only. A single
+// job stays readable by anyone holding its UUID (that is how visitors poll).
+jobRoutes.get("/", authMiddleware, async (c) => {
   const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") || "20")));
   const rows = await db.select().from(jobs).orderBy(desc(jobs.createdAt)).limit(limit).all();
   return c.json({ jobs: rows.map(parseJob) });

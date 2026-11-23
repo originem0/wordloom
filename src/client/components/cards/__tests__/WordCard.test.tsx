@@ -3,8 +3,9 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import React from "react";
 import "@testing-library/jest-dom/vitest";
-import { WordCard, normalizeBoundaryTests } from "../WordCard";
-import type { Card } from "@/shared/types";
+import { WordCard } from "../WordCard";
+import { normalizeBoundaryTests } from "../boundaryTests";
+import type { BoundaryTest, Card } from "@/shared/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // Mock the API hooks so it doesn't actually try to fetch
@@ -27,7 +28,7 @@ function renderWithProviders(ui: React.ReactElement) {
 
 describe("Scenario 2: Legacy Card Backward Compatibility", () => {
   it("normalizeBoundaryTests adapter seamlessly converts old format to new layout", () => {
-    const legacyTests: any[] = [
+    const legacyTests: BoundaryTest[] = [
       {
         scenario: "When something blocks your way",
         answer: "yes",
@@ -79,7 +80,7 @@ describe("Scenario 2: Legacy Card Backward Compatibility", () => {
           answer: "yes",
           explanation: "Old reason",
         },
-      ] as any[],
+      ],
     } as unknown as Card;
 
     renderWithProviders(<WordCard card={legacyCard} />);

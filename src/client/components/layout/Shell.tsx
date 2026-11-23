@@ -1,10 +1,10 @@
-import { useEffect } from "react";
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Layers, Puzzle, Cpu, Settings, Sun, Moon, LogOut, ImagePlus } from "lucide-react";
-import { apiFetch, apiPost } from "@/client/lib/api";
+import { Link, Outlet, NavLink, useNavigate } from "react-router-dom";
+import { BookOpen, Layers, Puzzle, Cpu, Settings, Sun, Moon, LogIn, LogOut, ImagePlus } from "lucide-react";
+import { apiPost } from "@/client/lib/api";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
+import { queryClient } from "@/client/lib/query-client";
+import { AUTH_QUERY_KEY, useIsAdmin } from "@/client/hooks/useAuth";
 import { TaskPanel } from "./TaskPanel";
 
 const navItems = [
@@ -40,34 +40,16 @@ function ThemeToggle() {
 
 export function Shell() {
   const navigate = useNavigate();
+  const isAdmin = useIsAdmin();
 
   async function handleLogout() {
     try {
       await apiPost("/api/auth/logout", {});
     } finally {
+      // Drop the cached admin flag so admin-only controls vanish immediately.
+      await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
       navigate("/login", { replace: true });
     }
-  }
-
-  // Auth guard: probe a protected endpoint
-  const { error, isLoading } = useQuery({
-    queryKey: ["auth-check"],
-    queryFn: () => apiFetch("/api/settings"),
-    retry: false,
-  });
-
-  useEffect(() => {
-    if (error && (error as any).status === 401) {
-      navigate("/login", { replace: true });
-    }
-  }, [error, navigate]);
-
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      </div>
-    );
   }
 
   return (
@@ -98,14 +80,23 @@ export function Shell() {
         </nav>
         <div className="border-t p-3 space-y-2">
           <ThemeToggle />
-          <button
-            onClick={handleLogout}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            title="退出登录"
-          >
-            <LogOut className="size-4" />
-            退出登录
-          </button>
+          {isAdmin ? (
+            <button
+              onClick={handleLogout}
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            >
+              <LogOut className="size-4" />
+              退出登录
+            </button>
+          ) : (
+            <Link
+              to="/login"
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            >
+              <LogIn className="size-4" />
+              管理员登录
+            </Link>
+          )}
         </div>
       </aside>
 

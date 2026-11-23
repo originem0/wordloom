@@ -5,7 +5,7 @@ import { useChunks } from "@/client/hooks/useChunks";
 import type { Chunk } from "@/shared/types";
 import { ChunkCard } from "./ChunkCard";
 import { ChunkDetail } from "./ChunkDetail";
-import { getCategoryColor, getCategoryLabel } from "./ChunkCardBody";
+import { getCategoryColor, getCategoryLabel } from "./chunkMeta";
 
 const CATEGORIES = [
   "prep-intuition",
@@ -52,7 +52,7 @@ export function ChunkCollection({ onSuggest }: ChunkCollectionProps) {
     limit: 200,
   });
 
-  const chunks = data?.chunks ?? [];
+  const chunks = useMemo(() => data?.chunks ?? [], [data]);
   const total = data?.total ?? 0;
   const hasFilters = !!(debouncedSearch || category || frequency);
   const showEmptySeed = !isLoading && !hasFilters && total === 0;

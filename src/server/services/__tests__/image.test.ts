@@ -36,7 +36,7 @@ describe("compressImage", () => {
   it("resizes images wider than 1920px", async () => {
     mockMetadata.mockResolvedValue({ width: 3840, height: 2160 });
 
-    const result = await compressImage(Buffer.from("img"), "image/png");
+    const result = await compressImage(Buffer.from("img"));
 
     expect(mockResize).toHaveBeenCalledWith(1920, undefined, {
       fit: "inside",
@@ -48,7 +48,7 @@ describe("compressImage", () => {
   it("does not resize images narrower than 1920px", async () => {
     mockMetadata.mockResolvedValue({ width: 800, height: 600 });
 
-    await compressImage(Buffer.from("img"), "image/png");
+    await compressImage(Buffer.from("img"));
 
     expect(mockResize).not.toHaveBeenCalled();
   });
@@ -56,7 +56,7 @@ describe("compressImage", () => {
   it("does not resize images exactly 1920px wide (> not >=)", async () => {
     mockMetadata.mockResolvedValue({ width: 1920, height: 1080 });
 
-    await compressImage(Buffer.from("img"), "image/png");
+    await compressImage(Buffer.from("img"));
 
     expect(mockResize).not.toHaveBeenCalled();
   });
@@ -64,7 +64,7 @@ describe("compressImage", () => {
   it("does not resize when metadata has no width", async () => {
     mockMetadata.mockResolvedValue({});
 
-    await compressImage(Buffer.from("img"), "image/png");
+    await compressImage(Buffer.from("img"));
 
     expect(mockResize).not.toHaveBeenCalled();
   });
@@ -72,7 +72,7 @@ describe("compressImage", () => {
   it("always outputs image/jpeg", async () => {
     mockMetadata.mockResolvedValue({ width: 500 });
 
-    const result = await compressImage(Buffer.from("img"), "image/webp");
+    const result = await compressImage(Buffer.from("img"));
 
     expect(result.mimeType).toBe("image/jpeg");
   });

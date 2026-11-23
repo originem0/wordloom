@@ -175,7 +175,7 @@
   display: flex;
   justify-content: center;
 }
-.proto-page .custom-schema-svg svg {
+.proto-page .custom-schema-svg img {
   width: 100%;
   height: auto;
   aspect-ratio: 600 / 180;

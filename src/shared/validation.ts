@@ -3,7 +3,9 @@ import { z } from "zod";
 // --- Request schemas ---
 
 export const generateCardsRequestSchema = z.object({
-  words: z.array(z.string().min(1)).min(1).max(10),
+  // 64 chars covers any real headword or short compound; an unbounded "word"
+  // is a free-form prompt-injection channel into the card/deep prompts.
+  words: z.array(z.string().min(1).max(64)).min(1).max(10),
 });
 
 export const extractWordsRequestSchema = z.object({

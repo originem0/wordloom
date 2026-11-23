@@ -1,41 +1,10 @@
 import { useState } from "react";
 import { useGenerateDeep } from "@/client/hooks/useCards";
 import { SchemaBlockageSvg } from "./SchemaBlockageSvg";
-import type { Card, BoundaryTest, BoundaryTestOption } from "@/shared/types";
+import type { Card } from "@/shared/types";
 import "./word-card.css";
-
-// ---------------------------------------------------------------------------
-// Backward-compat adapter for BoundaryTest
-// Old format: { scenario, answer, explanation }
-// New format: { sentence, options: [{ verdict, word, reason }] }
-// ---------------------------------------------------------------------------
-
-interface NormalizedBoundaryTest {
-  sentence: string;
-  options: BoundaryTestOption[];
-}
-
-export function normalizeBoundaryTests(
-  tests: BoundaryTest[],
-): NormalizedBoundaryTest[] {
-  return tests.map((t) => {
-    // New format — has sentence + options
-    if (t.sentence && t.options && t.options.length > 0) {
-      return { sentence: t.sentence, options: t.options };
-    }
-    // Legacy format — convert { scenario, answer, explanation } → new shape
-    return {
-      sentence: t.scenario ?? "",
-      options: [
-        {
-          verdict: (t.answer === "yes" ? "yes" : t.answer === "no" ? "no" : "maybe") as "yes" | "no" | "maybe",
-          word: "—",
-          reason: t.explanation ?? "",
-        },
-      ],
-    };
-  });
-}
+import { BoldMarkup } from "./UntrustedText";
+import { normalizeBoundaryTests, type NormalizedBoundaryTest } from "./boundaryTests";
 
 // ---------------------------------------------------------------------------
 // Section: Word Header
@@ -129,15 +98,9 @@ function SceneActivationSection({ card }: { card: Card }) {
         <div key={i} className="wc-scene">
           <h3>{scene.title}</h3>
           <p>{scene.description}</p>
-          <p
-            className="wc-scene-example"
-            dangerouslySetInnerHTML={{
-              __html: scene.example.replace(
-                /\*\*(.*?)\*\*/g,
-                "<strong>$1</strong>",
-              ),
-            }}
-          />
+          <p className="wc-scene-example">
+            <BoldMarkup text={scene.example} />
+          </p>
           {scene.associatedWords.length > 0 && (
             <div className="wc-associated-words">
               {scene.associatedWords.map((w) => (
@@ -199,12 +162,9 @@ function FamilyComparisonSection({ card }: { card: Card }) {
         </table>
       </div>
       {boundaryNote && (
-        <div
-          className="wc-boundary-note"
-          dangerouslySetInnerHTML={{
-            __html: boundaryNote.replace(/\n/g, "<br>"),
-          }}
-        />
+        <div className="wc-boundary-note" style={{ whiteSpace: "pre-line" }}>
+          {boundaryNote}
+        </div>
       )}
     </section>
   );

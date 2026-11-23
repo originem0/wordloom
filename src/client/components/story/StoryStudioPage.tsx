@@ -11,6 +11,7 @@ import { useTaskStore } from "@/client/store/tasks";
 import { apiFetch } from "@/client/lib/api";
 import { toast } from "sonner";
 import type { Story, Card as CardType } from "@/shared/types";
+import { AdminOnly } from "@/client/components/auth/AdminOnly";
 
 function StoryStudioInner() {
   const [page, setPage] = useState(1);
@@ -200,17 +201,19 @@ function StoryStudioInner() {
                       {timeAgo(s.createdAt)}
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="shrink-0 min-h-8 min-w-8 text-muted-foreground hover:text-destructive"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(s.id);
-                    }}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
+                  <AdminOnly>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="shrink-0 min-h-8 min-w-8 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(s.id);
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </AdminOnly>
                 </CardContent>
               </Card>
             ))}

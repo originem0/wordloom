@@ -7,7 +7,9 @@ import {
   useIncrementChunkUsage,
 } from "@/client/hooks/useChunks";
 import type { Chunk } from "@/shared/types";
-import { ChunkCardBody, getCategoryColor } from "./ChunkCardBody";
+import { ChunkCardBody } from "./ChunkCardBody";
+import { getCategoryColor } from "./chunkMeta";
+import { AdminOnly } from "@/client/components/auth/AdminOnly";
 
 interface ChunkDetailProps {
   chunk: Chunk;
@@ -131,24 +133,26 @@ export function ChunkDetail({
             )}
             用过了 +1
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleDelete}
-            disabled={del.isPending}
-          >
-            {del.isPending ? (
-              <>
-                <Loader2 className="mr-2 size-4 animate-spin" />
-                Deleting…
-              </>
-            ) : (
-              <>
-                <Trash2 className="mr-2 size-4" />
-                Delete
-              </>
-            )}
-          </Button>
+          <AdminOnly>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleDelete}
+              disabled={del.isPending}
+            >
+              {del.isPending ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                <>
+                  <Trash2 className="mr-2 size-4" />
+                  Delete
+                </>
+              )}
+            </Button>
+          </AdminOnly>
         </div>
       </footer>
     </div>

@@ -8,7 +8,7 @@ import {
   extractWords,
 } from "../services/ai-router.js";
 import { AI_BUSY } from "../services/ai-shared.js";
-import { rateLimit, dailyLimit } from "../middleware/rateLimit.js";
+import { rateLimit, dailyLimit, UTILITY_DAILY_LIMIT } from "../middleware/rateLimit.js";
 import {
   generateCardsRequestSchema,
   extractWordsRequestSchema,
@@ -16,14 +16,7 @@ import {
 import type { Card, CardGenerateResult } from "../../shared/types.js";
 
 type CardGeneratePayload = CardGenerateResult & { message?: string };
-import {
-  createJob,
-  isJobCancelled,
-  setJobCancelled,
-  setJobDone,
-  setJobFailed,
-  setJobRunning,
-} from "../services/jobs.js";
+import { createJob, runJob } from "../services/jobs.js";
 
 export const cardRoutes = new Hono();
 
@@ -41,11 +34,13 @@ const JSON_FIELDS = [
   "boundaryTests",
 ] as const;
 
-const DEEP_JSON_FIELDS = new Set([
+// Typed as Set<string> so .has() accepts any JSON_FIELDS member, not just the
+// three literals listed here.
+const DEEP_JSON_FIELDS = new Set<string>([
   "familyComparison",
   "schemaAnalysis",
   "boundaryTests",
-] as const);
+]);
 
 /** Parse a card DB row into the API shape (JSON-decode text fields). */
 export function toCard(row: typeof cards.$inferSelect): Card {
@@ -169,32 +164,6 @@ async function generateCardsPayload(normalized: string[]): Promise<CardGenerateP
   return { success: [...existing, ...insertedCards], failed: generated.failed, existing };
 }
 
-async function runCardsJob(jobId: string, normalized: string[]) {
-  await setJobRunning(jobId);
-  try {
-    if (await isJobCancelled(jobId)) {
-      await setJobCancelled(jobId);
-      return;
-    }
-
-    const result = await generateCardsPayload(normalized);
-
-    if (await isJobCancelled(jobId)) {
-      await setJobCancelled(jobId);
-      return;
-    }
-
-    await setJobDone(jobId, result);
-  } catch (err) {
-    if (await isJobCancelled(jobId)) {
-      await setJobCancelled(jobId);
-      return;
-    }
-    const msg = err instanceof Error ? err.message : "Generation failed";
-    await setJobFailed(jobId, msg);
-  }
-}
-
 // POST /generate — generate cards for a list of words
 cardRoutes.post("/generate", async (c) => {
   const limited = rateLimit(c, {
@@ -227,7 +196,7 @@ cardRoutes.post("/generate", async (c) => {
   const useAsync = c.req.query("async") === "1";
   if (useAsync) {
     const jobId = await createJob("cards", { words: normalized });
-    void runCardsJob(jobId, normalized);
+    void runJob(jobId, () => generateCardsPayload(normalized));
     return c.json({ jobId, status: "queued" }, 202);
   }
 
@@ -246,6 +215,11 @@ cardRoutes.post("/generate", async (c) => {
 
 // POST /extract — extract words from text
 cardRoutes.post("/extract", async (c) => {
+  const limited = rateLimit(c, { key: "cards-extract", windowMs: 60_000, max: 20 });
+  if (limited) return limited;
+  const dailyLimited = await dailyLimit(c, UTILITY_DAILY_LIMIT);
+  if (dailyLimited) return dailyLimited;
+
   const body = await c.req.json();
   const parsed = extractWordsRequestSchema.safeParse(body);
   if (!parsed.success) {

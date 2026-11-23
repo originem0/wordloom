@@ -70,6 +70,19 @@ describe("auth middleware", () => {
     expect(res.status).toBe(401);
   });
 
+  describe("GET /auth/me", () => {
+    it("reports anonymous when auth is configured and no session is held", async () => {
+      process.env.AUTH_TOKEN = "secret-token";
+      const res = await buildApp().request("/auth/me");
+      expect(await res.json()).toEqual({ authenticated: false });
+    });
+
+    it("reports admin in dev mode, where writes are not guarded either", async () => {
+      const res = await buildApp().request("/auth/me");
+      expect(await res.json()).toEqual({ authenticated: true });
+    });
+  });
+
   describe("login endpoint", () => {
     it("returns ok in dev mode regardless of token", async () => {
       const app = buildApp();
@@ -79,8 +92,7 @@ describe("auth middleware", () => {
         body: JSON.stringify({ token: "anything" }),
       });
       expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.ok).toBe(true);
+      expect(await res.json()).toMatchObject({ ok: true });
     });
 
     it("sets session cookie on correct token", async () => {

@@ -17,15 +17,8 @@ import type {
   StoryArtifact,
   GroundingSource,
 } from "../../shared/types.js";
-import { rateLimit, dailyLimit } from "../middleware/rateLimit.js";
-import {
-  createJob,
-  isJobCancelled,
-  setJobCancelled,
-  setJobDone,
-  setJobFailed,
-  setJobRunning,
-} from "../services/jobs.js";
+import { rateLimit, dailyLimit, UTILITY_DAILY_LIMIT } from "../middleware/rateLimit.js";
+import { createJob, runJob } from "../services/jobs.js";
 
 const IMAGE_DIR = join(process.cwd(), "data", "images");
 const TTS_CACHE_DIR = join(process.cwd(), "data", "tts");
@@ -134,14 +127,13 @@ async function attachExistingCardIds(artifact: StoryArtifact): Promise<void> {
 
 type StoryJobInput = {
   prompt: string;
-  mimeType: string;
   imageBuffer: Buffer;
 };
 
 async function createStoryRecord(input: StoryJobInput): Promise<Story> {
-  const { prompt, mimeType, imageBuffer } = input;
+  const { prompt, imageBuffer } = input;
 
-  const result = await compressImage(imageBuffer, mimeType);
+  const result = await compressImage(imageBuffer);
   const preferredVocab = await fetchPreferredVocab();
   const generated = await generateStory(
     result.buffer,
@@ -171,32 +163,6 @@ async function createStoryRecord(input: StoryJobInput): Promise<Story> {
     .returning();
 
   return toStory(inserted[0]);
-}
-
-async function runStoryJob(jobId: string, input: StoryJobInput) {
-  await setJobRunning(jobId);
-  try {
-    if (await isJobCancelled(jobId)) {
-      await setJobCancelled(jobId);
-      return;
-    }
-
-    const story = await createStoryRecord(input);
-
-    if (await isJobCancelled(jobId)) {
-      await setJobCancelled(jobId);
-      return;
-    }
-
-    await setJobDone(jobId, story as unknown as Record<string, unknown>);
-  } catch (err) {
-    if (await isJobCancelled(jobId)) {
-      await setJobCancelled(jobId);
-      return;
-    }
-    const msg = err instanceof Error ? err.message : "Story generation failed";
-    await setJobFailed(jobId, msg);
-  }
 }
 
 // POST /generate — upload image + optional prompt, get a story back
@@ -241,21 +207,15 @@ storyRoutes.post("/generate", async (c) => {
       imageSize: file.size,
     });
 
-    void runStoryJob(jobId, {
-      prompt,
-      mimeType: file.type,
-      imageBuffer,
-    });
+    void runJob(jobId, () =>
+      createStoryRecord({ prompt, imageBuffer }),
+    );
 
     return c.json({ jobId, status: "queued" }, 202);
   }
 
   try {
-    const story = await createStoryRecord({
-      prompt,
-      mimeType: file.type,
-      imageBuffer,
-    });
+    const story = await createStoryRecord({ prompt, imageBuffer });
     return c.json(story);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Story generation failed";
@@ -340,6 +300,11 @@ storyRoutes.post("/:id/tts", ttsHandler);
 
 // POST /:id/translate — translate a story to Chinese
 storyRoutes.post("/:id/translate", async (c) => {
+  const limited = rateLimit(c, { key: "stories-translate", windowMs: 60_000, max: 20 });
+  if (limited) return limited;
+  const dailyLimited = await dailyLimit(c, UTILITY_DAILY_LIMIT);
+  if (dailyLimited) return dailyLimited;
+
   const id = Number(c.req.param("id"));
   const row = await db.select().from(stories).where(eq(stories.id, id)).get();
   if (!row) {
