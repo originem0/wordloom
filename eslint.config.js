@@ -20,4 +20,11 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // shadcn/ui primitives are vendored as generated: each file exports its
+    // component together with its cva() variants. Splitting them would fork
+    // the files from upstream for a dev-only Fast Refresh nicety.
+    files: ['src/client/components/ui/**/*.tsx'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
 ])

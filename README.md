@@ -79,7 +79,7 @@ AI 驱动的英语学习工具。上传图片生成英语故事，点击生词�
 | 数据库 | SQLite (Drizzle ORM + libSQL) |
 | AI | 双 Provider：Gemini API + OpenAI-compatible（DeepSeek / GLM / Grok / Kimi 等中转站） |
 | TTS | Edge TTS (免费) / Gemini TTS / 浏览器 SpeechSynthesis |
-| 部署 | Docker + nginx |
+| 部署 | systemd + 宿主机 nginx（可选 Docker） |
 | PWA | vite-plugin-pwa, autoUpdate + controllerchange 自动刷新 |
 
 ## 快速开始
@@ -248,6 +248,26 @@ sudo systemctl status wordloom
 journalctl -u wordloom -n 100 --no-pager
 ```
 
+#### 反向代理与真实 IP
+
+限流和每日额度按客户端 IP 计数，应用**只信任 `X-Real-IP`**（不读 `X-Forwarded-For`，它可被客户端伪造）。因此 nginx 必须设置：
+
+```nginx
+proxy_set_header X-Real-IP $remote_addr;
+```
+
+如果站点在 Cloudflare 后面，`$remote_addr` 默认是 Cloudflare 节点的地址，所有访客会共用一个额度。把 `deploy/nginx/wordloom-cloudflare-realip.conf` 放到 `/etc/nginx/snippets/` 并在 server 块里 `include`，nginx 会只对来自 Cloudflare 网段的连接采信 `CF-Connecting-IP`。Cloudflare 网段偶尔变动，对照 <https://www.cloudflare.com/ips/> 更新。
+
+#### 数据库备份
+
+`tools/backup-db.sh` 用 `sqlite3 .backup` 做一致性快照、校验后压缩到 `backups/`，默认保留 14 天。建议挂 cron：
+
+```cron
+17 4 * * * /path/to/wordloom/tools/backup-db.sh >> /path/to/wordloom/backups/backup.log 2>&1
+```
+
+`backups/` 与数据库在同一块盘上，只防误删和写坏，不防磁盘损坏；重要数据请再同步到机器之外。
+
 ### Docker
 
 ```bash
@@ -259,7 +279,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-适合你明确想把运行时和宿主机隔离开时使用。注意 Docker 默认会把 SQLite 放进 named volume，不会直接使用仓库里的 `data/` 目录。
+适合你明确想把运行时和宿主机隔离开时使用（线上实例用的是上面的 systemd 方式，Docker 路径未随每次发布验证）。根目录的 `nginx.conf` 是配合它的反代示例。注意 Docker 默认会把 SQLite 放进 named volume，不会直接使用仓库里的 `data/` 目录。
 
 ### 手动部署
 
@@ -269,17 +289,29 @@ pnpm db:migrate     # 运行数据库迁移
 pnpm start          # 启动生产服务器（端口 3001）
 ```
 
+## 开发检查
+
+```bash
+npx tsc -b --force   # 类型检查（根目录的 tsc --noEmit 不检查任何文件）
+pnpm lint
+pnpm test            # 使用内存 SQLite，不会碰 data/app.db
+```
+
+CI（`.github/workflows/ci.yml`）在 push / PR 时跑同样的检查，外加构建和生产依赖审计。
+
 ## 环境变量
 
 | 变量 | 说明 | 必填 |
 |---|---|---|
 | `AUTH_TOKEN` | 登录密码（打开网页时输入） | 生产环境必填 |
 | `AUTH_SECRET` | Cookie 签名密钥（随机字符串） | 生产环境必填 |
-| `ALLOWED_ORIGINS` | 允许的前端域名（逗号分隔） | 生产环境建议设置 |
+| `ALLOWED_ORIGINS` | 允许跨域访问 API 的前端 Origin（逗号分隔）。不设置时只接受同站请求 | 否（前后端同域时不需要） |
 | `DATABASE_URL` | SQLite 连接字符串 | 否（默认 `file:data/app.db`） |
 | `PORT` | 服务端口 | 否（默认 3001） |
 
 开发环境不设置 `AUTH_TOKEN` 则跳过认证。
+
+权限模型：读取和生成（故事、词卡、语块、练习）对访客开放并受每日额度限制；删除、编辑、设置等其余写操作默认需要管理员登录（白名单见 `src/server/middleware/writeGuard.ts`）。
 
 ## License
 

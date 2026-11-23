@@ -156,7 +156,7 @@ export function normalizeContextLadder(value: unknown): unknown {
       const context =
         (typeof item.context === "string" ? item.context : undefined) ??
         (typeof item.contextDescription === "string" ? item.contextDescription : undefined) ??
-        (typeof (item as any).context_description === "string" ? (item as any).context_description : undefined) ??
+        (typeof item.context_description === "string" ? item.context_description : undefined) ??
         (typeof item.description === "string" ? item.description : undefined) ??
         (typeof item.desc === "string" ? item.desc : undefined) ??
         "";

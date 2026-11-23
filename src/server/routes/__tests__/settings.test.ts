@@ -22,6 +22,28 @@ vi.mock("../../db/index.js", () => ({
 
 import { settingRoutes } from "../settings.js";
 
+/** What POST /settings/test answers — only as much as the assertions read. */
+type TestBody = {
+  ok: boolean;
+  code?: string;
+  target?: string;
+  model?: string;
+  request: { requestRoot: string };
+  result: { status?: number; parsedJson?: unknown; mimeType?: string; sample?: string; audioBase64Length?: number };
+  error: { message: string };
+};
+
+type FetchLike = (url: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
+/** Typed so tests can read back the (url, init) each call was made with. */
+function stubFetch(respond: () => Response) {
+  const mock = vi.fn<FetchLike>(async () => respond());
+  globalThis.fetch = mock as unknown as typeof fetch;
+  return mock;
+}
+
+const sentHeaders = (init?: RequestInit) => (init?.headers ?? {}) as Record<string, string>;
+
 function buildApp() {
   const app = new Hono();
   app.route("/settings", settingRoutes);
@@ -48,19 +70,16 @@ describe("settings /test endpoint", () => {
     });
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as TestBody;
     expect(body.ok).toBe(false);
     expect(body.code).toBe("VALIDATION_ERROR");
   });
 
   it("baseUrl test does not require apiKey (401/403 is treated as reachable)", async () => {
-    const mockFetch = vi.fn(async () => {
-      return new Response(
-        JSON.stringify({ error: { message: "Missing API key" } }),
-        { status: 403, headers: { "Content-Type": "application/json" } },
-      );
-    });
-    globalThis.fetch = mockFetch as any;
+    const mockFetch = stubFetch(() => new Response(
+      JSON.stringify({ error: { message: "Missing API key" } }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    ));
 
     const app = buildApp();
     const res = await app.request("/settings/test", {
@@ -72,7 +91,7 @@ describe("settings /test endpoint", () => {
       }),
     });
 
-    const body = await res.json();
+    const body = (await res.json()) as TestBody;
     expect(body.ok).toBe(true);
     expect(body.target).toBe("baseUrl");
     expect(body.request.requestRoot).toBe("https://relay.example.com/v1beta");
@@ -80,7 +99,7 @@ describe("settings /test endpoint", () => {
 
     // Ensure we didn't send x-goog-api-key on baseUrl test.
     const [, init] = mockFetch.mock.calls[0];
-    const headers = (init as any)?.headers ?? {};
+    const headers = sentHeaders(init);
     expect(headers["x-goog-api-key"]).toBeUndefined();
   });
 
@@ -96,31 +115,28 @@ describe("settings /test endpoint", () => {
       }),
     });
 
-    const body = await res.json();
+    const body = (await res.json()) as TestBody;
     expect(body.ok).toBe(false);
     expect(body.error.message).toMatch(/API Key not configured/i);
   });
 
   it("generalModel test parses fenced JSON correctly", async () => {
-    const mockFetch = vi.fn(async () => {
-      return new Response(
-        JSON.stringify({
-          candidates: [
-            {
-              content: {
-                parts: [
-                  {
-                    text: "```json\n{\"ok\": true, \"n\": 1}\n```",
-                  },
-                ],
-              },
+    const mockFetch = stubFetch(() => new Response(
+      JSON.stringify({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: "```json\n{\"ok\": true, \"n\": 1}\n```",
+                },
+              ],
             },
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    });
-    globalThis.fetch = mockFetch as any;
+          },
+        ],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
 
     const app = buildApp();
     const res = await app.request("/settings/test", {
@@ -134,39 +150,36 @@ describe("settings /test endpoint", () => {
       }),
     });
 
-    const body = await res.json();
+    const body = (await res.json()) as TestBody;
     expect(body.ok).toBe(true);
     expect(body.model).toBe("gemini-2.5-pro-bs");
     expect(body.result.parsedJson).toEqual({ ok: true, n: 1 });
 
     const [url, init] = mockFetch.mock.calls[0];
     expect(String(url)).toContain("/v1beta/models/gemini-2.5-pro-bs:generateContent");
-    expect((init as any).headers["x-goog-api-key"]).toBe("test-key");
+    expect(sentHeaders(init)["x-goog-api-key"]).toBe("test-key");
   });
 
   it("ttsModel test detects inline audio", async () => {
-    const mockFetch = vi.fn(async () => {
-      return new Response(
-        JSON.stringify({
-          candidates: [
-            {
-              content: {
-                parts: [
-                  {
-                    inlineData: {
-                      mimeType: "audio/pcm",
-                      data: "AAA=",
-                    },
+    stubFetch(() => new Response(
+      JSON.stringify({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: "audio/pcm",
+                    data: "AAA=",
                   },
-                ],
-              },
+                },
+              ],
             },
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    });
-    globalThis.fetch = mockFetch as any;
+          },
+        ],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
 
     const app = buildApp();
     const res = await app.request("/settings/test", {
@@ -180,7 +193,7 @@ describe("settings /test endpoint", () => {
       }),
     });
 
-    const body = await res.json();
+    const body = (await res.json()) as TestBody;
     expect(body.ok).toBe(true);
     expect(body.model).toBe("gemini-2.5-flash-preview-tts");
     expect(body.result.audioBase64Length).toBe(4);
@@ -220,7 +233,7 @@ describe("settings /test endpoint — OpenAI model tests token budget", () => {
     );
   }
 
-  async function requestModelTest(app: Hono, target: string): Promise<any> {
+  async function requestModelTest(app: Hono, target: string): Promise<TestBody> {
     const res = await app.request("/settings/test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -232,18 +245,17 @@ describe("settings /test endpoint — OpenAI model tests token budget", () => {
         model: "test-model",
       }),
     });
-    return res.json();
+    return (await res.json()) as TestBody;
   }
 
   it("deepModel test sends a large enough max_tokens for the deep JSON schema", async () => {
-    const mockFetch = vi.fn(async () => openaiChatResponse(VALID_DEEP_JSON, "stop"));
-    globalThis.fetch = mockFetch as any;
+    const mockFetch = stubFetch(() => openaiChatResponse(VALID_DEEP_JSON, "stop"));
 
     const body = await requestModelTest(buildApp(), "deepModel");
     expect(body.ok).toBe(true);
 
-    const [, init] = mockFetch.mock.calls[0] as any[];
-    const sent = JSON.parse((init as any).body);
+    const [, init] = mockFetch.mock.calls[0];
+    const sent = JSON.parse(String(init?.body));
     // Real deep responses run 600+ tokens (verbose/pretty-printing models more);
     // the old global 300 cap truncated them into invalid JSON.
     expect(sent.max_tokens).toBeGreaterThanOrEqual(2000);
@@ -251,8 +263,7 @@ describe("settings /test endpoint — OpenAI model tests token budget", () => {
 
   it("deepModel test reports truncation when finish_reason=length instead of Invalid JSON", async () => {
     const truncated = VALID_DEEP_JSON.slice(0, 120); // cut mid-JSON
-    const mockFetch = vi.fn(async () => openaiChatResponse(truncated, "length"));
-    globalThis.fetch = mockFetch as any;
+    stubFetch(() => openaiChatResponse(truncated, "length"));
 
     const body = await requestModelTest(buildApp(), "deepModel");
     expect(body.ok).toBe(false);
@@ -263,14 +274,14 @@ describe("settings /test endpoint — OpenAI model tests token budget", () => {
 });
 
 describe("settings PUT — masked-literal write guard", () => {
-  async function putSetting(key: string, value: string): Promise<{ status: number; body: any }> {
+  async function putSetting(key: string, value: string): Promise<{ status: number; body: { ok?: boolean; error?: string; code?: string } }> {
     const app = buildApp();
     const res = await app.request("/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key, value }),
     });
-    return { status: res.status, body: await res.json() };
+    return { status: res.status, body: (await res.json()) as { ok?: boolean; error?: string; code?: string } };
   }
 
   it("rejects saving the GET mask literal to sensitive keys", async () => {

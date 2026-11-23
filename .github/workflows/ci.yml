@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `tsc --noEmit` at the root checks nothing (the root tsconfig only holds
+      # project references); -b is what actually type-checks client + server.
+      - name: Typecheck
+        run: pnpm exec tsc -b --force
+      - name: Lint
+        run: pnpm lint
+      # Tests run against an in-memory SQLite (see vitest.config.ts).
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high

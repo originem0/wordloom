@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Loader2,
   Moon,
@@ -59,15 +59,18 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
 
-  useEffect(() => {
-    if (!settings || initialized) return;
+  // Seed the drafts from the saved settings once, the first render they are
+  // available. Done during render (not in an effect) so the form never paints
+  // with defaults first; `initialized` keeps later refetches from overwriting
+  // what the user is typing.
+  if (settings && !initialized) {
     const d: Record<string, string> = {};
     for (const [k, v] of Object.entries(DEFAULTS)) {
       d[k] = settings[k] ?? v;
     }
     setDrafts(d);
     setInitialized(true);
-  }, [settings, initialized]);
+  }
 
   const draftValue = useCallback((key: string) => drafts[key] ?? "", [drafts]);
 

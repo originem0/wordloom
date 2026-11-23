@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Cpu, Globe, Loader2, PlayCircle, Zap } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Cpu, Loader2, PlayCircle, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { apiPost } from "@/client/lib/api";
 import { Button } from "@/client/components/ui/button";
@@ -17,8 +17,6 @@ import {
 } from "./SettingWidgets";
 
 type Drafts = Record<string, string>;
-type HealthKey = string;
-type HealthMap = Partial<Record<HealthKey, SettingTestResponse>>;
 type ProviderType = "gemini" | "openai";
 
 const PROVIDERS: ProviderType[] = ["gemini", "openai"];
@@ -49,7 +47,22 @@ const GEMINI_DEFAULTS: Record<string, string> = {
   gemini_tts_voice: "Zephyr",
 };
 
-const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
+/** Model list detected earlier in this browser session ([] if none or unreadable). */
+function readCachedModels(storageKey: string): string[] {
+  try {
+    const cached = sessionStorage.getItem(storageKey);
+    return cached ? readModelList(JSON.parse(cached)).models : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Narrow the untyped `result` of a listModels / openaiListModels test. */
+function readModelList(result: unknown): { models: string[]; totalListed: number } {
+  const r = (result && typeof result === "object" ? result : {}) as { models?: unknown; totalListed?: unknown };
+  const models = Array.isArray(r.models) ? r.models.filter((m): m is string => typeof m === "string") : [];
+  return { models, totalListed: typeof r.totalListed === "number" ? r.totalListed : models.length };
+}
 
 function roleCandidates(models: string[], role: string) {
   const unique = [...new Set(models)];
@@ -76,10 +89,8 @@ export function AIProvidersPage() {
   const [initialized, setInitialized] = useState(false);
 
   // Per-provider state
-  const [geminiModels, setGeminiModels] = useState<string[]>([]);
-  const [openaiModels, setOpenaiModels] = useState<string[]>([]);
-  const [geminiHealth, setGeminiHealth] = useState<HealthMap>({});
-  const [openaiHealth, setOpenaiHealth] = useState<HealthMap>({});
+  const [geminiModels, setGeminiModels] = useState(() => readCachedModels("wordloom:ai-gemini-models"));
+  const [openaiModels, setOpenaiModels] = useState(() => readCachedModels("wordloom:ai-openai-models"));
   const [detectingGemini, setDetectingGemini] = useState(false);
   const [detectingOpenai, setDetectingOpenai] = useState(false);
   const [testingAll, setTestingAll] = useState(false);
@@ -94,7 +105,6 @@ export function AIProvidersPage() {
     } catch { /* ignore */ }
     return {};
   });
-  const hasAutoDetected = useRef(false);
 
   // Persist routeHealth to sessionStorage on change
   useEffect(() => {
@@ -103,9 +113,11 @@ export function AIProvidersPage() {
     }
   }, [routeHealth]);
 
-  // Initialize drafts from saved settings
-  useEffect(() => {
-    if (!settings || initialized) return;
+  // Seed the drafts from the saved settings once, the first render they are
+  // available. Done during render (not in an effect) so the form never paints
+  // empty first; `initialized` keeps later refetches from overwriting what the
+  // user is typing.
+  if (settings && !initialized) {
     const d: Drafts = {
       gemini_api_key: "",
       gemini_base_url: settings.gemini_base_url ?? "",
@@ -132,7 +144,7 @@ export function AIProvidersPage() {
     }
     setDrafts(d);
     setInitialized(true);
-  }, [settings, initialized]);
+  }
 
   const draftValue = useCallback((key: string) => drafts[key] ?? "", [drafts]);
   const setDraft = useCallback((key: string, value: string) => {
@@ -143,20 +155,6 @@ export function AIProvidersPage() {
   const hasOpenaiKey = settings?.openai_api_key === "configured";
   const hasImageKey = settings?.image_api_key === "configured";
 
-  // Auto-detect models on first load
-  useEffect(() => {
-    if (!initialized || hasAutoDetected.current) return;
-    hasAutoDetected.current = true;
-
-    // Hydrate from cache
-    try {
-      const gCache = sessionStorage.getItem("wordloom:ai-gemini-models");
-      if (gCache) { const d = JSON.parse(gCache); if (d.models?.length) setGeminiModels(d.models); }
-      const oCache = sessionStorage.getItem("wordloom:ai-openai-models");
-      if (oCache) { const d = JSON.parse(oCache); if (d.models?.length) setOpenaiModels(d.models); }
-    } catch { /* ignore */ }
-  }, [initialized]);
-
   // --- Detect models ---
   const detectGeminiModels = useCallback(async () => {
     setDetectingGemini(true);
@@ -165,11 +163,9 @@ export function AIProvidersPage() {
       if (drafts.gemini_api_key?.trim()) payload.apiKey = drafts.gemini_api_key.trim();
       const res = await apiPost<SettingTestResponse>("/api/settings/test", payload);
       if (!res.ok) { toast.error(res.error?.message || "Gemini model detection failed"); return; }
-      const result = res.result as any;
-      const models = result?.models ?? [];
-      const totalListed = result?.totalListed ?? models.length;
+      const { models, totalListed } = readModelList(res.result);
       setGeminiModels(models);
-      try { sessionStorage.setItem("wordloom:ai-gemini-models", JSON.stringify({ models, ts: Date.now() })); } catch {}
+      try { sessionStorage.setItem("wordloom:ai-gemini-models", JSON.stringify({ models, ts: Date.now() })); } catch { /* cache is best-effort (private mode / quota) */ }
       if (models.length > 0) {
         const msg = totalListed > models.length
           ? `${models.length} usable models (${totalListed - models.length} filtered out)`
@@ -192,11 +188,9 @@ export function AIProvidersPage() {
       if (drafts.openai_api_key?.trim()) payload.apiKey = drafts.openai_api_key.trim();
       const res = await apiPost<SettingTestResponse>("/api/settings/test", payload);
       if (!res.ok) { toast.error(res.error?.message || "OpenAI model detection failed"); return; }
-      const result = res.result as any;
-      const models = result?.models ?? [];
-      const totalListed = result?.totalListed ?? models.length;
+      const { models, totalListed } = readModelList(res.result);
       setOpenaiModels(models);
-      try { sessionStorage.setItem("wordloom:ai-openai-models", JSON.stringify({ models, ts: Date.now() })); } catch {}
+      try { sessionStorage.setItem("wordloom:ai-openai-models", JSON.stringify({ models, ts: Date.now() })); } catch { /* cache is best-effort (private mode / quota) */ }
       if (models.length > 0) {
         const msg = totalListed > models.length
           ? `${models.length} usable models (${totalListed - models.length} filtered out)`
