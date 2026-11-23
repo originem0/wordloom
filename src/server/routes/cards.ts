@@ -9,6 +9,7 @@ import {
 } from "../services/ai-router.js";
 import { AI_BUSY } from "../services/ai-shared.js";
 import { rateLimit, dailyLimit, UTILITY_DAILY_LIMIT } from "../middleware/rateLimit.js";
+import { authMiddleware } from "../middleware/auth.js";
 import {
   generateCardsRequestSchema,
   extractWordsRequestSchema,
@@ -384,8 +385,9 @@ cardRoutes.get("/", async (c) => {
   });
 });
 
-// GET /missing-deep — list card IDs that don't have deep layer yet
-cardRoutes.get("/missing-deep", async (c) => {
+// GET /missing-deep — list card IDs that don't have deep layer yet.
+// Admin only: it exists to drive "Retry Deep", which only the admin can run.
+cardRoutes.get("/missing-deep", authMiddleware, async (c) => {
   const rows = await db
     .select({ id: cards.id, word: cards.word })
     .from(cards)

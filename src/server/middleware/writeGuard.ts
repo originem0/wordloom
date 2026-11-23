@@ -9,21 +9,12 @@ import { authMiddleware } from "./auth.js";
 // non-GET request needs an admin session unless its route is listed here.
 // Adding a new write route therefore fails closed.
 //
-// Everything on this list is something a visitor legitimately does: generate
-// content (each route enforces its own rate/daily limits), bump a usage
-// counter, or manage their own job by its unguessable UUID.
+// The only write a visitor still makes is signing in or out. Generation used
+// to be listed here too: it let anyone overwrite a chunk row by re-analysing
+// its form, feed arbitrarily long text into a prompt, and read the upstream
+// provider's raw error text — so it is admin-only now.
 const PUBLIC_WRITES: ReadonlyArray<readonly [method: string, path: RegExp]> = [
   ["POST", /^\/api\/auth\/(login|logout)$/],
-  ["POST", /^\/api\/stories\/generate$/],
-  ["POST", /^\/api\/stories\/\d+\/(tts|translate)$/],
-  ["POST", /^\/api\/cards\/(generate|extract)$/],
-  ["POST", /^\/api\/cards\/\d+\/deep$/],
-  ["PATCH", /^\/api\/cards\/\d+\/usage$/],
-  ["POST", /^\/api\/chunks\/generate$/],
-  ["PATCH", /^\/api\/chunks\/\d+\/usage$/],
-  ["POST", /^\/api\/practice\/generate$/],
-  ["POST", /^\/api\/practice\/\d+\/grade$/],
-  ["POST", /^\/api\/jobs\/[\w-]+\/cancel$/],
 ];
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);

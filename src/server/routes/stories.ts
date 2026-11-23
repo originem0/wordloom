@@ -18,6 +18,7 @@ import type {
   GroundingSource,
 } from "../../shared/types.js";
 import { rateLimit, dailyLimit, UTILITY_DAILY_LIMIT } from "../middleware/rateLimit.js";
+import { authMiddleware } from "../middleware/auth.js";
 import { createJob, runJob } from "../services/jobs.js";
 
 const IMAGE_DIR = join(process.cwd(), "data", "images");
@@ -294,7 +295,9 @@ const ttsHandler = async (c: Context) => {
   });
 };
 
-storyRoutes.get("/:id/tts", ttsHandler);
+// A GET that triggers generation: the write guard only sees non-GET methods,
+// so this one needs its own check.
+storyRoutes.get("/:id/tts", authMiddleware, ttsHandler);
 // Keep POST for backward compatibility (older clients may POST)
 storyRoutes.post("/:id/tts", ttsHandler);
 

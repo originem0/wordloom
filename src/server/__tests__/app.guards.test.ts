@@ -147,48 +147,102 @@ describe("what stays open", () => {
     expect(await db.select().from(cards).where(eq(cards.id, card.id)).get()).toBeUndefined();
   });
 
-  it("visitors can still read, count usage and call public generators", async () => {
+  it("visitors can still read cards", async () => {
     const card = await seedCard();
     expect((await req("/api/cards")).status).toBe(200);
-    expect((await req(`/api/cards/${card.id}/usage`, { method: "PATCH" })).status).toBe(200);
-    const res = await req("/api/cards/extract", {
+    expect((await req(`/api/cards/${card.id}`)).status).toBe(200);
+  });
+});
+
+describe("generation and its bookkeeping are admin-only", () => {
+  it.each([
+    ["POST", "/api/stories/generate"],
+    ["GET", "/api/stories/1/tts"],
+    ["POST", "/api/stories/1/tts"],
+    ["POST", "/api/stories/1/translate"],
+    ["POST", "/api/cards/generate"],
+    ["POST", "/api/cards/extract"],
+    ["POST", "/api/cards/1/deep"],
+    ["POST", "/api/chunks/generate"],
+    ["PATCH", "/api/chunks/1/usage"],
+    ["POST", "/api/practice/generate"],
+    ["POST", "/api/practice/1/grade"],
+  ])("%s %s is refused without a session", async (method, path) => {
+    const res = await req(path, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: method === "GET" ? undefined : "{}",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("a refused extraction never reaches the model, and the admin's still does", async () => {
+    const init = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text: "alpha beta" }),
-    });
+    };
+    expect((await req("/api/cards/extract", init)).status).toBe(401);
+    expect(mockExtract).not.toHaveBeenCalled();
+
+    const cookie = await adminCookie();
+    const res = await req("/api/cards/extract", { ...init, headers: { ...init.headers, cookie } });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ words: ["alpha"] });
   });
 
-  it("a visitor can poll and cancel a job by its unguessable id", async () => {
+  it("a usage counter cannot be bumped without a session", async () => {
+    const card = await seedCard();
+    expect((await req(`/api/cards/${card.id}/usage`, { method: "PATCH" })).status).toBe(401);
+    const row = await db.select().from(cards).where(eq(cards.id, card.id)).get();
+    expect(row?.usageCount).toBe(0);
+  });
+
+  it("a job cannot be polled or cancelled without a session, even by its id", async () => {
     const now = Date.now();
     await db.insert(jobs).values({
       id: "0b5c7f0e-job", type: "cards", status: "running", input: "{}",
       createdAt: now, updatedAt: now,
     });
-    expect((await req("/api/jobs/0b5c7f0e-job")).status).toBe(200);
-    const res = await req("/api/jobs/0b5c7f0e-job/cancel", { method: "POST" });
+    expect((await req("/api/jobs/0b5c7f0e-job")).status).toBe(401);
+    expect((await req("/api/jobs/0b5c7f0e-job/cancel", { method: "POST" })).status).toBe(401);
+    expect((await db.select().from(jobs).where(eq(jobs.id, "0b5c7f0e-job")).get())?.status).toBe("running");
+
+    const cookie = await adminCookie();
+    expect((await req("/api/jobs/0b5c7f0e-job", { headers: { cookie } })).status).toBe(200);
+    const res = await req("/api/jobs/0b5c7f0e-job/cancel", { method: "POST", headers: { cookie } });
     expect(res.status).toBe(200);
+  });
+
+  it("the list of cards still missing a deep layer is admin-only", async () => {
+    expect((await req("/api/cards/missing-deep")).status).toBe(401);
+    const cookie = await adminCookie();
+    expect((await req("/api/cards/missing-deep", { headers: { cookie } })).status).toBe(200);
   });
 });
 
 describe("cross-site writes", () => {
+  // Sent with the admin's cookie, so the Origin check is the only thing that
+  // can be refusing them.
   it("rejects a write whose Origin is another site when no allowlist is configured", async () => {
     const card = await seedCard();
-    const res = await req(`/api/cards/${card.id}/usage`, {
-      method: "PATCH",
+    const cookie = await adminCookie();
+    const res = await req(`/api/cards/${card.id}`, {
+      method: "DELETE",
       origin: "https://evil.example",
+      headers: { cookie },
     });
     expect(res.status).toBe(403);
-    const row = await db.select().from(cards).where(eq(cards.id, card.id)).get();
-    expect(row?.usageCount).toBe(0);
+    expect(await db.select().from(cards).where(eq(cards.id, card.id)).get()).toBeTruthy();
   });
 
   it("accepts the same site on a non-default port (nginx also listens on 8443)", async () => {
     const card = await seedCard();
-    const res = await req(`/api/cards/${card.id}/usage`, {
-      method: "PATCH",
+    const cookie = await adminCookie();
+    const res = await req(`/api/cards/${card.id}`, {
+      method: "DELETE",
       origin: `https://${HOST}:8443`,
+      headers: { cookie },
     });
     expect(res.status).toBe(200);
   });
@@ -199,74 +253,31 @@ describe("cross-site writes", () => {
   });
 });
 
-describe("usage limits cannot be reset by the client", () => {
-  async function extract(headers: Record<string, string>, ip: string) {
-    return req("/api/cards/extract", {
+// The login is the one write a visitor can still make, and its throttle is all
+// that stands between a guesser and AUTH_TOKEN.
+describe("the login throttle cannot be reset by the client", () => {
+  function attempt(ip: string, forwardedFor: string) {
+    return req("/api/auth/login", {
       method: "POST",
       ip,
-      headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify({ text: "alpha beta" }),
+      headers: { "content-type": "application/json", "x-forwarded-for": forwardedFor },
+      body: JSON.stringify({ token: "wrong" }),
     });
   }
 
-  it("a forged X-Forwarded-For does not buy a fresh daily allowance", async () => {
-    await db.insert(settings).values({ key: "daily_utility_limit", value: "2" });
-    expect((await extract({ "x-forwarded-for": "1.1.1.1" }, "198.51.100.1")).status).toBe(200);
-    expect((await extract({ "x-forwarded-for": "2.2.2.2" }, "198.51.100.1")).status).toBe(200);
-    const third = await extract({ "x-forwarded-for": "3.3.3.3" }, "198.51.100.1");
-    expect(third.status).toBe(429);
-    expect(await third.json()).toMatchObject({ code: "DAILY_LIMIT" });
-    expect(mockExtract).toHaveBeenCalledTimes(2);
+  it("a forged X-Forwarded-For does not buy fresh attempts", async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 25; i++) {
+      statuses.push((await attempt("198.51.100.1", `10.0.0.${i}`)).status);
+    }
+    expect(statuses[0]).toBe(401);
+    expect(statuses.at(-1)).toBe(429);
   });
 
-  it("a different real client keeps its own allowance", async () => {
-    await db.insert(settings).values({ key: "daily_utility_limit", value: "1" });
-    expect((await extract({}, "198.51.100.2")).status).toBe(200);
-    expect((await extract({}, "198.51.100.2")).status).toBe(429);
-    expect((await extract({}, "198.51.100.3")).status).toBe(200);
-  });
-
-  it("story translation draws on the same utility allowance", async () => {
-    await db.insert(settings).values({ key: "daily_utility_limit", value: "1" });
-    const [story] = await db
-      .insert(stories)
-      .values({ imagePath: "data/images/x.jpg", story: "A quiet harbour.", createdAt: Date.now() })
-      .returning();
-    const call = () => req(`/api/stories/${story.id}/translate`, { method: "POST", ip: "198.51.100.4" });
-    expect((await call()).status).toBe(200);
-    expect((await call()).status).toBe(429);
-  });
-
-  it("chunk analysis has a daily allowance", async () => {
-    await db.insert(settings).values({ key: "daily_chunks_limit", value: "1" });
-    const call = () =>
-      req("/api/chunks/generate", {
-        method: "POST",
-        ip: "198.51.100.5",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ input: "in terms of" }),
-      });
-    expect((await call()).status).toBe(200);
-    const second = await call();
-    expect(second.status).toBe(429);
-    expect(await second.json()).toMatchObject({ code: "DAILY_LIMIT" });
-  });
-
-  it("practice grading has a daily allowance", async () => {
-    await db.insert(settings).values({ key: "daily_grade_limit", value: "1" });
-    const [practice] = await db
-      .insert(practices)
-      .values({ imagePath: "data/images/p.jpg", visualPrompt: "a harbour at dawn", createdAt: Date.now() })
-      .returning();
-    const call = () =>
-      req(`/api/practice/${practice.id}/grade`, {
-        method: "POST",
-        ip: "198.51.100.6",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ description: "Boats are moored along the quay." }),
-      });
-    expect((await call()).status).toBe(200);
-    expect((await call()).status).toBe(429);
+  it("a different real client keeps its own attempts", async () => {
+    for (let i = 0; i < 25; i++) await attempt("198.51.100.2", "10.0.0.1");
+    expect((await attempt("198.51.100.2", "10.0.0.1")).status).toBe(429);
+    expect((await attempt("198.51.100.3", "10.0.0.1")).status).toBe(401);
   });
 });
 
@@ -296,28 +307,28 @@ describe("response hardening", () => {
   it("does not echo internal error text to the client", async () => {
     const res = await req("/api/cards/extract", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", cookie: await adminCookie() },
       body: "{not json",
     });
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(400);
     const text = await res.text();
     expect(text).not.toMatch(/JSON|Unexpected|position|SyntaxError/i);
   });
 });
 
 describe("async generation, end to end", () => {
-  async function submit() {
+  async function submit(cookie: string) {
     const res = await req("/api/chunks/generate?async=1", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ input: "in terms of" }),
     });
     expect(res.status).toBe(202);
     return ((await res.json()) as { jobId: string }).jobId;
   }
 
-  async function poll(jobId: string) {
-    return (await (await req(`/api/jobs/${jobId}`)).json()) as {
+  async function poll(jobId: string, cookie: string) {
+    return (await (await req(`/api/jobs/${jobId}`, { headers: { cookie } })).json()) as {
       status: string;
       result: unknown;
       error: string | null;
@@ -325,15 +336,17 @@ describe("async generation, end to end", () => {
   }
 
   it("a submitted job becomes pollable as done with the generator's result", async () => {
-    const jobId = await submit();
-    await vi.waitFor(async () => expect((await poll(jobId)).status).toBe("done"));
-    expect((await poll(jobId)).result).toEqual(NOT_CHUNK);
+    const cookie = await adminCookie();
+    const jobId = await submit(cookie);
+    await vi.waitFor(async () => expect((await poll(jobId, cookie)).status).toBe("done"));
+    expect((await poll(jobId, cookie)).result).toEqual(NOT_CHUNK);
   });
 
   it("a generator failure surfaces to the poller as a failed job, not a hung one", async () => {
     mockChunk.mockRejectedValue(new Error("model unavailable"));
-    const jobId = await submit();
-    await vi.waitFor(async () => expect((await poll(jobId)).status).toBe("failed"));
-    expect((await poll(jobId)).error).toBe("model unavailable");
+    const cookie = await adminCookie();
+    const jobId = await submit(cookie);
+    await vi.waitFor(async () => expect((await poll(jobId, cookie)).status).toBe("failed"));
+    expect((await poll(jobId, cookie)).error).toBe("model unavailable");
   });
 });

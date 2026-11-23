@@ -7,7 +7,9 @@ import { authMiddleware } from "../middleware/auth.js";
 
 export const jobRoutes = new Hono();
 
-jobRoutes.get("/:id", async (c) => {
+// Only the admin can start a job now, so only the admin has one to poll or
+// cancel. The poll is a GET, which the write guard does not look at.
+jobRoutes.get("/:id", authMiddleware, async (c) => {
   const id = c.req.param("id");
   const row = await db.select().from(jobs).where(eq(jobs.id, id)).get();
   if (!row) {
@@ -16,7 +18,7 @@ jobRoutes.get("/:id", async (c) => {
   return c.json(parseJob(row));
 });
 
-jobRoutes.post("/:id/cancel", async (c) => {
+jobRoutes.post("/:id/cancel", authMiddleware, async (c) => {
   const id = c.req.param("id");
   const row = await db.select().from(jobs).where(eq(jobs.id, id)).get();
   if (!row) {
@@ -32,8 +34,7 @@ jobRoutes.post("/:id/cancel", async (c) => {
   return c.json(parseJob(updated!));
 });
 
-// The list exposes every visitor's inputs and results — admin only. A single
-// job stays readable by anyone holding its UUID (that is how visitors poll).
+// The list exposes every job's inputs and results — admin only.
 jobRoutes.get("/", authMiddleware, async (c) => {
   const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") || "20")));
   const rows = await db.select().from(jobs).orderBy(desc(jobs.createdAt)).limit(limit).all();
