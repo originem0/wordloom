@@ -94,6 +94,16 @@ pnpm dev
 
 浏览器访问 `http://localhost:5173`，进入 AI Providers 页面配置连接和模型。
 
+### 导入已有词库（可选）
+
+数据库不在 Git 里，新克隆的仓库是空库。`seed/wordloom-seed.db.gz` 是一份词卡和语块的快照（不含 API key、网关地址、登录会话、故事和练习），在**首次启动前**解压到 `data/app.db` 即可：
+
+```bash
+gunzip -c seed/wordloom-seed.db.gz > data/app.db
+```
+
+Windows（PowerShell）没有 `gunzip` 时可用 7-Zip 解压后改名为 `data/app.db`。导入后仍需在 AI Providers 页面填写自己的 API key。这是某一时刻的快照，不会随线上数据自动更新。
+
 ## AI 服务配置
 
 应用内分为两个配置页面：
