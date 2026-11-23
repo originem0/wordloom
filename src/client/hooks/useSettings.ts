@@ -7,10 +7,12 @@ export interface Settings {
   [key: string]: string;
 }
 
-export function useSettings() {
+/** Admin-only on the server: a caller that may be a visitor passes `enabled`. */
+export function useSettings({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ["settings"],
     queryFn: () => apiFetch<Settings>("/api/settings"),
+    enabled,
   });
 }
 

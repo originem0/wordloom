@@ -4,7 +4,7 @@ import { logger } from "hono/logger";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { HTTPException } from "hono/http-exception";
-import { requireAuthForWrites } from "./middleware/writeGuard.js";
+import { requireAuth } from "./middleware/guard.js";
 import { authRoutes } from "./routes/auth.js";
 import { cardRoutes } from "./routes/cards.js";
 import { settingRoutes } from "./routes/settings.js";
@@ -90,7 +90,7 @@ app.use("/api/*", async (c, next) => {
   return next();
 });
 
-app.use("/api/*", requireAuthForWrites);
+app.use("/api/*", requireAuth);
 
 // Health check (no auth)
 app.get("/api/health", (c) => c.json({ ok: true }));
@@ -98,14 +98,18 @@ app.get("/api/health", (c) => c.json({ ok: true }));
 // Auth routes
 app.route("/api/auth", authRoutes);
 
-// Reads are public; writes pass requireAuthForWrites above. Daily limits are
-// enforced inside each public generate route.
+// Who may call what is decided in one place, requireAuth above: reading cards
+// is public, everything else here is the admin's.
 // Chained (not separate app.route calls) so the route types accumulate into
 // AppType for a future Hono RPC client.
 export const apiRoutes = app
   .route("/api/cards", cardRoutes)
   .route("/api/settings", settingRoutes)
   .route("/api/jobs", jobRoutes);
+
+// An /api path no route answered. Without this a GET would fall through to
+// the SPA fallback below and come back as index.html with a 200.
+app.all("/api/*", (c) => c.json({ error: "Not found", code: "NOT_FOUND" }, 404));
 
 // --- Static file serving (production) ---
 // One catch-all serveStatic replaces the old per-file routes: the previous

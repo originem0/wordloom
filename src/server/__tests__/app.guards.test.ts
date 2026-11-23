@@ -55,6 +55,25 @@ async function adminCookie() {
   return `session=${raw}`;
 }
 
+/** Turned away by the guard, as opposed to a handler answering 401 on its own
+ *  account (a wrong login token is a 401 too). */
+async function refused(res: Response): Promise<boolean> {
+  if (res.status !== 401) return false;
+  const body = (await res.json().catch(() => ({}))) as { code?: string };
+  return body.code === "AUTH_REQUIRED";
+}
+
+// Read off the Hono instance rather than listed by hand, so a route added
+// later is probed without anyone remembering to add it here. Middleware and
+// the 404 catch-all are registered under the method "ALL".
+function registeredRoutes(): string[] {
+  const found = new Set<string>();
+  for (const { method, path } of app.routes) {
+    if (method !== "ALL" && path.startsWith("/api/")) found.add(`${method} ${path}`);
+  }
+  return [...found];
+}
+
 const originalEnv = { ...process.env };
 
 beforeEach(async () => {
@@ -73,54 +92,94 @@ afterEach(() => {
   process.env = { ...originalEnv };
 });
 
-describe("anonymous visitors cannot destroy or rewrite library data", () => {
-  it("DELETE /api/cards/:id is refused and the card survives", async () => {
+describe("what a visitor can reach", () => {
+  it("is the public list and nothing else the app registers", async () => {
+    const card = await seedCard();
+    const routes = registeredRoutes();
+    // Guards the probe itself: a table that lost the mounted routers would
+    // leave the comparison below checking only the public routes.
+    expect(routes).toEqual(
+      expect.arrayContaining([
+        "GET /api/settings",
+        "PUT /api/settings",
+        "POST /api/settings/test",
+        "GET /api/jobs",
+        "GET /api/jobs/:id",
+        "POST /api/jobs/:id/cancel",
+        "POST /api/cards/generate",
+        "POST /api/cards/extract",
+        "POST /api/cards/:id/deep",
+        "GET /api/cards/missing-deep",
+        "DELETE /api/cards/:id",
+      ]),
+    );
+
+    const open: string[] = [];
+    for (const route of routes) {
+      const [method, pattern] = route.split(" ");
+      const path = pattern.replace(/:\w+(\{[^}]+\})?/g, String(card.id));
+      const res = await req(path, {
+        method,
+        ...(method === "GET" ? {} : { headers: { "content-type": "application/json" }, body: "{}" }),
+      });
+      if (!(await refused(res))) open.push(route);
+    }
+    expect(open.sort()).toEqual([
+      "GET /api/auth/me",
+      "GET /api/cards",
+      "GET /api/cards/:id",
+      "GET /api/health",
+      "POST /api/auth/login",
+      "POST /api/auth/logout",
+    ]);
+  });
+
+  it("includes reading the list and a single card", async () => {
+    const card = await seedCard();
+    const list = await req("/api/cards");
+    expect(list.status).toBe(200);
+    expect(await list.json()).toMatchObject({ total: 1 });
+    const one = await req(`/api/cards/${card.id}`);
+    expect(one.status).toBe(200);
+    expect(await one.json()).toMatchObject({ word: "anchor" });
+  });
+
+  // This is what default deny means: the answer does not depend on whether
+  // anyone wrote a route, so it cannot depend on anyone remembering to guard it.
+  it.each([
+    ["GET", "/api/brand-new/x"],
+    ["POST", "/api/brand-new/x"],
+    ["DELETE", "/api/cards/anything/new-endpoint"],
+    ["GET", "/api/stories"],
+  ])("does not include a path no route answers: %s %s", async (method, path) => {
+    expect(await refused(await req(path, { method }))).toBe(true);
+  });
+
+  it("does not include the look-alikes of a public path", async () => {
+    const card = await seedCard();
+    for (const path of [
+      "/api/cards/",
+      `/api/cards/${card.id}/`,
+      `/api/cards/${card.id}/deep`,
+      "/api/cards/missing-deep",
+      "/api/cards/abc",
+      "/api/health/x",
+      "/api/auth/me/x",
+    ]) {
+      expect(await refused(await req(path)), path).toBe(true);
+    }
+  });
+
+  it("treats HEAD as the GET it is answered by", async () => {
+    expect((await req("/api/cards", { method: "HEAD" })).status).toBe(200);
+    expect((await req("/api/settings", { method: "HEAD" })).status).toBe(401);
+  });
+
+  it("a refused DELETE leaves the card in place", async () => {
     const card = await seedCard();
     const res = await req(`/api/cards/${card.id}`, { method: "DELETE" });
     expect(res.status).toBe(401);
     expect(await db.select().from(cards).where(eq(cards.id, card.id)).get()).toBeTruthy();
-  });
-
-  it("a write route nobody remembered to whitelist is refused by default", async () => {
-    const res = await req("/api/cards/anything/new-endpoint", { method: "POST" });
-    expect(res.status).toBe(401);
-  });
-
-  it("the job list (other visitors' inputs and results) is admin-only", async () => {
-    expect((await req("/api/jobs")).status).toBe(401);
-    const cookie = await adminCookie();
-    expect((await req("/api/jobs", { headers: { cookie } })).status).toBe(200);
-  });
-});
-
-describe("what stays open", () => {
-  it("the admin can delete a card", async () => {
-    const card = await seedCard();
-    const cookie = await adminCookie();
-    const res = await req(`/api/cards/${card.id}`, { method: "DELETE", headers: { cookie } });
-    expect(res.status).toBe(200);
-    expect(await db.select().from(cards).where(eq(cards.id, card.id)).get()).toBeUndefined();
-  });
-
-  it("visitors can still read cards", async () => {
-    const card = await seedCard();
-    expect((await req("/api/cards")).status).toBe(200);
-    expect((await req(`/api/cards/${card.id}`)).status).toBe(200);
-  });
-});
-
-describe("generation and its bookkeeping are admin-only", () => {
-  it.each([
-    ["POST", "/api/cards/generate"],
-    ["POST", "/api/cards/extract"],
-    ["POST", "/api/cards/1/deep"],
-  ])("%s %s is refused without a session", async (method, path) => {
-    const res = await req(path, {
-      method,
-      headers: { "content-type": "application/json" },
-      body: method === "GET" ? undefined : "{}",
-    });
-    expect(res.status).toBe(401);
   });
 
   it("a refused extraction never reaches the model, and the admin's still does", async () => {
@@ -153,15 +212,47 @@ describe("generation and its bookkeeping are admin-only", () => {
     const res = await req("/api/jobs/0b5c7f0e-job/cancel", { method: "POST", headers: { cookie } });
     expect(res.status).toBe(200);
   });
+});
 
-  it("the list of cards still missing a deep layer is admin-only", async () => {
-    expect((await req("/api/cards/missing-deep")).status).toBe(401);
+describe("with the admin session", () => {
+  it("the private reads answer", async () => {
     const cookie = await adminCookie();
-    expect((await req("/api/cards/missing-deep", { headers: { cookie } })).status).toBe(200);
+    for (const path of ["/api/settings", "/api/jobs", "/api/cards/missing-deep"]) {
+      expect((await req(path, { headers: { cookie } })).status, path).toBe(200);
+    }
+  });
+
+  it("a card can be deleted", async () => {
+    const card = await seedCard();
+    const cookie = await adminCookie();
+    const res = await req(`/api/cards/${card.id}`, { method: "DELETE", headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(await db.select().from(cards).where(eq(cards.id, card.id)).get()).toBeUndefined();
+  });
+
+  // Story Studio, Chunk Forge and Practice were deleted, not hidden: behind
+  // the guard there is nothing left to answer. JSON, because a GET that fell
+  // through to the SPA fallback would come back as the app shell with a 200.
+  it.each([
+    ["GET", "/api/stories"],
+    ["POST", "/api/stories/generate"],
+    ["POST", "/api/stories/1/tts"],
+    ["POST", "/api/stories/1/translate"],
+    ["GET", "/api/chunks"],
+    ["POST", "/api/chunks/generate"],
+    ["GET", "/api/practice"],
+    ["POST", "/api/practice/1/grade"],
+    ["POST", "/api/cards/1/usage"],
+    ["GET", "/api/brand-new/x"],
+  ])("%s %s is a JSON 404", async (method, path) => {
+    const res = await req(path, { method, headers: { cookie: await adminCookie() } });
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toMatch(/application\/json/);
+    expect(await res.json()).toMatchObject({ code: "NOT_FOUND" });
   });
 });
 
-describe("cross-site writes", () => {
+describe("cross-site requests", () => {
   // Sent with the admin's cookie, so the Origin check is the only thing that
   // can be refusing them.
   it("rejects a write whose Origin is another site when no allowlist is configured", async () => {
@@ -190,6 +281,19 @@ describe("cross-site writes", () => {
   it("does not hand out credentialed CORS to arbitrary origins", async () => {
     const res = await req("/api/cards", { origin: "https://evil.example" });
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  // The guard has no exemption for OPTIONS. It needs none as long as CORS
+  // answers the preflight first; a browser sends that without the cookie.
+  it("answers an allowed origin's preflight for a private route without a session", async () => {
+    process.env.ALLOWED_ORIGINS = "https://app.example";
+    const res = await req("/api/settings", {
+      method: "OPTIONS",
+      origin: "https://app.example",
+      headers: { "access-control-request-method": "PUT" },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://app.example");
   });
 });
 
@@ -270,29 +374,28 @@ describe("reading settings", () => {
     await db.insert(settings).values(Object.entries(rows).map(([key, value]) => ({ key, value })));
   }
 
-  async function readSettings(cookie?: string) {
-    const res = await req("/api/settings", cookie ? { headers: { cookie } } : {});
-    return (await res.json()) as Record<string, string>;
-  }
+  it("tells a visitor nothing, not even which settings exist", async () => {
+    await seedSettings();
+    const res = await req("/api/settings");
+    expect(res.status).toBe(401);
+    expect(await res.text()).not.toMatch(/secret|internal|api_key|base_url|explanation/);
+  });
 
   it("never returns a stored api key, not even to the admin", async () => {
     await seedSettings();
-    for (const body of [await readSettings(), await readSettings(await adminCookie())]) {
-      expect(body).toMatchObject({ gemini_api_key: "configured", image_api_key: "configured" });
-      expect(JSON.stringify(body)).not.toContain("secret");
-    }
+    const res = await req("/api/settings", { headers: { cookie: await adminCookie() } });
+    const body = (await res.json()) as Record<string, string>;
+    expect(body).toMatchObject({ gemini_api_key: "configured", image_api_key: "configured" });
+    expect(JSON.stringify(body)).not.toContain("secret");
   });
 
-  it("hides base URLs from visitors and shows them to the admin", async () => {
+  it("shows the admin everything else as stored", async () => {
     await seedSettings();
-    expect(await readSettings()).toMatchObject({
-      openai_base_url: "configured",
-      image_base_url: "configured",
-      explanation_language: "zh",
-    });
-    expect(await readSettings(await adminCookie())).toMatchObject({
+    const res = await req("/api/settings", { headers: { cookie: await adminCookie() } });
+    expect(await res.json()).toMatchObject({
       openai_base_url: "https://gw.internal/v1",
       image_base_url: "https://img.internal/v1",
+      explanation_language: "zh",
     });
   });
 });

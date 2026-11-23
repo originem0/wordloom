@@ -246,8 +246,9 @@ describe("settings PUT — masked-literal write guard", () => {
   }
 
   it("rejects saving the GET mask literal to sensitive keys", async () => {
-    // The GET handler masks base URLs / API keys as "configured" for anonymous
-    // readers; echoing that back through save must not destroy the real value.
+    // The GET handler answers "configured" in place of an API key, and once
+    // did the same for base URLs; echoing that back through save must not
+    // destroy the real value.
     for (const key of ["gemini_base_url", "openai_base_url", "gemini_api_key"]) {
       const { status, body } = await putSetting(key, "configured");
       expect(status).toBe(400);

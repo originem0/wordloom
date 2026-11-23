@@ -245,13 +245,10 @@ export function AIProvidersPage() {
         pairs.push({ key: `${r.key}_openai_model`, value: draftValue(`${r.key}_openai_model`) });
         pairs.push({ key: `${r.key}_openai_fallback_model`, value: draftValue(`${r.key}_openai_fallback_model`) });
       }
-      // Usage limits
-      pairs.push({ key: "daily_cards_limit", value: draftValue("daily_cards_limit") || "50" });
-      pairs.push({ key: "daily_deep_limit", value: draftValue("daily_deep_limit") || "100" });
 
       for (const pair of pairs) {
         if (pair.skipEmpty && !pair.value.trim()) continue;
-        // Never echo the anonymous-GET mask back into the DB (server rejects it too).
+        // Never write the mask the server shows in place of a key back into the DB (it rejects that too).
         if (pair.value.trim() === "configured") continue;
         await updateSetting.mutateAsync({ key: pair.key, value: pair.value.trim() });
       }
@@ -552,40 +549,6 @@ export function AIProvidersPage() {
           </SettingRow>
         );
       })}
-
-      {/* ══════════ USAGE LIMITS ══════════ */}
-      <SectionHeader>Usage Limits</SectionHeader>
-
-      <SettingRow
-        title="Daily Limits"
-        subtitle="未登录用户每天的 AI 生成限额（按 IP）"
-        value={`Cards ${draftValue("daily_cards_limit") || "50"} · Deep ${draftValue("daily_deep_limit") || "100"}`}
-        defaultOpen
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <div className="text-[13px] font-medium">Cards 生成</div>
-            <Input
-              value={draftValue("daily_cards_limit") || "50"}
-              onChange={(e) => setDraft("daily_cards_limit", e.target.value)}
-              placeholder="50"
-              className={`${INPUT_CLASS} font-mono text-sm`}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <div className="text-[13px] font-medium">Deep 分析</div>
-            <Input
-              value={draftValue("daily_deep_limit") || "100"}
-              onChange={(e) => setDraft("daily_deep_limit", e.target.value)}
-              placeholder="100"
-              className={`${INPUT_CLASS} font-mono text-sm`}
-            />
-          </div>
-        </div>
-        <div className="mt-2 text-[11px] text-muted-foreground/60">
-          已登录管理员不受限额约束。设为 0 则完全禁止未登录用户生成。
-        </div>
-      </SettingRow>
 
       {/* ── Sticky save bar ── */}
       {isDirty && (

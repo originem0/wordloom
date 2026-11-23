@@ -2,20 +2,36 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import { MemoryRouter } from "react-router-dom";
 
 type Settings = Record<string, string>;
-let current: { data?: Settings; isLoading: boolean; error: null };
+let current: { data?: Settings; isLoading: boolean; error: Error | null };
+let isAdmin: boolean;
+const useSettingsMock = vi.fn((options?: { enabled?: boolean }) => {
+  void options;
+  return current;
+});
+const logout = vi.fn();
 
 vi.mock("@/client/hooks/useSettings", () => ({
-  useSettings: () => current,
+  useSettings: (options?: { enabled?: boolean }) => useSettingsMock(options),
   useUpdateSetting: () => ({ mutateAsync: vi.fn() }),
+}));
+vi.mock("@/client/hooks/useAuth", () => ({
+  useIsAdmin: () => isAdmin,
+  useLogout: () => logout,
 }));
 
 import { SettingsPage } from "../SettingsPage";
 import { AIProvidersPage } from "../AIProvidersPage";
 
+const renderSettings = () => render(<SettingsPage />, { wrapper: MemoryRouter });
+
 beforeEach(() => {
   sessionStorage.clear();
+  useSettingsMock.mockClear();
+  logout.mockClear();
+  isAdmin = true;
   current = { data: undefined, isLoading: true, error: null };
 });
 
@@ -24,23 +40,82 @@ beforeEach(() => {
 // what the user is in the middle of typing.
 describe("SettingsPage drafts", () => {
   it("shows the saved values once settings arrive", () => {
-    const view = render(<SettingsPage />);
-    expect(screen.queryByText("Settings")).toBeNull();
+    const view = renderSettings();
+    expect(screen.queryByRole("combobox")).toBeNull();
 
     current = { data: { analysis_language: "en" }, isLoading: false, error: null };
     view.rerender(<SettingsPage />);
-    expect(screen.getAllByRole("combobox")[0]).toHaveValue("en");
+    expect(screen.getByRole("combobox")).toHaveValue("en");
   });
 
   it("keeps unsaved edits when the settings query refetches", () => {
     current = { data: { analysis_language: "en" }, isLoading: false, error: null };
-    const view = render(<SettingsPage />);
-    const language = screen.getAllByRole("combobox")[0];
-    fireEvent.change(language, { target: { value: "bilingual" } });
+    const view = renderSettings();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "bilingual" } });
 
     current = { data: { analysis_language: "zh-CN" }, isLoading: false, error: null };
     view.rerender(<SettingsPage />);
-    expect(screen.getAllByRole("combobox")[0]).toHaveValue("bilingual");
+    expect(screen.getByRole("combobox")).toHaveValue("bilingual");
+  });
+});
+
+// The page is public; what the server stores is not, and GET /api/settings
+// answers a visitor with 401. So the page neither asks for it nor leaves an
+// error where it would have been.
+describe("SettingsPage for a visitor", () => {
+  beforeEach(() => {
+    isAdmin = false;
+    current = { data: undefined, isLoading: false, error: null };
+  });
+
+  it("shows what lives in the browser and asks the server for nothing", () => {
+    renderSettings();
+    expect(screen.getByText("Theme")).toBeInTheDocument();
+    expect(screen.getByText("App Refresh & Cache")).toBeInTheDocument();
+    expect(screen.getByText("About")).toBeInTheDocument();
+    expect(screen.queryByText("Explanation Language")).toBeNull();
+    expect(screen.queryByText("Network Tolerance")).toBeNull();
+
+    // Leaving the option out would mean "enabled", so every call must say no.
+    const asked = new Set(useSettingsMock.mock.calls.map(([options]) => options?.enabled));
+    expect(asked).toEqual(new Set([false]));
+  });
+
+  // Settings read under a session that has since expired are still in memory.
+  it("keeps the server's settings off the page even when they are cached", () => {
+    current = { data: { analysis_language: "en" }, isLoading: false, error: null };
+    renderSettings();
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByText("Network Tolerance")).toBeNull();
+  });
+
+  it("offers the way in, and the way back to this page", () => {
+    renderSettings();
+    expect(screen.getByRole("link", { name: "管理员登录" })).toHaveAttribute("href", "/login?redirect=/settings");
+    expect(screen.queryByRole("button", { name: "退出登录" })).toBeNull();
+  });
+});
+
+describe("SettingsPage for the admin", () => {
+  it("asks for the settings", () => {
+    renderSettings();
+    expect(useSettingsMock).toHaveBeenLastCalledWith({ enabled: true });
+  });
+
+  it("offers the way out", () => {
+    renderSettings();
+    expect(screen.queryByRole("link", { name: "管理员登录" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
+    expect(logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the rest of the page when the settings cannot be read", () => {
+    current = { data: undefined, isLoading: false, error: new Error("boom") };
+    renderSettings();
+    expect(screen.getByText("Failed to load settings: boom")).toBeInTheDocument();
+    expect(screen.getByText("Theme")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "退出登录" })).toBeInTheDocument();
+    expect(screen.queryByText("Network Tolerance")).toBeNull();
   });
 });
 

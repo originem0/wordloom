@@ -5,8 +5,8 @@ import { extractJsonCandidate } from "../services/ai-normalize.js";
 import { authMiddleware } from "../middleware/auth.js";
 
 // Connectivity / model-capability probes behind the AI Providers page.
-// Split out of settings.ts: that file is the settings store (read, masked for
-// anonymous readers, and write); this one only talks to upstream AI providers
+// Split out of settings.ts: that file is the settings store (read, with the
+// keys masked, and write); this one only talks to upstream AI providers
 // and never touches the settings table except to read defaults.
 // Mounted by settings.ts, so the URL stays POST /api/settings/test.
 export const settingTestRoutes = new Hono();
@@ -249,7 +249,9 @@ async function verifyOpenaiModels(
   return verified;
 }
 
-// POST /test — test connectivity/model capability using current (or provided) settings
+// POST /test — test connectivity/model capability using current (or provided) settings.
+// It makes outbound requests with the stored keys, so on top of the API guard
+// it checks the session itself.
 settingTestRoutes.post("/test", authMiddleware, async (c) => {
   const started = Date.now();
 

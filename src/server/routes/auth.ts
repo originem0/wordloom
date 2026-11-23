@@ -60,7 +60,7 @@ authRoutes.post("/login", async (c) => {
 
 authRoutes.get("/me", async (c) => {
   // Dev mode (no AUTH_TOKEN) guards nothing, so report admin: the UI keys
-  // admin-only controls off this answer and must agree with the write guard.
+  // admin-only controls off this answer and must agree with the API guard.
   if (!process.env.AUTH_TOKEN) return c.json({ authenticated: true });
   const session = getCookie(c, "session");
   const authenticated = session ? await verifySession(session) : false;

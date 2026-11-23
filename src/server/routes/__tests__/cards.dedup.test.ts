@@ -43,8 +43,6 @@ vi.mock("../../services/ai-shared.js", () => ({
 
 vi.mock("../../middleware/rateLimit.js", () => ({
   rateLimit: () => null,
-  dailyLimit: async () => null,
-  UTILITY_DAILY_LIMIT: { key: "daily-utility", settingKey: "daily_utility_limit", defaultMax: 100 },
 }));
 
 // Import after mocks

@@ -10,7 +10,9 @@ import {
   DialogTitle,
 } from "@/client/components/ui/dialog";
 import { useCards, useDeleteCard, useMissingDeep } from "@/client/hooks/useCards";
+import { useIsAdmin } from "@/client/hooks/useAuth";
 import { apiPost } from "@/client/lib/api";
+import { queryClient } from "@/client/lib/query-client";
 import { PrototypeWordCard } from "./PrototypeWordCard";
 import type { Card } from "@/shared/types";
 import { AdminOnly } from "@/client/components/auth/AdminOnly";
@@ -75,7 +77,8 @@ export function CardCollection({ searchInput }: CardCollectionProps) {
 
   const deleteCard = useDeleteCard();
   const { mutate: deleteCardMutate, isPending: deletePending } = deleteCard;
-  const missingDeep = useMissingDeep();
+  const isAdmin = useIsAdmin();
+  const missingDeep = useMissingDeep(isAdmin);
   const [retryingDeep, setRetryingDeep] = useState(false);
   const [retryProgress, setRetryProgress] = useState({ done: 0, total: 0, ok: 0, fail: 0 });
 
@@ -96,9 +99,12 @@ export function CardCollection({ searchInput }: CardCollectionProps) {
       setRetryProgress({ done: i + 1, total: list.length, ok, fail });
     }
     setRetryingDeep(false);
-    missingDeep.refetch();
+    // The list rows carry the deep layer, and nothing generates it on open any
+    // more: without a refetch the cards just analysed would still open empty.
+    // The prefix covers the missing-deep count as well.
+    queryClient.invalidateQueries({ queryKey: ["cards"] });
     toast.success(`Deep retry done: ${ok} ok, ${fail} failed`);
-  }, [missingDeep]);
+  }, [missingDeep.data]);
 
   // Stable callback: closes detail only when the deleted card is the open one.
   // No `selectedCard` dependency → memoized CardListItems don't re-render
@@ -137,8 +143,9 @@ export function CardCollection({ searchInput }: CardCollectionProps) {
           ))}
         </div>
 
-        {/* Batch retry deep */}
-        {(missingDeep.data?.total ?? 0) > 0 && (
+        {/* Batch retry deep. isAdmin is checked as well as the data: a count
+            cached before sign-out is still in memory after it. */}
+        {isAdmin && (missingDeep.data?.total ?? 0) > 0 && (
           <div className="flex items-center gap-2">
             <Button
               size="sm"
@@ -169,7 +176,7 @@ export function CardCollection({ searchInput }: CardCollectionProps) {
       {/* Empty state */}
       {!isLoading && cards.length === 0 && (
         <p className="py-8 text-center text-sm text-muted-foreground">
-          No cards yet. Generate some from the input above!
+          {searchInput || cefr !== "All" ? "没有匹配的词卡。" : "词库里还没有词卡。"}
         </p>
       )}
 

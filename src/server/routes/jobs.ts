@@ -3,13 +3,12 @@ import { db } from "../db/index.js";
 import { jobs } from "../db/schema.js";
 import { eq, desc } from "drizzle-orm";
 import { parseJob, setJobCancelled } from "../services/jobs.js";
-import { authMiddleware } from "../middleware/auth.js";
 
 export const jobRoutes = new Hono();
 
-// Only the admin can start a job now, so only the admin has one to poll or
-// cancel. The poll is a GET, which the write guard does not look at.
-jobRoutes.get("/:id", authMiddleware, async (c) => {
+// Nothing here is on the API guard's public list: a job carries its input and
+// its result, and only the admin can start one.
+jobRoutes.get("/:id", async (c) => {
   const id = c.req.param("id");
   const row = await db.select().from(jobs).where(eq(jobs.id, id)).get();
   if (!row) {
@@ -18,7 +17,7 @@ jobRoutes.get("/:id", authMiddleware, async (c) => {
   return c.json(parseJob(row));
 });
 
-jobRoutes.post("/:id/cancel", authMiddleware, async (c) => {
+jobRoutes.post("/:id/cancel", async (c) => {
   const id = c.req.param("id");
   const row = await db.select().from(jobs).where(eq(jobs.id, id)).get();
   if (!row) {
@@ -34,8 +33,7 @@ jobRoutes.post("/:id/cancel", authMiddleware, async (c) => {
   return c.json(parseJob(updated!));
 });
 
-// The list exposes every job's inputs and results — admin only.
-jobRoutes.get("/", authMiddleware, async (c) => {
+jobRoutes.get("/", async (c) => {
   const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") || "20")));
   const rows = await db.select().from(jobs).orderBy(desc(jobs.createdAt)).limit(limit).all();
   return c.json({ jobs: rows.map(parseJob) });

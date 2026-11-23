@@ -35,6 +35,9 @@ const MAX_POLL_FAILURES = 120;
 
 function failTask(taskId: string, error: string) {
   clearPoll(taskId);
+  // A task dropped while its poll was in flight (removed, or everything reset
+  // at sign-out) has nobody left to report to.
+  if (!useTaskStore.getState().tasks.some((t) => t.id === taskId)) return;
   updateTask(taskId, { status: "failed", error });
   toast.error(`单词卡生成失败: ${error}`);
 }
@@ -87,6 +90,12 @@ async function pollJob(taskId: string) {
     // 404 is definitive — the server has no such job and never will.
     if (res.status === 404) {
       failTask(taskId, "任务不存在或已过期");
+      return;
+    }
+    // So is 401: jobs are the admin's, and asking again without a session
+    // cannot start working. The job itself carries on regardless.
+    if (res.status === 401) {
+      failTask(taskId, "登录已失效，重新登录后可在词库中查看结果");
       return;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -152,6 +161,7 @@ export const useTaskStore = create<{
   cancelTask: (id: string) => Promise<void> | void;
   removeTask: (id: string) => void;
   clearDone: () => void;
+  reset: () => void;
 }>((set) => ({
   tasks: [],
 
@@ -247,5 +257,14 @@ export const useTaskStore = create<{
     set((s) => ({
       tasks: s.tasks.filter((t) => t.status === "running"),
     }));
+  },
+
+  // Sign-out: the tasks were the admin's, and following them needs the session
+  // that just ended. The jobs themselves are left to finish on the server.
+  reset() {
+    for (const id of [...pollTimers.keys()]) clearPoll(id);
+    for (const controller of submitControllers.values()) controller.abort();
+    submitControllers.clear();
+    set({ tasks: [] });
   },
 }));

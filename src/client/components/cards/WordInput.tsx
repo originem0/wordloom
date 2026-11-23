@@ -11,6 +11,7 @@ import { Input } from "@/client/components/ui/input";
 import { Button } from "@/client/components/ui/button";
 import { Badge } from "@/client/components/ui/badge";
 import { useCards, useExtractWords } from "@/client/hooks/useCards";
+import { useIsAdmin } from "@/client/hooks/useAuth";
 import { useTaskStore } from "@/client/store/tasks";
 import { cn } from "@/client/lib/utils";
 
@@ -35,6 +36,10 @@ interface WordInputProps {
 
 export function WordInput({ input, setInput, debouncedInput }: WordInputProps) {
   const submitCards = useTaskStore((s) => s.submitCards);
+  // The box searches for everyone. Everything about generating (the probe for
+  // an exact match, the offers it leads to, Enter, extraction) is the admin's:
+  // the server refuses it to anyone else, so a visitor is not shown it.
+  const isAdmin = useIsAdmin();
 
   // Live: drives chip display the moment user types a comma/space.
   const liveWords = parseWords(input);
@@ -47,10 +52,10 @@ export function WordInput({ input, setInput, debouncedInput }: WordInputProps) {
 
   // Probe whether the candidate exists. Reuses the same search route — TanStack
   // dedupes if CardCollection happens to query the same params.
-  const exactProbe = useCards({
-    search: candidate || undefined,
-    limit: 1,
-  });
+  const exactProbe = useCards(
+    { search: candidate || undefined, limit: 1 },
+    { enabled: isAdmin && !!candidate },
+  );
   const hasExactMatch =
     !!candidate &&
     !!exactProbe.data?.cards.some(
@@ -70,6 +75,7 @@ export function WordInput({ input, setInput, debouncedInput }: WordInputProps) {
   }, [input, submitCards, setInput]);
 
   const handleEnter = () => {
+    if (!isAdmin) return;
     if (isMulti) {
       handleGenerate();
       return;
@@ -86,40 +92,43 @@ export function WordInput({ input, setInput, debouncedInput }: WordInputProps) {
         input={input}
         setInput={setInput}
         onEnter={handleEnter}
+        canGenerate={isAdmin}
       />
 
-      {isMulti && (
+      {isAdmin && isMulti && (
         <MultiWordBar words={liveWords} onGenerate={handleGenerate} />
       )}
 
-      {showGenerateCta && (
+      {isAdmin && showGenerateCta && (
         <GenerateCta word={candidate} onGenerate={handleGenerate} />
       )}
 
-      <SecondaryEntries />
+      {isAdmin && <SecondaryEntries />}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Unified input — search + generate share one box.
+// Unified input — search for everyone; for the admin it generates as well.
 // ---------------------------------------------------------------------------
 
 function UnifiedSearchBar({
   input,
   setInput,
   onEnter,
+  canGenerate,
 }: {
   input: string;
   setInput: (v: string) => void;
   onEnter: () => void;
+  canGenerate: boolean;
 }) {
   return (
     <div className="relative">
       <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         className="h-11 pl-9 pr-9 text-base"
-        placeholder="查询或生成词卡（多词用逗号/空格分隔）"
+        placeholder={canGenerate ? "查询或生成词卡（多词用逗号/空格分隔）" : "搜索词卡"}
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => {

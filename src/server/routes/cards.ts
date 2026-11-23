@@ -8,8 +8,7 @@ import {
   extractWords,
 } from "../services/ai-router.js";
 import { AI_BUSY } from "../services/ai-shared.js";
-import { rateLimit, dailyLimit, UTILITY_DAILY_LIMIT } from "../middleware/rateLimit.js";
-import { authMiddleware } from "../middleware/auth.js";
+import { rateLimit } from "../middleware/rateLimit.js";
 import {
   generateCardsRequestSchema,
   extractWordsRequestSchema,
@@ -185,15 +184,6 @@ cardRoutes.post("/generate", async (c) => {
     return c.json({ error: "No valid words", code: "VALIDATION_ERROR" }, 400);
   }
 
-  // Daily limit — count by number of words, not number of requests
-  const dailyLimited = await dailyLimit(c, {
-    key: "daily-cards",
-    settingKey: "daily_cards_limit",
-    defaultMax: 50,
-    count: normalized.length,
-  });
-  if (dailyLimited) return dailyLimited;
-
   const useAsync = c.req.query("async") === "1";
   if (useAsync) {
     const jobId = await createJob("cards", { words: normalized });
@@ -218,8 +208,6 @@ cardRoutes.post("/generate", async (c) => {
 cardRoutes.post("/extract", async (c) => {
   const limited = rateLimit(c, { key: "cards-extract", windowMs: 60_000, max: 20 });
   if (limited) return limited;
-  const dailyLimited = await dailyLimit(c, UTILITY_DAILY_LIMIT);
-  if (dailyLimited) return dailyLimited;
 
   const body = await c.req.json();
   const parsed = extractWordsRequestSchema.safeParse(body);
@@ -241,13 +229,6 @@ cardRoutes.post("/extract", async (c) => {
 
 // POST /:id/deep — generate deep layer for a card (lazy)
 cardRoutes.post("/:id/deep", async (c) => {
-  const dailyLimited = await dailyLimit(c, {
-    key: "daily-deep",
-    settingKey: "daily_deep_limit",
-    defaultMax: 100,
-  });
-  if (dailyLimited) return dailyLimited;
-
   const id = Number(c.req.param("id"));
   const row = await db.select().from(cards).where(eq(cards.id, id)).get();
   if (!row) {
@@ -386,8 +367,9 @@ cardRoutes.get("/", async (c) => {
 });
 
 // GET /missing-deep — list card IDs that don't have deep layer yet.
-// Admin only: it exists to drive "Retry Deep", which only the admin can run.
-cardRoutes.get("/missing-deep", authMiddleware, async (c) => {
+// Drives the admin's "Retry Deep". Registered before /:id, and not on the
+// guard's public list (which admits numeric ids only).
+cardRoutes.get("/missing-deep", async (c) => {
   const rows = await db
     .select({ id: cards.id, word: cards.word })
     .from(cards)

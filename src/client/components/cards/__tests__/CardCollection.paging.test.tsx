@@ -14,6 +14,7 @@ vi.mock("@/client/hooks/useCards", () => ({
   useDeleteCard: () => ({ mutate: vi.fn(), isPending: false }),
   useMissingDeep: () => ({ data: { cards: [] }, refetch: vi.fn() }),
 }));
+vi.mock("@/client/hooks/useAuth", () => ({ useIsAdmin: () => false }));
 vi.mock("@/client/components/auth/AdminOnly", () => ({ AdminOnly: () => null }));
 vi.mock("../PrototypeWordCard", () => ({ PrototypeWordCard: () => null }));
 

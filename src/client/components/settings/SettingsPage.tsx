@@ -1,6 +1,9 @@
 import { useCallback, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Loader2,
+  LogIn,
+  LogOut,
   Moon,
   Monitor,
   RefreshCcw,
@@ -9,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/client/components/ui/button";
+import { useIsAdmin, useLogout } from "@/client/hooks/useAuth";
 import { useSettings, useUpdateSetting } from "@/client/hooks/useSettings";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
@@ -30,7 +34,12 @@ const DEFAULTS: Record<string, string> = {
 };
 
 export function SettingsPage() {
-  const settingsQuery = useSettings();
+  // The page is public: the theme and the cache controls live in the browser.
+  // What the server stores is the admin's to read as well as to change, so it
+  // is only asked for, and only shown, to an admin.
+  const isAdmin = useIsAdmin();
+  const logout = useLogout();
+  const settingsQuery = useSettings({ enabled: isAdmin });
   const updateSetting = useUpdateSetting();
   const settings = settingsQuery.data;
 
@@ -115,17 +124,15 @@ export function SettingsPage() {
     }
   }, []);
 
-  if (settingsQuery.isLoading && !initialized) {
-    return (
-      <div className="flex items-center justify-center p-12">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (settingsQuery.error) {
-    return <div className="p-6 text-destructive">Failed to load settings: {settingsQuery.error.message}</div>;
-  }
+  // Where the admin's part of the page stands. Loading and failing stay inside
+  // that part: the rest of the page does not depend on the server.
+  const serverSettings = !isAdmin
+    ? "hidden"
+    : settingsQuery.error
+      ? "error"
+      : initialized
+        ? "ready"
+        : "loading";
 
   const saveTheme = (next: Theme) => {
     setTheme(next);
@@ -149,24 +156,38 @@ export function SettingsPage() {
       <h1 className="text-xl font-semibold text-foreground">Settings</h1>
 
       {/* ══════════ LANGUAGE ══════════ */}
-      <SectionHeader>Language</SectionHeader>
+      {serverSettings !== "hidden" && <SectionHeader>Language</SectionHeader>}
 
-      <SettingRow
-        title="Explanation Language"
-        subtitle="词义解释、词源、深度分析等说明性文本"
-        value={draftValue("analysis_language")}
-        defaultOpen
-      >
-        <select
-          className={SELECT_CLASS}
+      {serverSettings === "loading" && (
+        <div className="py-3">
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        </div>
+      )}
+
+      {serverSettings === "error" && (
+        <div className="py-3 text-sm text-destructive">
+          Failed to load settings: {settingsQuery.error?.message}
+        </div>
+      )}
+
+      {serverSettings === "ready" && (
+        <SettingRow
+          title="Explanation Language"
+          subtitle="词义解释、词源、深度分析等说明性文本"
           value={draftValue("analysis_language")}
-          onChange={(e) => setDrafts((prev) => ({ ...prev, analysis_language: e.target.value }))}
+          defaultOpen
         >
-          <option value="zh-CN">简体中文</option>
-          <option value="en">English</option>
-          <option value="bilingual">Bilingual</option>
-        </select>
-      </SettingRow>
+          <select
+            className={SELECT_CLASS}
+            value={draftValue("analysis_language")}
+            onChange={(e) => setDrafts((prev) => ({ ...prev, analysis_language: e.target.value }))}
+          >
+            <option value="zh-CN">简体中文</option>
+            <option value="en">English</option>
+            <option value="bilingual">Bilingual</option>
+          </select>
+        </SettingRow>
+      )}
 
       {/* ══════════ APPEARANCE & APP ══════════ */}
       <SectionHeader>Appearance & App</SectionHeader>
@@ -205,15 +226,43 @@ export function SettingsPage() {
         </div>
       </SettingRow>
 
-      <SettingRow
-        title="Network Tolerance"
-        value={`${draftValue("api_timeout_ms")}ms · ${draftValue("api_max_retries")} retries`}
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
-          {textField("api_timeout_ms", "API timeout (ms)", DEFAULTS.api_timeout_ms)}
-          {textField("api_max_retries", "Max retries", DEFAULTS.api_max_retries)}
+      {serverSettings === "ready" && (
+        <SettingRow
+          title="Network Tolerance"
+          value={`${draftValue("api_timeout_ms")}ms · ${draftValue("api_max_retries")} retries`}
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            {textField("api_timeout_ms", "API timeout (ms)", DEFAULTS.api_timeout_ms)}
+            {textField("api_max_retries", "Max retries", DEFAULTS.api_max_retries)}
+          </div>
+        </SettingRow>
+      )}
+
+      {/* ══════════ ACCOUNT ══════════ */}
+      {/* On a phone this row is the only way in or out: the sidebar that
+          carries the same two actions is not shown there. */}
+      <SectionHeader>Account</SectionHeader>
+      <div className="flex items-center justify-between gap-4 py-3">
+        <div className="min-w-0">
+          <div className="text-[14px] font-medium leading-5 text-foreground">Admin</div>
+          <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground/60">
+            {isAdmin ? "已登录，可以生成词卡、调整 AI 配置" : "生成词卡、调整 AI 配置需要登录"}
+          </div>
         </div>
-      </SettingRow>
+        {isAdmin ? (
+          <Button size="sm" variant="outline" className="shrink-0" onClick={logout}>
+            <LogOut className="size-3.5" />
+            退出登录
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" className="shrink-0" asChild>
+            <Link to="/login?redirect=/settings">
+              <LogIn className="size-3.5" />
+              管理员登录
+            </Link>
+          </Button>
+        )}
+      </div>
 
       {/* ══════════ ABOUT ══════════ */}
       <SectionHeader>About</SectionHeader>
@@ -232,7 +281,7 @@ export function SettingsPage() {
       </div>
 
       {/* ── Sticky bottom save bar ── */}
-      {dirtyKeys.length > 0 && (
+      {serverSettings === "ready" && dirtyKeys.length > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border/60 bg-background/95 backdrop-blur px-4 py-3">
           <div className="mx-auto flex max-w-2xl items-center justify-between">
             <span className="text-[12px] text-muted-foreground">{dirtyKeys.length} unsaved change{dirtyKeys.length > 1 ? "s" : ""}</span>

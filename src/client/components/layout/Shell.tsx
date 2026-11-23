@@ -1,17 +1,17 @@
-import { Link, Outlet, NavLink, useNavigate } from "react-router-dom";
-import { Layers, Cpu, Settings, Sun, Moon, LogIn, LogOut } from "lucide-react";
-import { apiPost } from "@/client/lib/api";
+import { Link, Outlet, NavLink } from "react-router-dom";
+import { Layers, Cpu, Settings, Sun, Moon, LogIn, LogOut, type LucideIcon } from "lucide-react";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
-import { queryClient } from "@/client/lib/query-client";
-import { AUTH_QUERY_KEY, useIsAdmin } from "@/client/hooks/useAuth";
+import { useIsAdmin, useLogout } from "@/client/hooks/useAuth";
 import { TaskPanel } from "./TaskPanel";
 
-const navItems = [
+// A visitor reads cards and nothing else, so the page that configures the
+// models is not on their menu (the route itself sits behind AuthGuard).
+const navItems: Array<{ to: string; icon: LucideIcon; label: string; adminOnly?: boolean }> = [
   { to: "/cards", icon: Layers, label: "Cards" },
-  { to: "/providers", icon: Cpu, label: "AI" },
+  { to: "/providers", icon: Cpu, label: "AI", adminOnly: true },
   { to: "/settings", icon: Settings, label: "Settings" },
-] as const;
+];
 
 function ThemeToggle() {
   const theme = useAppStore((s) => s.theme);
@@ -36,18 +36,9 @@ function ThemeToggle() {
 }
 
 export function Shell() {
-  const navigate = useNavigate();
   const isAdmin = useIsAdmin();
-
-  async function handleLogout() {
-    try {
-      await apiPost("/api/auth/logout", {});
-    } finally {
-      // Drop the cached admin flag so admin-only controls vanish immediately.
-      await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
-      navigate("/login", { replace: true });
-    }
-  }
+  const handleLogout = useLogout();
+  const visibleNav = navItems.filter((item) => isAdmin || !item.adminOnly);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -57,7 +48,7 @@ export function Shell() {
           <h1 className="text-lg font-semibold">WordLoom</h1>
         </div>
         <nav className="flex flex-1 flex-col gap-1 p-3">
-          {navItems.map(({ to, icon: Icon, label }) => (
+          {visibleNav.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
@@ -106,7 +97,7 @@ export function Shell() {
 
       {/* Mobile bottom nav */}
       <nav className="fixed bottom-0 left-0 right-0 h-[calc(4rem+env(safe-area-inset-bottom))] pb-[env(safe-area-inset-bottom)] bg-background border-t flex items-center justify-around md:hidden">
-        {navItems.map(({ to, icon: Icon, label }) => (
+        {visibleNav.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}

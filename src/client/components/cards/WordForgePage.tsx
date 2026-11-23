@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ModuleErrorBoundary } from "@/client/components/layout/ErrorBoundary";
+import { useIsAdmin } from "@/client/hooks/useAuth";
 import { WordInput } from "./WordInput";
 import { CardCollection } from "./CardCollection";
 
 function WordForgeInner() {
+  const isAdmin = useIsAdmin();
   const [searchParams, setSearchParams] = useSearchParams();
   const prefill = searchParams.get("prefill") || "";
   const [input, setInput] = useState(prefill);
@@ -30,7 +32,9 @@ function WordForgeInner() {
       <section className="space-y-1">
         <h2 className="text-2xl font-semibold">Word Forge</h2>
         <p className="text-sm text-muted-foreground">
-          一个输入框：搜不到就生成。多词用逗号或空格分隔。
+          {isAdmin
+            ? "一个输入框：搜不到就生成。多词用逗号或空格分隔。"
+            : "搜索词库里的词卡，点开看词源、核心意象与边界测试。"}
         </p>
       </section>
       <section>
