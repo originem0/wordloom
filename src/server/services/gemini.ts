@@ -83,7 +83,7 @@ export async function geminiGenerateStory(
       fallbackKeys: ["story_fallback_model"],
       label: "generateStory",
       timeoutMultiplier: 1.5,
-      run: async (model) => {
+      run: async (model, signal) => {
         const ai = await getClient();
 
         const systemInstruction = buildStorySystemPrompt({
@@ -108,6 +108,7 @@ export async function geminiGenerateStory(
             },
           ],
           config: {
+            abortSignal: signal,
             systemInstruction,
             tools: [{ googleSearch: {} }],
           },
@@ -164,7 +165,7 @@ export async function generateTTS(text: string): Promise<string> {
       primaryFallback: "gemini-2.5-flash-preview-tts",
       fallbackKeys: ["gemini_tts_fallback_model", "tts_fallback_model"],
       label: "generateTTS",
-      run: async (model) => {
+      run: async (model, signal) => {
         const ai = await getClient();
         const voiceName = (await getSetting("gemini_tts_voice")).trim() || "Zephyr";
 
@@ -181,6 +182,7 @@ export async function generateTTS(text: string): Promise<string> {
             },
           ],
           config: {
+            abortSignal: signal,
             responseModalities: [Modality.AUDIO],
             speechConfig: {
               voiceConfig: {
@@ -212,11 +214,12 @@ export async function geminiTranslateText(text: string): Promise<string> {
       primaryFallback: "gemini-2.5-flash",
       fallbackKeys: ["utility_fallback_model", "general_fallback_model"],
       label: "translateText",
-      run: async (model) => {
+      run: async (model, signal) => {
         const ai = await getClient();
         const response = await ai.models.generateContent({
           model,
           contents: `Translate the following text to Simplified Chinese. Keep the markdown formatting intact. Only return the translated text, nothing else.\n\n${text}`,
+          config: { abortSignal: signal },
         });
         return response.text ?? "";
       },
@@ -241,12 +244,13 @@ export async function geminiGenerateCards(
       primaryFallback: "gemini-2.5-flash",
       fallbackKeys: ["cards_fallback_model", "general_fallback_model"],
       label: "generateCards",
-      run: async (model) => {
+      run: async (model, signal) => {
         const ai = await getClient();
         const response = await ai.models.generateContent({
           model,
           contents: `${CARDS_PROMPT}\n\nLanguage preference: ${languageInstruction}\n\nWords to analyze: ${JSON.stringify(words)}`,
           config: {
+            abortSignal: signal,
             responseMimeType: "application/json",
           },
         });
@@ -324,12 +328,13 @@ export async function geminiGenerateDeepLayer(
       fallbackKeys: ["deep_fallback_model", "general_fallback_model"],
       label: "generateDeepLayer",
       timeoutMultiplier: 2,
-      run: async (model) => {
+      run: async (model, signal) => {
         const ai = await getClient();
         const response = await ai.models.generateContent({
           model,
           contents: `${DEEP_PROMPT}\n\nLanguage preference: ${languageInstruction}\n\nWord: "${word}"`,
           config: {
+            abortSignal: signal,
             responseMimeType: "application/json",
           },
         });
@@ -408,12 +413,13 @@ export async function geminiGenerateChunk(input: string): Promise<ChunkGenerateR
       primaryFallback: "gemini-2.5-flash",
       fallbackKeys: ["chunks_fallback_model", "general_fallback_model"],
       label: "generateChunk",
-      run: async (model) => {
+      run: async (model, signal) => {
         const ai = await getClient();
         const response = await ai.models.generateContent({
           model,
           contents: `${CHUNKS_PROMPT}\n\nCandidate: ${JSON.stringify(input)}`,
           config: {
+            abortSignal: signal,
             responseMimeType: "application/json",
           },
         });
@@ -458,7 +464,7 @@ export async function geminiExtractWords(text: string): Promise<string[]> {
       primaryFallback: "gemini-2.5-flash",
       fallbackKeys: ["utility_fallback_model", "general_fallback_model"],
       label: "extractWords",
-      run: async (model) => {
+      run: async (model, signal) => {
         const ai = await getClient();
         const response = await ai.models.generateContent({
           model,
@@ -469,6 +475,7 @@ Return a JSON array of strings (just the words).
 Text:
 ${text}`,
           config: {
+            abortSignal: signal,
             responseMimeType: "application/json",
           },
         });
@@ -518,13 +525,13 @@ export async function geminiGeneratePracticeBrief(
       fallbackKeys: ["story_fallback_model"],
       label: "practiceBrief",
       timeoutMultiplier: 1.5,
-      run: async (model) => {
+      run: async (model, signal) => {
         const ai = await getClient();
         const system = buildPracticeBriefPrompt(input);
         const response = await ai.models.generateContent({
           model,
           contents: `${system}\n\nProduce the practice brief JSON now.`,
-          config: { responseMimeType: "application/json" },
+          config: { responseMimeType: "application/json", abortSignal: signal },
         });
         const parsed = parseJsonLenient(response.text ?? "{}");
         const result = practiceBriefSchema.safeParse(parsed);
@@ -546,12 +553,12 @@ export async function geminiGradePractice(input: PracticeGradeInput): Promise<Pr
       primaryFallback: "gemini-2.5-pro",
       fallbackKeys: ["story_fallback_model"],
       label: "gradePractice",
-      run: async (model) => {
+      run: async (model, signal) => {
         const ai = await getClient();
         const response = await ai.models.generateContent({
           model,
           contents: `${PRACTICE_GRADE_PROMPT}\n\nLanguage preference: ${languageInstruction}\n\nSCENE: ${input.visualPrompt}\n\nSUGGESTED_EXPRESSIONS: ${JSON.stringify(input.suggestedChunks)}\n\nDESCRIPTION: ${input.description}`,
-          config: { responseMimeType: "application/json" },
+          config: { responseMimeType: "application/json", abortSignal: signal },
         });
         const parsed = parseJsonLenient(response.text ?? "{}");
         const result = practiceFeedbackSchema.safeParse(parsed);

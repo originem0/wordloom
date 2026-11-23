@@ -88,23 +88,38 @@ export async function retryWithBackoff<T>(
 // Timeout wrapper
 // ---------------------------------------------------------------------------
 
-export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return await Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => reject(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs);
-    }),
-  ]);
+// The deadline does not just stop waiting — it aborts the work. A bare
+// Promise.race left the upstream request running (and billing) after we gave
+// up on it, and each retry then stacked another live request on top, so the
+// semaphore's concurrency cap stopped meaning anything.
+export async function withTimeout<T>(
+  work: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`timeout after ${timeoutMs}ms`);
+      controller.abort(err);
+      reject(err);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([work(controller.signal), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function runWithRetries<T>(
-  fn: () => Promise<T>,
+  fn: (signal: AbortSignal) => Promise<T>,
   timeoutMultiplier = 1,
 ): Promise<T> {
   const { timeoutMs, maxRetries } = await getRuntimeSettings();
   const effectiveTimeout = Math.round(timeoutMs * timeoutMultiplier);
   return await retryWithBackoff(
-    () => withTimeout(fn(), effectiveTimeout),
+    () => withTimeout(fn, effectiveTimeout),
     maxRetries,
   );
 }
@@ -131,7 +146,8 @@ export async function runWithModelFallback<T>(opts: {
   primaryFallback: string;
   fallbackKeys: string[];
   label: string;
-  run: (model: string) => Promise<T>;
+  /** `signal` aborts when this attempt times out — pass it to the HTTP call. */
+  run: (model: string, signal: AbortSignal) => Promise<T>;
   timeoutMultiplier?: number;
 }): Promise<T> {
   const pref = await getModelPreference(opts.primaryKeys, opts.primaryFallback, opts.fallbackKeys);
@@ -142,13 +158,13 @@ export async function runWithModelFallback<T>(opts: {
   }
 
   try {
-    return await runWithRetries(() => opts.run(pref.primary), mult);
+    return await runWithRetries((signal) => opts.run(pref.primary, signal), mult);
   } catch (primaryError) {
     if (!pref.fallback) throw primaryError;
     const pMsg = primaryError instanceof Error ? primaryError.message : String(primaryError);
     console.warn(`${opts.label}: primary model ${pref.primary} failed (${pMsg.slice(0, 150)}), trying fallback ${pref.fallback}`);
     try {
-      return await runWithRetries(() => opts.run(pref.fallback!), mult);
+      return await runWithRetries((signal) => opts.run(pref.fallback!, signal), mult);
     } catch (fallbackError) {
       const p = primaryError instanceof Error ? primaryError.message : String(primaryError);
       const f = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);

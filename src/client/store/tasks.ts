@@ -29,6 +29,22 @@ export interface Task {
 
 const submitControllers = new Map<string, AbortController>();
 const pollTimers = new Map<string, number>();
+// Consecutive failed polls per task. Transient errors (a 502 during a deploy,
+// a dropped connection) are retried, but not forever: ~5 minutes of nothing
+// but failures means the job's outcome is unknowable from here.
+const pollFailures = new Map<string, number>();
+const POLL_RETRY_MS = 2500;
+const MAX_POLL_FAILURES = 120;
+
+function taskNoun(type: TaskType): string {
+  return type === "story" ? "故事" : type === "practice" ? "出题" : "单词卡";
+}
+
+function failTask(taskId: string, type: TaskType, error: string) {
+  clearPoll(taskId);
+  updateTask(taskId, { status: "failed", error });
+  toast.error(`${taskNoun(type)}生成失败: ${error}`);
+}
 let seq = 0;
 
 function genId() {
@@ -45,6 +61,7 @@ function clearPoll(taskId: string) {
   const timer = pollTimers.get(taskId);
   if (timer) clearTimeout(timer);
   pollTimers.delete(taskId);
+  pollFailures.delete(taskId);
 }
 
 function cardsDoneLabel(result: CardGenerateResult): string {
@@ -74,9 +91,15 @@ async function pollJob(taskId: string) {
 
   try {
     const res = await fetch(`/api/jobs/${task.jobId}`, { credentials: "include" });
+    // 404 is definitive — the server has no such job and never will.
+    if (res.status === 404) {
+      failTask(taskId, task.type, "任务不存在或已过期");
+      return;
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const job = (await res.json()) as JobResponse;
+    pollFailures.delete(taskId);
 
     if (job.status === "queued" || job.status === "running") {
       const timer = window.setTimeout(() => pollJob(taskId), 1800);
@@ -92,12 +115,7 @@ async function pollJob(taskId: string) {
     }
 
     if (job.status === "failed") {
-      updateTask(taskId, {
-        status: "failed",
-        error: job.error || "任务失败",
-      });
-      const label = task.type === "story" ? "故事" : task.type === "practice" ? "出题" : "单词卡";
-      toast.error(`${label}生成失败: ${job.error || "未知错误"}`);
+      failTask(taskId, task.type, job.error || "未知错误");
       return;
     }
 
@@ -133,8 +151,13 @@ async function pollJob(taskId: string) {
       toast.success(doneLabel);
     }
   } catch {
-    // transient network error: keep polling while task is still running
-    const timer = window.setTimeout(() => pollJob(taskId), 2500);
+    const failures = (pollFailures.get(taskId) ?? 0) + 1;
+    if (failures >= MAX_POLL_FAILURES) {
+      failTask(taskId, task.type, "长时间无法连接服务器，请稍后在列表中查看结果");
+      return;
+    }
+    pollFailures.set(taskId, failures);
+    const timer = window.setTimeout(() => pollJob(taskId), POLL_RETRY_MS);
     pollTimers.set(taskId, timer);
   }
 }

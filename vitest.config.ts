@@ -12,5 +12,12 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    // Tests must never touch data/app.db: db/index.ts falls back to the real
+    // file when DATABASE_URL is unset, and auth.test.ts wipes the sessions
+    // table in beforeEach — every `pnpm test` used to log the admin out of
+    // production. Each worker gets its own throwaway in-memory database.
+    env: {
+      DATABASE_URL: ":memory:",
+    },
   },
 });

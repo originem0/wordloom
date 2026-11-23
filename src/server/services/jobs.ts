@@ -1,12 +1,16 @@
 import { randomUUID } from "crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { jobs } from "../db/schema.js";
 
 export type JobType = "story" | "cards" | "chunks" | "practice";
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
-type JsonLike = Record<string, unknown> | unknown[];
+// Anything JSON.stringify can take. (The old Record<string, unknown> alias
+// rejected plain interfaces, forcing `as unknown as` casts at every call site.)
+type JsonLike = object;
+
+const ACTIVE: JobStatus[] = ["queued", "running"];
 
 function now() {
   return Date.now();
@@ -62,12 +66,19 @@ export async function getJobRow(jobId: string) {
   return await db.select().from(jobs).where(eq(jobs.id, jobId)).get();
 }
 
-export async function setJobRunning(jobId: string) {
+// The three transitions below only apply to a job that is still active. A
+// cancel that lands while the work is in flight therefore wins by construction
+// — there is no window between "check cancelled" and "write result".
+
+/** Returns false if the job is no longer active (e.g. cancelled while queued). */
+export async function setJobRunning(jobId: string): Promise<boolean> {
   const ts = now();
-  await db
+  const rows = await db
     .update(jobs)
     .set({ status: "running", updatedAt: ts, startedAt: ts })
-    .where(eq(jobs.id, jobId));
+    .where(and(eq(jobs.id, jobId), inArray(jobs.status, ACTIVE)))
+    .returning({ id: jobs.id });
+  return rows.length > 0;
 }
 
 export async function setJobDone(jobId: string, result: JsonLike) {
@@ -81,7 +92,7 @@ export async function setJobDone(jobId: string, result: JsonLike) {
       updatedAt: ts,
       completedAt: ts,
     })
-    .where(eq(jobs.id, jobId));
+    .where(and(eq(jobs.id, jobId), inArray(jobs.status, ACTIVE)));
 }
 
 export async function setJobFailed(jobId: string, error: string) {
@@ -94,7 +105,7 @@ export async function setJobFailed(jobId: string, error: string) {
       updatedAt: ts,
       completedAt: ts,
     })
-    .where(eq(jobs.id, jobId));
+    .where(and(eq(jobs.id, jobId), inArray(jobs.status, ACTIVE)));
 }
 
 export async function setJobCancelled(jobId: string) {
@@ -108,4 +119,49 @@ export async function setJobCancelled(jobId: string) {
 export async function isJobCancelled(jobId: string): Promise<boolean> {
   const row = await getJobRow(jobId);
   return row?.status === "cancelled";
+}
+
+/**
+ * Runs a job's work and records the outcome. Never rejects.
+ *
+ * Routes fire this with `void runJob(...)` after answering 202, so a rejection
+ * here would be unhandled — and Node exits on unhandled rejections, taking the
+ * server and every other in-flight job with it. All bookkeeping failures are
+ * therefore caught and logged; the row is reconciled by failOrphanedJobs() on
+ * the next start.
+ */
+export async function runJob(jobId: string, work: () => Promise<JsonLike>): Promise<void> {
+  try {
+    if (!(await setJobRunning(jobId))) return;
+    let result: JsonLike;
+    try {
+      result = await work();
+    } catch (err) {
+      await setJobFailed(jobId, err instanceof Error ? err.message : "Job failed");
+      return;
+    }
+    await setJobDone(jobId, result);
+  } catch (err) {
+    console.error(`[jobs] could not record outcome of job ${jobId}:`, err);
+  }
+}
+
+/**
+ * Jobs execute inside this process, so any row still queued/running at startup
+ * belongs to a process that no longer exists. Mark them failed so polling
+ * clients get an answer instead of waiting forever.
+ */
+export async function failOrphanedJobs(): Promise<number> {
+  const ts = now();
+  const rows = await db
+    .update(jobs)
+    .set({
+      status: "failed",
+      error: "Interrupted by a server restart — please try again",
+      updatedAt: ts,
+      completedAt: ts,
+    })
+    .where(inArray(jobs.status, ACTIVE))
+    .returning({ id: jobs.id });
+  return rows.length;
 }

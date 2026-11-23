@@ -69,6 +69,8 @@ type MessageContent = string | Array<{ type: string; [k: string]: unknown }>;
 async function openaiChat(opts: {
   model: string;
   messages: Array<{ role: string; content: MessageContent }>;
+  /** Required on purpose: a call site that forgets it cannot be cancelled. */
+  signal: AbortSignal;
 }): Promise<string> {
   const { apiKey, chatUrl } = await getOpenaiConfig();
 
@@ -82,6 +84,7 @@ async function openaiChat(opts: {
       model: opts.model,
       messages: opts.messages,
     }),
+    signal: opts.signal,
   });
 
   const text = await res.text();
@@ -127,11 +130,12 @@ export async function openaiGenerateStory(
       fallbackKeys: ["story_openai_fallback_model"],
       label: "generateStory (OpenAI)",
       timeoutMultiplier: 1.5,
-      run: async (model) => {
+      run: async (model, signal) => {
         const base64 = imageBuffer.toString("base64");
         const dataUri = `data:${mimeType};base64,${base64}`;
 
         const text = await openaiChat({
+          signal,
           model,
           messages: [
             { role: "system", content: systemInstruction },
@@ -175,8 +179,9 @@ export async function openaiTranslateText(text: string): Promise<string> {
       primaryFallback: "",
       fallbackKeys: ["utility_openai_fallback_model"],
       label: "translateText (OpenAI)",
-      run: async (model) => {
+      run: async (model, signal) => {
         return await openaiChat({
+          signal,
           model,
           messages: [
             {
@@ -207,8 +212,9 @@ export async function openaiGenerateCards(
       primaryFallback: "",
       fallbackKeys: ["cards_openai_fallback_model"],
       label: "generateCards (OpenAI)",
-      run: async (model) => {
+      run: async (model, signal) => {
         const text = await openaiChat({
+          signal,
           model,
           messages: [
             {
@@ -294,8 +300,9 @@ export async function openaiGenerateDeepLayer(
       fallbackKeys: ["deep_openai_fallback_model"],
       label: "generateDeepLayer (OpenAI)",
       timeoutMultiplier: 2,
-      run: async (model) => {
+      run: async (model, signal) => {
         const text = await openaiChat({
+          signal,
           model,
           messages: [
             {
@@ -372,8 +379,9 @@ export async function openaiGenerateChunk(input: string): Promise<ChunkGenerateR
       primaryFallback: "",
       fallbackKeys: ["chunks_openai_fallback_model"],
       label: "generateChunk (OpenAI)",
-      run: async (model) => {
+      run: async (model, signal) => {
         const text = await openaiChat({
+          signal,
           model,
           messages: [
             {
@@ -426,8 +434,9 @@ export async function openaiExtractWords(text: string): Promise<string[]> {
       primaryFallback: "",
       fallbackKeys: ["utility_openai_fallback_model"],
       label: "extractWords (OpenAI)",
-      run: async (model) => {
+      run: async (model, signal) => {
         const raw = await openaiChat({
+          signal,
           model,
           messages: [
             {
@@ -517,7 +526,7 @@ export async function openaiGenerateImage(prompt: string): Promise<Buffer> {
       fallbackKeys: ["image_fallback_model"],
       label: "generateImage (OpenAI)",
       timeoutMultiplier: 3, // image generation is slow (~50s observed)
-      run: async (model) => {
+      run: async (model, signal) => {
         const { apiKey, imagesUrl } = await getImageConfig();
         const res = await fetch(imagesUrl, {
           method: "POST",
@@ -527,6 +536,7 @@ export async function openaiGenerateImage(prompt: string): Promise<Buffer> {
           },
           // size is a hint only — some gateways ignore/approximate it; compressImage normalizes output.
           body: JSON.stringify({ model, prompt, size: "1024x1024", quality: "high", n: 1 }),
+          signal,
         });
 
         const text = await res.text();
@@ -553,7 +563,7 @@ export async function openaiGenerateImage(prompt: string): Promise<Buffer> {
           return Buffer.from(item.b64_json, "base64");
         }
         if (item?.url) {
-          const imgRes = await fetch(item.url);
+          const imgRes = await fetch(item.url, { signal });
           if (!imgRes.ok) throw new Error(`Failed to fetch image url: HTTP ${imgRes.status}`);
           return Buffer.from(await imgRes.arrayBuffer());
         }
@@ -580,9 +590,10 @@ export async function openaiGeneratePracticeBrief(
       fallbackKeys: ["story_openai_fallback_model"],
       label: "practiceBrief (OpenAI)",
       timeoutMultiplier: 1.5,
-      run: async (model) => {
+      run: async (model, signal) => {
         const system = buildPracticeBriefPrompt(input);
         const text = await openaiChat({
+          signal,
           model,
           messages: [
             { role: "system", content: `${system}\n\nRespond in JSON only. No markdown fences.` },
@@ -609,8 +620,9 @@ export async function openaiGradePractice(input: PracticeGradeInput): Promise<Pr
       primaryFallback: "",
       fallbackKeys: ["story_openai_fallback_model"],
       label: "gradePractice (OpenAI)",
-      run: async (model) => {
+      run: async (model, signal) => {
         const text = await openaiChat({
+          signal,
           model,
           messages: [
             {
