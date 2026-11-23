@@ -30,7 +30,7 @@ COPY --from=build /app/drizzle.config.ts ./
 RUN pnpm install --prod --frozen-lockfile
 
 # Create data directory
-RUN mkdir -p /app/data/images
+RUN mkdir -p /app/data
 
 EXPOSE 3001
 

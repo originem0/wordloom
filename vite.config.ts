@@ -27,16 +27,6 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] },
             },
           },
-          {
-            // Cache story images
-            urlPattern: /\/api\/stories\/\d+\/image$/,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "image-cache",
-              expiration: { maxEntries: 50, maxAgeSeconds: 30 * 24 * 60 * 60 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
         ],
       },
     }),

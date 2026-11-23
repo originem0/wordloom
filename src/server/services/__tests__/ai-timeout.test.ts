@@ -4,10 +4,8 @@ import { settings } from "../../db/schema.js";
 import { withTimeout } from "../ai-shared.js";
 import {
   openaiExtractWords,
-  openaiTranslateText,
   openaiGenerateCards,
   openaiGenerateDeepLayer,
-  openaiGenerateStory,
 } from "../openai-compat.js";
 
 // Real settings table (in-memory), real retry/timeout/semaphore code. Only the
@@ -29,7 +27,6 @@ async function configure(extra: Record<string, string> = {}) {
     utility_openai_model: "m",
     cards_openai_model: "m",
     deep_openai_model: "m",
-    story_openai_model: "m",
     api_timeout_ms: "5000",
     api_max_retries: "1",
     ...extra,
@@ -100,12 +97,9 @@ describe("a timed-out provider call is cancelled, not abandoned", () => {
     await rejection;
   });
 
-  const img = Buffer.from("img");
   it.each([
-    ["translate", () => openaiTranslateText("text")],
     ["cards", () => openaiGenerateCards(["word"])],
     ["deep", () => openaiGenerateDeepLayer("word")],
-    ["story", () => openaiGenerateStory(img, "image/jpeg", "")],
   ])("%s hands its request an abort signal", async (_name, invoke) => {
     await configure();
     const call = invoke().catch((e: unknown) => e);

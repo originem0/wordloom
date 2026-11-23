@@ -1,11 +1,9 @@
 import { useCallback, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   Search,
   X,
   Sparkles,
   ScanText,
-  BookOpen,
   Loader2,
   ChevronDown,
 } from "lucide-react";
@@ -202,7 +200,7 @@ function GenerateCta({
 }
 
 // ---------------------------------------------------------------------------
-// Secondary entries — extract panel + link to story.
+// Secondary entries — the extract panel.
 // ---------------------------------------------------------------------------
 
 function SecondaryEntries() {
@@ -230,13 +228,6 @@ function SecondaryEntries() {
             )}
           />
         </button>
-        <Link
-          to="/"
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-        >
-          <BookOpen className="size-3.5" />
-          故事页双击点词
-        </Link>
       </div>
 
       {extractOpen && <ExtractPanel onClose={() => setExtractOpen(false)} />}

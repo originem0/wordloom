@@ -17,13 +17,10 @@ vi.mock("@google/genai", () => {
   class FakeGenAI {
     models = { generateContent: mockGenerateContent };
   }
-  return { GoogleGenAI: FakeGenAI, Modality: { AUDIO: "AUDIO" } };
+  return { GoogleGenAI: FakeGenAI };
 });
 
 import {
-  geminiGenerateStory,
-  generateTTS,
-  geminiTranslateText,
   geminiGenerateCards,
   geminiGenerateDeepLayer,
   geminiExtractWords,
@@ -37,11 +34,7 @@ describe("every Gemini call can be cancelled by the timeout", () => {
     mockGenerateContent.mockResolvedValue({ text: "{}" });
   });
 
-  const img = Buffer.from("img");
   it.each([
-    ["story", () => geminiGenerateStory(img, "image/jpeg", "")],
-    ["tts", () => generateTTS("hello")],
-    ["translate", () => geminiTranslateText("text")],
     ["cards", () => geminiGenerateCards(["word"])],
     ["deep", () => geminiGenerateDeepLayer("word")],
     ["extract", () => geminiExtractWords("some text")],

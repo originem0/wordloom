@@ -10,9 +10,6 @@ const writeCards = async (words: string[]) => ({
 });
 const mockCards = vi.fn(writeCards);
 vi.mock("../services/ai-router.js", () => ({
-  generateStory: vi.fn(),
-  generateTTS: vi.fn(),
-  translateText: vi.fn(async () => "译文"),
   generateCards: (words: string[]) => mockCards(words),
   generateDeepLayer: vi.fn(),
   extractWords: (text: string) => mockExtract(text),
@@ -20,7 +17,7 @@ vi.mock("../services/ai-router.js", () => ({
 
 import { app } from "../app.js";
 import { db } from "../db/index.js";
-import { cards, jobs, sessions, settings, stories } from "../db/schema.js";
+import { cards, jobs, sessions, settings } from "../db/schema.js";
 import { hashSessionId } from "../middleware/auth.js";
 import { eq } from "drizzle-orm";
 
@@ -64,7 +61,7 @@ beforeEach(async () => {
   process.env.AUTH_TOKEN = "secret-token";
   process.env.AUTH_SECRET = "secret";
   delete process.env.ALLOWED_ORIGINS;
-  for (const t of [cards, jobs, sessions, settings, stories]) {
+  for (const t of [cards, jobs, sessions, settings]) {
     await db.delete(t);
   }
   mockExtract.mockClear();
@@ -82,10 +79,6 @@ describe("anonymous visitors cannot destroy or rewrite library data", () => {
     const res = await req(`/api/cards/${card.id}`, { method: "DELETE" });
     expect(res.status).toBe(401);
     expect(await db.select().from(cards).where(eq(cards.id, card.id)).get()).toBeTruthy();
-  });
-
-  it("DELETE on stories is refused", async () => {
-    expect((await req("/api/stories/1", { method: "DELETE" })).status).toBe(401);
   });
 
   it("a write route nobody remembered to whitelist is refused by default", async () => {
@@ -118,10 +111,6 @@ describe("what stays open", () => {
 
 describe("generation and its bookkeeping are admin-only", () => {
   it.each([
-    ["POST", "/api/stories/generate"],
-    ["GET", "/api/stories/1/tts"],
-    ["POST", "/api/stories/1/tts"],
-    ["POST", "/api/stories/1/translate"],
     ["POST", "/api/cards/generate"],
     ["POST", "/api/cards/extract"],
     ["POST", "/api/cards/1/deep"],

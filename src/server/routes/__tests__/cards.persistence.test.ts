@@ -5,9 +5,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // asserted on its own copy, so it could not notice the route changing.
 const mockDeep = vi.fn();
 vi.mock("../../services/ai-router.js", () => ({
-  generateStory: vi.fn(),
-  generateTTS: vi.fn(),
-  translateText: vi.fn(),
   generateCards: vi.fn(),
   generateDeepLayer: (word: string) => mockDeep(word),
   extractWords: vi.fn(),

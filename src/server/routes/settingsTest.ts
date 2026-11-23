@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { generateEdgeTtsMp3 } from "../services/edgeTts.js";
 import { getSetting } from "../services/ai-shared.js";
 import { extractJsonCandidate } from "../services/ai-normalize.js";
 import { authMiddleware } from "../middleware/auth.js";
@@ -103,14 +102,10 @@ function buildHint(msg: string, warnings: string[], target: string): string | un
   if (warnings.length) return warnings[0];
   if (m.includes("no active api keys")) return "Upstream reports no active keys for this model group (provider-side issue).";
   if (m.includes("distributor") || msg.includes("无可用渠道")) return "This relay has no available channel/distributor for that model.";
-  if (m.includes("only supports text")) return "This model does not support AUDIO output. Pick a TTS-capable model or switch TTS Preference to Browser.";
   if (m.includes("invalid base url") || m.includes("failed to fetch") || m.includes("econn") || m.includes("timeout")) return "Base URL may be unreachable, blocked, or misconfigured.";
   if (target === "generalModel" && (m.includes("parse") || m.includes("json"))) return "This model did not return valid JSON for responseMimeType=application/json.";
   return undefined;
 }
-
-const SAMPLE_IMAGE_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAYklEQVR4nO3PwREAIAzDMMr+O8MUPX+kAZLzvLNrlg/u7vw+ATUBNQE1ATUBNQE1ATUBNQE1ATUBNQE1ATUBNQE1ATUBNQE1ATUBNQE1ATUBNQE1ATUBNQE1ATUBNQE1AbUPM1YCf8DaY+oAAAAASUVORK5CYII=";
 
 const settingTestSchema = z
   .object({
@@ -118,13 +113,9 @@ const settingTestSchema = z
       "apiKey",
       "baseUrl",
       "listModels",
-      "storyModel",
       "cardsModel",
       "deepModel",
       "utilityModel",
-      "ttsModel",
-      "geminiTts",
-      "edgeTts",
       "generalModel",
       "openaiListModels",
       "openaiBaseUrl",
@@ -467,8 +458,8 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
   };
 
   // --- OpenAI-compatible model tests ---
-  // When provider=openai, handle storyModel/cardsModel/deepModel/utilityModel via chat completions
-  const modelTestTargets = ["storyModel", "cardsModel", "deepModel", "utilityModel", "generalModel"];
+  // When provider=openai, handle cardsModel/deepModel/utilityModel via chat completions
+  const modelTestTargets = ["cardsModel", "deepModel", "utilityModel", "generalModel"];
   if (parsed.data.provider === "openai" && modelTestTargets.includes(target)) {
     const openaiKey = (parsed.data.apiKey ?? (await getSetting("openai_api_key"))).trim();
     const openaiBase = (parsed.data.baseUrl ?? (await getSetting("openai_base_url"))).trim().replace(/\/+$/, "");
@@ -482,7 +473,7 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
     const chatUrl = `${openaiBase}/${chatPath}`;
 
     // Build test prompt based on target — match actual route complexity
-    let messages: Array<{ role: string; content: unknown }>;
+    let messages: Array<{ role: string; content: string }>;
     let expectJson = false;
     let validateShape: ((parsed: unknown) => string | null) | null = null;
     let testTimeoutMs = 30_000;
@@ -491,16 +482,7 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
     // answer, or the test truncates valid output and misreports it as bad JSON.
     let maxTokens = 300;
 
-    if (target === "storyModel") {
-      testTimeoutMs = 45_000;
-      messages = [
-        { role: "system", content: "Reply with exactly: OK" },
-        { role: "user", content: [
-          { type: "image_url", image_url: { url: `data:image/png;base64,${SAMPLE_IMAGE_PNG_BASE64}` } },
-          { type: "text", text: "Reply with exactly: OK" },
-        ]},
-      ];
-    } else if (target === "cardsModel") {
+    if (target === "cardsModel") {
       maxTokens = 1500;
       messages = [
         { role: "user", content: 'Return JSON only, no markdown fences. Generate a word card for "signal": [{"word":"signal","coreMeaning":"信号","collocations":["signal to"],"examples":[{"level":"B1","sentence":"She gave the signal.","translation":"她发出了信号。"}],"contextLadder":[{"level":1,"sentence":"A signal.","context":"basic"}],"phrases":["signal fire"],"synonyms":["sign"],"antonyms":[]}]' },
@@ -760,171 +742,6 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return fail(msg, { requestUrl: url, model, code: "NETWORK_ERROR" });
-    }
-  }
-
-  if (target === "storyModel") {
-    const model = await resolveModel(["story_model"], "gemini-2.5-pro");
-    const url = `${requestRoot}/models/${encodeURIComponent(model)}:generateContent`;
-
-    const payload = {
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              inlineData: {
-                mimeType: "image/png",
-                data: SAMPLE_IMAGE_PNG_BASE64,
-              },
-            },
-            {
-              text: "Reply with exactly: OK",
-            },
-          ],
-        },
-      ],
-      tools: [{ googleSearch: {} }],
-    };
-
-    try {
-      const res = await fetchJson(url, {
-        headers,
-        method: "POST",
-        body: JSON.stringify(payload),
-        timeoutMs: 30000,
-      });
-      const upstream = extractUpstreamError(res.json);
-      if (res.status >= 400 || upstream.message) {
-        const msg = upstream.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
-        return fail(msg, {
-          status: res.status,
-          requestUrl: url,
-          model,
-          upstream,
-        });
-      }
-
-      const text = extractGeminiText(res.json);
-      if (!text.trim()) {
-        return fail("Model returned empty text.", {
-          requestUrl: url,
-          model,
-        });
-      }
-
-      const isProd = process.env.NODE_ENV === "production";
-      const result = isProd ? { ok: true } : { text: text.slice(0, 220) };
-      return c.json({
-        ok: true,
-        ...baseRequest,
-        latencyMs: Date.now() - started,
-        requestUrl: url,
-        model,
-        result,
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return fail(msg, {
-        requestUrl: url,
-        model,
-        code: "NETWORK_ERROR",
-      });
-    }
-  }
-
-  if (target === "edgeTts") {
-    try {
-      const audio = await generateEdgeTtsMp3("OK");
-      return c.json({
-        ok: true,
-        ...baseRequest,
-        latencyMs: Date.now() - started,
-        result: { mode: "edge-tts", bytes: audio.byteLength },
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return fail(msg, { code: "EDGE_TTS_ERROR" });
-    }
-  }
-
-  if (target === "ttsModel" || target === "geminiTts") {
-    const model = await resolveModel(["gemini_tts_model", "tts_model"], "gemini-2.5-flash-preview-tts");
-    const url = `${requestRoot}/models/${encodeURIComponent(model)}:generateContent`;
-
-    const voiceName = (await getSetting("gemini_tts_voice")).trim() || "Zephyr";
-    const payload = {
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: "Say OK" }],
-        },
-      ],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName },
-          },
-        },
-      },
-    };
-
-    try {
-      const res = await fetchJson(url, {
-        headers,
-        method: "POST",
-        body: JSON.stringify(payload),
-        timeoutMs: 30000,
-      });
-      const upstream = extractUpstreamError(res.json);
-      if (res.status >= 400 || upstream.message) {
-        const msg = upstream.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
-        return fail(msg, {
-          status: res.status,
-          requestUrl: url,
-          model,
-          upstream,
-        });
-      }
-
-      const parts = dig(res.json, "candidates", 0, "content", "parts");
-      const inline = Array.isArray(parts) ? dig(parts[0], "inlineData") : undefined;
-      const data = asString(dig(inline, "data"));
-
-      if (!data) {
-        const text = extractGeminiText(res.json);
-        return fail(
-          "No audio returned (inlineData.data missing).",
-          {
-            requestUrl: url,
-            model,
-            rawText: text.slice(0, 220),
-          },
-        );
-      }
-
-      const mimeType = asString(dig(inline, "mimeType"));
-
-      const isProd = process.env.NODE_ENV === "production";
-      const result = isProd
-        ? { mimeType }
-        : { mimeType, audioBase64Length: data.length };
-      return c.json({
-        ok: true,
-        ...baseRequest,
-        latencyMs: Date.now() - started,
-        requestUrl: url,
-        model,
-        result,
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return fail(msg, {
-        requestUrl: url,
-        model,
-        code: "NETWORK_ERROR",
-      });
     }
   }
 

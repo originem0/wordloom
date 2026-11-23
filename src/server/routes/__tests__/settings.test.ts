@@ -29,7 +29,7 @@ type TestBody = {
   target?: string;
   model?: string;
   request: { requestRoot: string };
-  result: { status?: number; parsedJson?: unknown; mimeType?: string; sample?: string; audioBase64Length?: number };
+  result: { status?: number; parsedJson?: unknown; sample?: string };
   error: { message: string };
 };
 
@@ -158,45 +158,6 @@ describe("settings /test endpoint", () => {
     const [url, init] = mockFetch.mock.calls[0];
     expect(String(url)).toContain("/v1beta/models/gemini-2.5-pro-bs:generateContent");
     expect(sentHeaders(init)["x-goog-api-key"]).toBe("test-key");
-  });
-
-  it("ttsModel test detects inline audio", async () => {
-    stubFetch(() => new Response(
-      JSON.stringify({
-        candidates: [
-          {
-            content: {
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: "audio/pcm",
-                    data: "AAA=",
-                  },
-                },
-              ],
-            },
-          },
-        ],
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    ));
-
-    const app = buildApp();
-    const res = await app.request("/settings/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        target: "ttsModel",
-        baseUrl: "https://relay.example.com",
-        apiKey: "test-key",
-        model: "gemini-2.5-flash-preview-tts",
-      }),
-    });
-
-    const body = (await res.json()) as TestBody;
-    expect(body.ok).toBe(true);
-    expect(body.model).toBe("gemini-2.5-flash-preview-tts");
-    expect(body.result.audioBase64Length).toBe(4);
   });
 });
 

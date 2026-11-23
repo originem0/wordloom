@@ -27,20 +27,20 @@ describe("SettingsPage drafts", () => {
     const view = render(<SettingsPage />);
     expect(screen.queryByText("Settings")).toBeNull();
 
-    current = { data: { tts_preference: "edge" }, isLoading: false, error: null };
+    current = { data: { analysis_language: "en" }, isLoading: false, error: null };
     view.rerender(<SettingsPage />);
-    expect(screen.getAllByRole("combobox")[0]).toHaveValue("edge");
+    expect(screen.getAllByRole("combobox")[0]).toHaveValue("en");
   });
 
   it("keeps unsaved edits when the settings query refetches", () => {
-    current = { data: { tts_preference: "edge" }, isLoading: false, error: null };
+    current = { data: { analysis_language: "en" }, isLoading: false, error: null };
     const view = render(<SettingsPage />);
-    const primary = screen.getAllByRole("combobox")[0];
-    fireEvent.change(primary, { target: { value: "gemini" } });
+    const language = screen.getAllByRole("combobox")[0];
+    fireEvent.change(language, { target: { value: "bilingual" } });
 
-    current = { data: { tts_preference: "browser" }, isLoading: false, error: null };
+    current = { data: { analysis_language: "zh-CN" }, isLoading: false, error: null };
     view.rerender(<SettingsPage />);
-    expect(screen.getAllByRole("combobox")[0]).toHaveValue("gemini");
+    expect(screen.getAllByRole("combobox")[0]).toHaveValue("bilingual");
   });
 });
 

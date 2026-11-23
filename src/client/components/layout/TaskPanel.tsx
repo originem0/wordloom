@@ -7,17 +7,10 @@ import {
   ChevronUp,
   ChevronDown,
   Layers,
-  BookOpen,
   Ban,
 } from "lucide-react";
 import { useTaskStore, type Task } from "@/client/store/tasks";
 import { Button } from "@/client/components/ui/button";
-
-function TaskIcon({ type }: { type: Task["type"] }) {
-  if (type === "story")
-    return <BookOpen className="size-3.5 shrink-0 text-muted-foreground" />;
-  return <Layers className="size-3.5 shrink-0 text-muted-foreground" />;
-}
 
 function StatusBadge({ status }: { status: Task["status"] }) {
   switch (status) {
@@ -38,7 +31,7 @@ function TaskItem({ task }: { task: Task }) {
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 text-sm">
-      <TaskIcon type={task.type} />
+      <Layers className="size-3.5 shrink-0 text-muted-foreground" />
       <StatusBadge status={task.status} />
       <span className="min-w-0 flex-1 truncate">
         {task.label}

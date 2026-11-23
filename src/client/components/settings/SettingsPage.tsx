@@ -23,24 +23,7 @@ import { Input } from "@/client/components/ui/input";
 
 type Theme = "light" | "dark" | "system";
 
-const EDGE_VOICES = [
-  "en-US-EmmaMultilingualNeural",
-  "en-US-JennyNeural",
-  "en-US-GuyNeural",
-  "en-GB-SoniaNeural",
-  "en-GB-RyanNeural",
-  "en-AU-NatashaNeural",
-  "en-AU-WilliamNeural",
-] as const;
-
-const GEMINI_VOICES = ["Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Aoede"] as const;
-const TTS_PROVIDERS = ["browser", "edge", "gemini"] as const;
-
 const DEFAULTS: Record<string, string> = {
-  tts_preference: "browser",
-  tts_provider_fallback: "",
-  edge_tts_voice: "en-US-EmmaMultilingualNeural",
-  gemini_tts_voice: "Zephyr",
   analysis_language: "zh-CN",
   api_timeout_ms: "45000",
   api_max_retries: "3",
@@ -132,15 +115,6 @@ export function SettingsPage() {
     }
   }, []);
 
-  const activeProviders = useMemo(() => {
-    const set = new Set<string>();
-    const prim = draftValue("tts_preference");
-    const fb = draftValue("tts_provider_fallback");
-    if (prim) set.add(prim);
-    if (fb) set.add(fb);
-    return set;
-  }, [draftValue]);
-
   if (settingsQuery.isLoading && !initialized) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -173,83 +147,6 @@ export function SettingsPage() {
   return (
     <div className="mx-auto max-w-2xl px-4 pt-6 pb-24 md:px-6">
       <h1 className="text-xl font-semibold text-foreground">Settings</h1>
-
-      {/* ══════════ TTS ══════════ */}
-      <SectionHeader>TTS</SectionHeader>
-
-      <SettingRow
-        title="Provider"
-        subtitle="TTS provider 和备选"
-        right={
-          <span className="text-[12px] text-muted-foreground">
-            {draftValue("tts_preference")}{draftValue("tts_provider_fallback") ? ` → ${draftValue("tts_provider_fallback")}` : ""}
-          </span>
-        }
-        defaultOpen
-      >
-        <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <div className="text-[13px] font-medium">Primary</div>
-              <select
-                className={SELECT_CLASS}
-                value={draftValue("tts_preference")}
-                onChange={(e) => setDrafts((prev) => ({ ...prev, tts_preference: e.target.value }))}
-              >
-                {TTS_PROVIDERS.map((p) => (<option key={p} value={p}>{p}</option>))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <div className="text-[13px] font-medium">Fallback</div>
-              <select
-                className={SELECT_CLASS}
-                value={draftValue("tts_provider_fallback")}
-                onChange={(e) => setDrafts((prev) => ({ ...prev, tts_provider_fallback: e.target.value }))}
-              >
-                <option value="">none</option>
-                {TTS_PROVIDERS.filter((p) => p !== draftValue("tts_preference")).map((p) => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {activeProviders.has("edge") && (
-            <div className="space-y-1.5">
-              <div className="text-[13px] font-medium">Edge TTS Voice</div>
-              <select
-                className={SELECT_CLASS}
-                value={draftValue("edge_tts_voice")}
-                onChange={(e) => setDrafts((prev) => ({ ...prev, edge_tts_voice: e.target.value }))}
-              >
-                {EDGE_VOICES.map((v) => (<option key={v} value={v}>{v}</option>))}
-              </select>
-            </div>
-          )}
-
-          {activeProviders.has("gemini") && (
-            <div className="space-y-1.5">
-              <div className="text-[13px] font-medium">Gemini TTS Voice</div>
-              <select
-                className={SELECT_CLASS}
-                value={draftValue("gemini_tts_voice")}
-                onChange={(e) => setDrafts((prev) => ({ ...prev, gemini_tts_voice: e.target.value }))}
-              >
-                {GEMINI_VOICES.map((v) => (<option key={v} value={v}>{v}</option>))}
-              </select>
-              <div className="text-[11px] text-muted-foreground/60">
-                TTS model 在 AI Providers 页面配置。
-              </div>
-            </div>
-          )}
-
-          {draftValue("tts_preference") === "browser" && !draftValue("tts_provider_fallback") && (
-            <div className="text-[11px] text-muted-foreground/60">
-              Browser TTS uses your device's built-in speech synthesis. No additional configuration needed.
-            </div>
-          )}
-        </div>
-      </SettingRow>
 
       {/* ══════════ LANGUAGE ══════════ */}
       <SectionHeader>Language</SectionHeader>
@@ -323,22 +220,14 @@ export function SettingsPage() {
       <div className="space-y-2 py-3 text-[13px] leading-6 text-muted-foreground/80">
         <p>
           <span className="font-medium text-foreground">WordLoom</span> ——
-          以"习得 → 部署"为闭环的英语学习工作台。
+          一座公开可读的英语词卡库。
         </p>
-        <ul className="space-y-1 pl-1">
-          <li>
-            <span className="font-medium text-foreground">Story Studio</span>：
-            上传图片，AI 产出一份「教学素材包」——高质量描述、中文翻译、看图说话脚手架，以及
-            5-8 个可直接激活的地道表达（优先多词组块，标注直译陷阱）。
-          </li>
-          <li>
-            <span className="font-medium text-foreground">Word Forge</span>：
-            查/造合一的词卡工坊——搜得到就用，搜不到一键生成；分层卡片含音标、词源、认知意象与边界测试。
-          </li>
-        </ul>
+        <p>
+          <span className="font-medium text-foreground">Word Forge</span>：
+          查/造合一的词卡工坊。分层卡片含音标、词源、认知意象与边界测试。
+        </p>
         <p className="text-muted-foreground/60">
-          两个模块共享同一词库：故事里学到的表达可一键沉淀为词卡，下次写作时
-          AI 会优先复现你尚未用过的词。
+          搜索和浏览对所有人开放；生成新卡、从文本抽词需要管理员登录。
         </p>
       </div>
 

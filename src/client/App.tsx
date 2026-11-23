@@ -6,7 +6,6 @@ import { ErrorBoundary } from "./components/layout/ErrorBoundary";
 import { Shell } from "./components/layout/Shell";
 import { LoginPage } from "./components/auth/LoginPage";
 import { AuthGuard } from "./components/auth/AuthGuard";
-import { StoryStudioPage } from "./components/story/StoryStudioPage";
 import { SettingsPage } from "./components/settings/SettingsPage";
 import { AIProvidersPage } from "./components/settings/AIProvidersPage";
 import { Toaster } from "./components/ui/sonner";
@@ -44,7 +43,7 @@ function AppContent() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<Shell />}>
-          <Route index element={<StoryStudioPage />} />
+          <Route index element={<Navigate to="/cards" replace />} />
           <Route path="cards"
             element={
               <Suspense

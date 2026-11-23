@@ -1,24 +1,14 @@
-import type { GroundingSource, StoryArtifact } from "../../shared/types.js";
 import { getSetting, type ParsedCard } from "./ai-shared.js";
 import {
-  geminiGenerateStory,
   geminiGenerateCards,
   geminiGenerateDeepLayer,
   geminiExtractWords,
-  geminiTranslateText,
-  generateTTS,
-  type PreferredVocabItem,
 } from "./gemini.js";
 import {
-  openaiGenerateStory,
   openaiGenerateCards,
   openaiGenerateDeepLayer,
   openaiExtractWords,
-  openaiTranslateText,
 } from "./openai-compat.js";
-
-// Re-export TTS — always Gemini, not routed
-export { generateTTS };
 
 // ---------------------------------------------------------------------------
 // Provider resolution
@@ -34,19 +24,6 @@ async function getProvider(route: string): Promise<ProviderType> {
 // ---------------------------------------------------------------------------
 // Routed exports — same signatures as the old gemini.ts exports
 // ---------------------------------------------------------------------------
-
-export async function generateStory(
-  imageBuffer: Buffer,
-  mimeType: string,
-  prompt: string,
-  preferredVocab: PreferredVocabItem[] = [],
-): Promise<{ artifact: StoryArtifact; sources: GroundingSource[] }> {
-  const provider = await getProvider("story");
-  if (provider === "openai") {
-    return openaiGenerateStory(imageBuffer, mimeType, prompt, preferredVocab);
-  }
-  return geminiGenerateStory(imageBuffer, mimeType, prompt, preferredVocab);
-}
 
 export async function generateCards(
   words: string[],
@@ -79,12 +56,4 @@ export async function extractWords(text: string): Promise<string[]> {
     return openaiExtractWords(text);
   }
   return geminiExtractWords(text);
-}
-
-export async function translateText(text: string): Promise<string> {
-  const provider = await getProvider("utility");
-  if (provider === "openai") {
-    return openaiTranslateText(text);
-  }
-  return geminiTranslateText(text);
 }

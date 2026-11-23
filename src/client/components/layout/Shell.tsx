@@ -1,5 +1,5 @@
 import { Link, Outlet, NavLink, useNavigate } from "react-router-dom";
-import { BookOpen, Layers, Cpu, Settings, Sun, Moon, LogIn, LogOut } from "lucide-react";
+import { Layers, Cpu, Settings, Sun, Moon, LogIn, LogOut } from "lucide-react";
 import { apiPost } from "@/client/lib/api";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
@@ -8,7 +8,6 @@ import { AUTH_QUERY_KEY, useIsAdmin } from "@/client/hooks/useAuth";
 import { TaskPanel } from "./TaskPanel";
 
 const navItems = [
-  { to: "/", icon: BookOpen, label: "Story" },
   { to: "/cards", icon: Layers, label: "Cards" },
   { to: "/providers", icon: Cpu, label: "AI" },
   { to: "/settings", icon: Settings, label: "Settings" },
@@ -62,7 +61,6 @@ export function Shell() {
             <NavLink
               key={to}
               to={to}
-              end={to === "/"}
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
                   isActive
@@ -112,7 +110,6 @@ export function Shell() {
           <NavLink
             key={to}
             to={to}
-            end={to === "/"}
             className={({ isActive }) =>
               `flex flex-col items-center justify-center gap-1 min-h-11 min-w-11 px-2 text-[11px] transition-colors ${
                 isActive ? "text-foreground font-medium" : "text-muted-foreground"

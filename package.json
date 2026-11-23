@@ -7,7 +7,7 @@
     "dev": "concurrently \"pnpm dev:client\" \"pnpm dev:server\"",
     "dev:client": "vite",
     "dev:server": "pnpm db:migrate && tsx watch src/server/index.ts",
-    "build": "vite build && tsup src/server/index.ts --outDir dist/server --external @libsql/client --external sharp --format esm",
+    "build": "vite build && tsup src/server/index.ts --outDir dist/server --external @libsql/client --format esm",
     "start": "node dist/server/index.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -24,7 +24,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.4",
-    "edge-tts-universal": "^1.4.0",
     "hono": "^4.13.20",
     "lucide-react": "^0.577.0",
     "next-themes": "^0.4.6",
@@ -33,7 +32,6 @@
     "react-dom": "^19.3.1",
     "react-router": "^7.18.6",
     "react-router-dom": "^7.18.6",
-    "sharp": "^0.35.5",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.7.1",
     "zod": "^4.6.7",
@@ -41,7 +39,6 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "sharp",
       "protobufjs",
       "esbuild"
     ]

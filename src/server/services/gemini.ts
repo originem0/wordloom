@@ -1,6 +1,5 @@
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { aiCardsResponseSchema, aiDeepLayerSchema } from "../../shared/validation.js";
-import type { GroundingSource, StoryArtifact } from "../../shared/types.js";
 import {
   Semaphore,
   getSetting,
@@ -8,30 +7,18 @@ import {
   acquireSemaphore,
   type ParsedCard,
 } from "./ai-shared.js";
+import { parseJsonLenient, normalizeCardsPayload } from "./ai-normalize.js";
 import {
-  parseJsonLenient,
-  normalizeCardsPayload,
-  normalizeStoryArtifact,
-  buildFallbackStoryArtifact,
-} from "./ai-normalize.js";
-import {
-  buildStorySystemPrompt,
   CARDS_PROMPT,
   DEEP_PROMPT,
   getExplanationLanguageInstruction,
 } from "./ai-prompts.js";
 
-export interface PreferredVocabItem {
-  id: number;
-  word: string;
-  coreMeaning?: string | null;
-}
-
 // ---------------------------------------------------------------------------
 // Semaphores — limits concurrent Gemini API calls
 // ---------------------------------------------------------------------------
 
-const geminiSemaphore = new Semaphore(3);       // story, cards, utility
+const geminiSemaphore = new Semaphore(3);       // cards, utility
 const geminiDeepSemaphore = new Semaphore(2);   // deep analysis only
 
 // ---------------------------------------------------------------------------
@@ -47,170 +34,6 @@ async function getClient(): Promise<GoogleGenAI> {
     apiKey,
     ...(baseUrl ? { httpOptions: { baseUrl } } : {}),
   });
-}
-
-// ---------------------------------------------------------------------------
-// geminiGenerateStory
-// ---------------------------------------------------------------------------
-
-export async function geminiGenerateStory(
-  imageBuffer: Buffer,
-  mimeType: string,
-  prompt: string,
-  preferredVocab: PreferredVocabItem[] = [],
-): Promise<{ artifact: StoryArtifact; sources: GroundingSource[] }> {
-  await acquireSemaphore(geminiSemaphore);
-  try {
-    return await runWithModelFallback({
-      primaryKeys: ["story_model"],
-      primaryFallback: "gemini-2.5-pro",
-      fallbackKeys: ["story_fallback_model"],
-      label: "generateStory",
-      timeoutMultiplier: 1.5,
-      run: async (model, signal) => {
-        const ai = await getClient();
-
-        const systemInstruction = buildStorySystemPrompt({
-          preferredVocab,
-          customPrompt: prompt,
-        });
-
-        const response = await ai.models.generateContent({
-          model,
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  inlineData: {
-                    mimeType,
-                    data: imageBuffer.toString("base64"),
-                  },
-                },
-                { text: "Describe this image following the instructions. Return ONLY the JSON object." },
-              ],
-            },
-          ],
-          config: {
-            abortSignal: signal,
-            systemInstruction,
-            tools: [{ googleSearch: {} }],
-          },
-        });
-
-        const raw = response.text ?? "";
-
-        // Tolerant parse: JSON → normalize → graceful fallback to plain text.
-        let artifact: StoryArtifact;
-        try {
-          const parsed = parseJsonLenient(raw);
-          const normalized = normalizeStoryArtifact(parsed);
-          if (normalized) {
-            artifact = normalized as StoryArtifact;
-          } else {
-            artifact = buildFallbackStoryArtifact(raw) as StoryArtifact;
-          }
-        } catch {
-          artifact = buildFallbackStoryArtifact(raw) as StoryArtifact;
-        }
-
-        const sources: GroundingSource[] = [];
-        const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-        if (chunks) {
-          for (const chunk of chunks) {
-            if (chunk.web) {
-              sources.push({
-                web: {
-                  uri: chunk.web.uri ?? "",
-                  title: chunk.web.title ?? "",
-                },
-              });
-            }
-          }
-        }
-
-        return { artifact, sources };
-      },
-    });
-  } finally {
-    geminiSemaphore.release();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// generateTTS — Gemini native TTS, returns base64 PCM (always Gemini, not routed)
-// ---------------------------------------------------------------------------
-
-export async function generateTTS(text: string): Promise<string> {
-  await acquireSemaphore(geminiSemaphore);
-  try {
-    return await runWithModelFallback({
-      primaryKeys: ["gemini_tts_model", "tts_model"],
-      primaryFallback: "gemini-2.5-flash-preview-tts",
-      fallbackKeys: ["gemini_tts_fallback_model", "tts_fallback_model"],
-      label: "generateTTS",
-      run: async (model, signal) => {
-        const ai = await getClient();
-        const voiceName = (await getSetting("gemini_tts_voice")).trim() || "Zephyr";
-
-        const response = await ai.models.generateContent({
-          model,
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: `Read this story in a natural, human-like voice, with engaging and varied intonation suitable for an English learner. Avoid a robotic tone. Story: ${text}`,
-                },
-              ],
-            },
-          ],
-          config: {
-            abortSignal: signal,
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName },
-              },
-            },
-          },
-        });
-
-        const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        if (!data) throw new Error("TTS returned no audio data");
-        return data;
-      },
-    });
-  } finally {
-    geminiSemaphore.release();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// geminiTranslateText
-// ---------------------------------------------------------------------------
-
-export async function geminiTranslateText(text: string): Promise<string> {
-  await acquireSemaphore(geminiSemaphore);
-  try {
-    return await runWithModelFallback({
-      primaryKeys: ["utility_model", "general_model"],
-      primaryFallback: "gemini-2.5-flash",
-      fallbackKeys: ["utility_fallback_model", "general_fallback_model"],
-      label: "translateText",
-      run: async (model, signal) => {
-        const ai = await getClient();
-        const response = await ai.models.generateContent({
-          model,
-          contents: `Translate the following text to Simplified Chinese. Keep the markdown formatting intact. Only return the translated text, nothing else.\n\n${text}`,
-          config: { abortSignal: signal },
-        });
-        return response.text ?? "";
-      },
-    });
-  } finally {
-    geminiSemaphore.release();
-  }
 }
 
 // ---------------------------------------------------------------------------

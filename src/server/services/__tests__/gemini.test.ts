@@ -21,7 +21,7 @@ vi.mock("@google/genai", () => {
   class FakeGenAI {
     models = { generateContent: mockGenerateContent };
   }
-  return { GoogleGenAI: FakeGenAI, Modality: { AUDIO: "AUDIO" } };
+  return { GoogleGenAI: FakeGenAI };
 });
 
 // Import after mocks

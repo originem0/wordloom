@@ -4,7 +4,6 @@ import { apiFetch, apiPut } from "@/client/lib/api";
 export interface Settings {
   gemini_api_key: string; // "configured" or ""
   openai_api_key: string; // "configured" or ""
-  tts_preference: string; // "browser" | "edge" | "gemini"
   [key: string]: string;
 }
 

@@ -1,16 +1,14 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import { queryClient } from "../lib/query-client";
-import type { Story, CardGenerateResult } from "../../shared/types";
+import type { CardGenerateResult } from "../../shared/types";
 
 export type TaskStatus = "running" | "done" | "failed" | "cancelled";
-export type TaskType = "story" | "cards";
 
 type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
 type JobResponse = {
   id: string;
-  type: TaskType;
   status: JobStatus;
   result?: unknown;
   error?: string | null;
@@ -18,11 +16,10 @@ type JobResponse = {
 
 export interface Task {
   id: string;
-  type: TaskType;
   label: string;
   status: TaskStatus;
   error?: string;
-  result?: Story | CardGenerateResult;
+  result?: CardGenerateResult;
   createdAt: number;
   jobId?: string;
 }
@@ -36,14 +33,10 @@ const pollFailures = new Map<string, number>();
 const POLL_RETRY_MS = 2500;
 const MAX_POLL_FAILURES = 120;
 
-function taskNoun(type: TaskType): string {
-  return type === "story" ? "故事" : "单词卡";
-}
-
-function failTask(taskId: string, type: TaskType, error: string) {
+function failTask(taskId: string, error: string) {
   clearPoll(taskId);
   updateTask(taskId, { status: "failed", error });
-  toast.error(`${taskNoun(type)}生成失败: ${error}`);
+  toast.error(`单词卡生成失败: ${error}`);
 }
 let seq = 0;
 
@@ -93,7 +86,7 @@ async function pollJob(taskId: string) {
     const res = await fetch(`/api/jobs/${task.jobId}`, { credentials: "include" });
     // 404 is definitive — the server has no such job and never will.
     if (res.status === 404) {
-      failTask(taskId, task.type, "任务不存在或已过期");
+      failTask(taskId, "任务不存在或已过期");
       return;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -115,19 +108,11 @@ async function pollJob(taskId: string) {
     }
 
     if (job.status === "failed") {
-      failTask(taskId, task.type, job.error || "未知错误");
+      failTask(taskId, job.error || "未知错误");
       return;
     }
 
     // done
-    if (task.type === "story") {
-      const result = job.result as Story;
-      updateTask(taskId, { status: "done", result, label: "故事生成完成" });
-      queryClient.invalidateQueries({ queryKey: ["stories"] });
-      toast.success("故事生成完成");
-      return;
-    }
-
     const result = job.result as CardGenerateResult;
     const doneLabel = cardsDoneLabel(result);
     updateTask(taskId, { status: "done", result, label: doneLabel });
@@ -145,7 +130,7 @@ async function pollJob(taskId: string) {
   } catch {
     const failures = (pollFailures.get(taskId) ?? 0) + 1;
     if (failures >= MAX_POLL_FAILURES) {
-      failTask(taskId, task.type, "长时间无法连接服务器，请稍后在列表中查看结果");
+      failTask(taskId, "长时间无法连接服务器，请稍后在列表中查看结果");
       return;
     }
     pollFailures.set(taskId, failures);
@@ -163,71 +148,12 @@ function startPolling(taskId: string, jobId: string) {
 
 export const useTaskStore = create<{
   tasks: Task[];
-  submitStory: (image: File, prompt: string) => string;
   submitCards: (words: string[]) => string;
   cancelTask: (id: string) => Promise<void> | void;
   removeTask: (id: string) => void;
   clearDone: () => void;
 }>((set) => ({
   tasks: [],
-
-  submitStory(image: File, prompt: string) {
-    const id = genId();
-    const ac = new AbortController();
-    submitControllers.set(id, ac);
-
-    set((s) => ({
-      tasks: [
-        {
-          id,
-          type: "story" as const,
-          label: "生成故事",
-          status: "running" as const,
-          createdAt: Date.now(),
-        },
-        ...s.tasks,
-      ],
-    }));
-
-    const form = new FormData();
-    form.append("image", image);
-    form.append("prompt", prompt);
-
-    fetch("/api/stories/generate?async=1", {
-      method: "POST",
-      body: form,
-      credentials: "include",
-      signal: ac.signal,
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || `HTTP ${res.status}`);
-        }
-
-        const body = (await res.json()) as { jobId?: string; status?: string } | Story;
-        if ("jobId" in body && body.jobId) {
-          startPolling(id, body.jobId);
-          return;
-        }
-
-        // fallback for any unexpected sync response
-        updateTask(id, { status: "done", result: body as Story, label: "故事生成完成" });
-        queryClient.invalidateQueries({ queryKey: ["stories"] });
-        toast.success("故事生成完成");
-      })
-      .catch((err) => {
-        if (err.name === "AbortError") {
-          updateTask(id, { status: "cancelled" });
-        } else {
-          updateTask(id, { status: "failed", error: err.message });
-          toast.error(`故事生成失败: ${err.message}`);
-        }
-      })
-      .finally(() => submitControllers.delete(id));
-
-    return id;
-  },
 
   submitCards(words: string[]) {
     const id = genId();
@@ -240,7 +166,6 @@ export const useTaskStore = create<{
       tasks: [
         {
           id,
-          type: "cards" as const,
           label: `生成 ${unique.length} 张单词卡`,
           status: "running" as const,
           createdAt: Date.now(),

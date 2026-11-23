@@ -1,5 +1,9 @@
 import { sqliteTable, text, integer, real, index, unique } from "drizzle-orm/sqlite-core";
 
+// Data kept, code removed: Story Studio (image → story, TTS, translation) is
+// gone. The definition stays so the rows survive, cards.story_id keeps a table
+// to point at, and drizzle-kit does not generate a DROP TABLE. The uploaded
+// images and cached audio are still on disk under data/images/ and data/tts/.
 export const stories = sqliteTable("stories", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   imagePath: text("image_path").notNull(),
@@ -60,7 +64,7 @@ export const sessions = sqliteTable("sessions", {
 
 export const jobs = sqliteTable("jobs", {
   id: text("id").primaryKey(),
-  type: text("type").notNull(), // story | cards (rows from before the refactor may say chunks or practice)
+  type: text("type").notNull(), // cards (rows from before the refactor may say story, chunks or practice)
   status: text("status").notNull(), // queued | running | done | failed | cancelled
   input: text("input").notNull(), // JSON payload
   result: text("result"), // JSON payload

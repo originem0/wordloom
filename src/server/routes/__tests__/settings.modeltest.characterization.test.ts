@@ -90,19 +90,6 @@ describe("Gemini model probes", () => {
     upstream(geminiText("null"));
     expect((await run({ target: "deepModel", ...gemini, model: "g" })).ok).toBe(false);
   });
-
-  it("ttsModel fails with a clear message when no audio comes back", async () => {
-    upstream(geminiText("I cannot speak"));
-    const body = await run({ target: "ttsModel", ...gemini, model: "tts" });
-    expect(body.ok).toBe(false);
-    expect(body.error?.message).toMatch(/No audio returned/);
-  });
-
-  it("ttsModel reports the audio mime type", async () => {
-    upstream({ candidates: [{ content: { parts: [{ inlineData: { mimeType: "audio/pcm", data: "AAAA" } }] } }] });
-    const body = await run({ target: "ttsModel", ...gemini, model: "tts" });
-    expect(body.result).toMatchObject({ mimeType: "audio/pcm" });
-  });
 });
 
 describe("OpenAI-compatible probes", () => {

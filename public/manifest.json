@@ -1,7 +1,7 @@
 {
   "name": "WordLoom",
   "short_name": "WordLoom",
-  "description": "Weave stories from images, forge vocabulary cards with AI",
+  "description": "A library of English vocabulary cards, forged with AI",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

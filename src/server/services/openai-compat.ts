@@ -1,5 +1,4 @@
 import { aiCardsResponseSchema, aiDeepLayerSchema } from "../../shared/validation.js";
-import type { GroundingSource, StoryArtifact } from "../../shared/types.js";
 import {
   Semaphore,
   getSetting,
@@ -7,25 +6,18 @@ import {
   acquireSemaphore,
   type ParsedCard,
 } from "./ai-shared.js";
+import { parseJsonLenient, normalizeCardsPayload } from "./ai-normalize.js";
 import {
-  parseJsonLenient,
-  normalizeCardsPayload,
-  normalizeStoryArtifact,
-  buildFallbackStoryArtifact,
-} from "./ai-normalize.js";
-import {
-  buildStorySystemPrompt,
   CARDS_PROMPT,
   DEEP_PROMPT,
   getExplanationLanguageInstruction,
 } from "./ai-prompts.js";
-import type { PreferredVocabItem } from "./gemini.js";
 
 // ---------------------------------------------------------------------------
 // Semaphores — independent from Gemini, split by route to avoid starvation
 // ---------------------------------------------------------------------------
 
-const openaiSemaphore = new Semaphore(3);      // story, cards, utility
+const openaiSemaphore = new Semaphore(3);      // cards, utility
 const openaiDeepSemaphore = new Semaphore(2);   // deep analysis only
 
 // ---------------------------------------------------------------------------
@@ -48,11 +40,9 @@ async function getOpenaiConfig(): Promise<{ apiKey: string; chatUrl: string }> {
   return { apiKey, chatUrl };
 }
 
-type MessageContent = string | Array<{ type: string; [k: string]: unknown }>;
-
 async function openaiChat(opts: {
   model: string;
-  messages: Array<{ role: string; content: MessageContent }>;
+  messages: Array<{ role: string; content: string }>;
   /** Required on purpose: a call site that forgets it cannot be cancelled. */
   signal: AbortSignal;
 }): Promise<string> {
@@ -89,96 +79,6 @@ async function openaiChat(opts: {
     throw new Error("OpenAI response missing choices[0].message.content");
   }
   return content;
-}
-
-// ---------------------------------------------------------------------------
-// openaiGenerateStory
-// ---------------------------------------------------------------------------
-
-export async function openaiGenerateStory(
-  imageBuffer: Buffer,
-  mimeType: string,
-  prompt: string,
-  preferredVocab: PreferredVocabItem[] = [],
-): Promise<{ artifact: StoryArtifact; sources: GroundingSource[] }> {
-  await acquireSemaphore(openaiSemaphore);
-  try {
-    const systemInstruction = buildStorySystemPrompt({
-      preferredVocab,
-      customPrompt: prompt,
-    });
-
-    return await runWithModelFallback({
-      primaryKeys: ["story_openai_model"],
-      primaryFallback: "",
-      fallbackKeys: ["story_openai_fallback_model"],
-      label: "generateStory (OpenAI)",
-      timeoutMultiplier: 1.5,
-      run: async (model, signal) => {
-        const base64 = imageBuffer.toString("base64");
-        const dataUri = `data:${mimeType};base64,${base64}`;
-
-        const text = await openaiChat({
-          signal,
-          model,
-          messages: [
-            { role: "system", content: systemInstruction },
-            {
-              role: "user",
-              content: [
-                { type: "image_url", image_url: { url: dataUri } },
-                { type: "text", text: "Describe this image following the instructions. Return ONLY the JSON object." },
-              ],
-            },
-          ],
-        });
-
-        let artifact: StoryArtifact;
-        try {
-          const parsed = parseJsonLenient(text);
-          const normalized = normalizeStoryArtifact(parsed);
-          artifact = (normalized ?? buildFallbackStoryArtifact(text)) as StoryArtifact;
-        } catch {
-          artifact = buildFallbackStoryArtifact(text) as StoryArtifact;
-        }
-
-        // No grounding with OpenAI-compatible providers
-        return { artifact, sources: [] };
-      },
-    });
-  } finally {
-    openaiSemaphore.release();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// openaiTranslateText
-// ---------------------------------------------------------------------------
-
-export async function openaiTranslateText(text: string): Promise<string> {
-  await acquireSemaphore(openaiSemaphore);
-  try {
-    return await runWithModelFallback({
-      primaryKeys: ["utility_openai_model"],
-      primaryFallback: "",
-      fallbackKeys: ["utility_openai_fallback_model"],
-      label: "translateText (OpenAI)",
-      run: async (model, signal) => {
-        return await openaiChat({
-          signal,
-          model,
-          messages: [
-            {
-              role: "user",
-              content: `Translate the following text to Simplified Chinese. Keep the markdown formatting intact. Only return the translated text, nothing else.\n\n${text}`,
-            },
-          ],
-        });
-      },
-    });
-  } finally {
-    openaiSemaphore.release();
-  }
 }
 
 // ---------------------------------------------------------------------------

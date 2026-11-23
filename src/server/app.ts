@@ -6,7 +6,6 @@ import { secureHeaders } from "hono/secure-headers";
 import { HTTPException } from "hono/http-exception";
 import { requireAuthForWrites } from "./middleware/writeGuard.js";
 import { authRoutes } from "./routes/auth.js";
-import { storyRoutes } from "./routes/stories.js";
 import { cardRoutes } from "./routes/cards.js";
 import { settingRoutes } from "./routes/settings.js";
 import { jobRoutes } from "./routes/jobs.js";
@@ -104,7 +103,6 @@ app.route("/api/auth", authRoutes);
 // Chained (not separate app.route calls) so the route types accumulate into
 // AppType for a future Hono RPC client.
 export const apiRoutes = app
-  .route("/api/stories", storyRoutes)
   .route("/api/cards", cardRoutes)
   .route("/api/settings", settingRoutes)
   .route("/api/jobs", jobRoutes);

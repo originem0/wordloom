@@ -21,27 +21,19 @@ type ProviderType = "gemini" | "openai";
 
 const PROVIDERS: ProviderType[] = ["gemini", "openai"];
 
-const GEMINI_VOICES = ["Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Aoede"] as const;
-
 const ROUTES = [
-  { key: "story", label: "Story", subtitle: "图片 → 故事生成", testTarget: "storyModel" },
   { key: "cards", label: "Cards", subtitle: "短 JSON、稳定结构", testTarget: "cardsModel" },
   { key: "deep", label: "Deep Analysis", subtitle: "长 JSON、schemaAnalysis、SVG", testTarget: "deepModel" },
-  { key: "utility", label: "Utility", subtitle: "抽词、翻译、轻量文本", testTarget: "utilityModel" },
+  { key: "utility", label: "Utility", subtitle: "抽词、轻量文本", testTarget: "utilityModel" },
 ] as const;
 
 const GEMINI_DEFAULTS: Record<string, string> = {
-  story_model: "gemini-2.5-pro",
-  story_fallback_model: "",
   cards_model: "",
   cards_fallback_model: "",
   deep_model: "",
   deep_fallback_model: "",
   utility_model: "",
   utility_fallback_model: "",
-  gemini_tts_model: "gemini-2.5-flash-preview-tts",
-  gemini_tts_fallback_model: "",
-  gemini_tts_voice: "Zephyr",
 };
 
 /** Model list detected earlier in this browser session ([] if none or unreadable). */
@@ -62,18 +54,14 @@ function readModelList(result: unknown): { models: string[]; totalListed: number
 }
 
 function roleCandidates(models: string[], role: string) {
-  const unique = [...new Set(models)];
-  const textModels = unique.filter((m) => !/tts|audio|speech/i.test(m));
-  const ttsModels = unique.filter((m) => /tts|audio|speech/i.test(m));
+  const textModels = [...new Set(models)].filter((m) => !/tts|audio|speech/i.test(m));
   const score = (m: string) => {
-    if (role === "story") return (/pro|vision/i.test(m) ? 20 : 0) + (/flash/i.test(m) ? -2 : 0);
     if (role === "deep") return (/pro|gpt-5/i.test(m) ? 20 : 0) + (/flash/i.test(m) ? -4 : 0);
     if (role === "cards") return (/flash|mini/i.test(m) ? 10 : 0) + (/pro/i.test(m) ? 2 : 0);
     if (role === "utility") return (/flash|mini/i.test(m) ? 12 : 0) + (/pro/i.test(m) ? -2 : 0);
-    return (/tts|audio/i.test(m) ? 10 : 0);
+    return 0;
   };
-  const list = role === "geminiTts" ? ttsModels : textModels;
-  return list.sort((a, b) => score(b) - score(a) || a.localeCompare(b));
+  return textModels.sort((a, b) => score(b) - score(a) || a.localeCompare(b));
 }
 
 export function AIProvidersPage() {
@@ -119,7 +107,6 @@ export function AIProvidersPage() {
       gemini_base_url: settings.gemini_base_url ?? "",
       openai_api_key: "",
       openai_base_url: settings.openai_base_url ?? "",
-      gemini_tts_voice: settings.gemini_tts_voice ?? GEMINI_DEFAULTS.gemini_tts_voice,
     };
     // Route providers
     for (const r of ROUTES) {
@@ -229,12 +216,8 @@ export function AIProvidersPage() {
     try {
       await Promise.allSettled(ROUTES.map((route) => {
         const provider = (draftValue(`${route.key}_provider`) || "gemini") as ProviderType;
-        const primaryKey = provider === "openai"
-          ? `${route.key}_openai_model`
-          : route.key === "story" ? "story_model" : `${route.key}_model`;
-        const model = draftValue(primaryKey) || (provider === "gemini"
-          ? (route.key === "story" ? "gemini-2.5-pro" : (settings?.general_model || "gemini-2.5-flash"))
-          : "");
+        const primaryKey = provider === "openai" ? `${route.key}_openai_model` : `${route.key}_model`;
+        const model = draftValue(primaryKey) || (provider === "gemini" ? (settings?.general_model || "gemini-2.5-flash") : "");
         if (!model) return Promise.resolve();
         return testRoute(route.key, route.testTarget, model, provider);
       }));
@@ -252,24 +235,17 @@ export function AIProvidersPage() {
         { key: "gemini_base_url", value: draftValue("gemini_base_url") },
         { key: "openai_api_key", value: drafts.openai_api_key ?? "", skipEmpty: true },
         { key: "openai_base_url", value: draftValue("openai_base_url") },
-        { key: "gemini_tts_voice", value: draftValue("gemini_tts_voice") },
       ];
       for (const r of ROUTES) {
         pairs.push({ key: `${r.key}_provider`, value: draftValue(`${r.key}_provider`) });
         // Gemini model keys
-        const gKey = r.key === "story" ? "story_model" : `${r.key}_model`;
-        const gFb = r.key === "story" ? "story_fallback_model" : `${r.key}_fallback_model`;
-        pairs.push({ key: gKey, value: draftValue(gKey) });
-        pairs.push({ key: gFb, value: draftValue(gFb) });
+        pairs.push({ key: `${r.key}_model`, value: draftValue(`${r.key}_model`) });
+        pairs.push({ key: `${r.key}_fallback_model`, value: draftValue(`${r.key}_fallback_model`) });
         // OpenAI model keys
         pairs.push({ key: `${r.key}_openai_model`, value: draftValue(`${r.key}_openai_model`) });
         pairs.push({ key: `${r.key}_openai_fallback_model`, value: draftValue(`${r.key}_openai_fallback_model`) });
       }
-      // Gemini TTS models
-      pairs.push({ key: "gemini_tts_model", value: draftValue("gemini_tts_model") });
-      pairs.push({ key: "gemini_tts_fallback_model", value: draftValue("gemini_tts_fallback_model") });
       // Usage limits
-      pairs.push({ key: "daily_story_limit", value: draftValue("daily_story_limit") || "20" });
       pairs.push({ key: "daily_cards_limit", value: draftValue("daily_cards_limit") || "50" });
       pairs.push({ key: "daily_deep_limit", value: draftValue("daily_deep_limit") || "100" });
 
@@ -359,8 +335,6 @@ export function AIProvidersPage() {
   };
 
   // --- Computed ---
-  const geminiTtsCandidates = useMemo(() => roleCandidates(geminiModels, "geminiTts"), [geminiModels]);
-
   // Dirty check
   const isDirty = useMemo(() => {
     if (!initialized || !settings) return false;
@@ -384,18 +358,14 @@ export function AIProvidersPage() {
     return <div className="p-6 text-destructive">Failed to load settings: {settingsQuery.error.message}</div>;
   }
 
-  const getRouteModelKey = (routeKey: string, provider: ProviderType, suffix: string) => {
-    if (provider === "openai") return `${routeKey}_openai_${suffix}`;
-    return routeKey === "story" ? `story_${suffix}` : `${routeKey}_${suffix}`;
-  };
+  const getRouteModelKey = (routeKey: string, provider: ProviderType, suffix: string) =>
+    provider === "openai" ? `${routeKey}_openai_${suffix}` : `${routeKey}_${suffix}`;
 
   const resolveRuntimeModel = (routeKey: string, provider: ProviderType) => {
     const key = getRouteModelKey(routeKey, provider, "model");
     const val = draftValue(key);
     if (val) return val;
-    if (provider === "gemini") {
-      return routeKey === "story" ? "gemini-2.5-pro" : (settings?.general_model || "gemini-2.5-flash");
-    }
+    if (provider === "gemini") return settings?.general_model || "gemini-2.5-flash";
     return "(not set)";
   };
 
@@ -576,36 +546,12 @@ export function AIProvidersPage() {
                   {PROVIDERS.map((p) => (<option key={p} value={p}>{p === "gemini" ? "Gemini" : "OpenAI-compatible"}</option>))}
                 </select>
               </div>
-              {modelField(primaryKey, "Primary Model", provider === "gemini" ? (route.key === "story" ? "gemini-2.5-pro" : "Leave empty to inherit") : "e.g. deepseek-chat", candidates, undefined, provider === "gemini" && route.key !== "story")}
+              {modelField(primaryKey, "Primary Model", provider === "gemini" ? "Leave empty to inherit" : "e.g. deepseek-chat", candidates, undefined, provider === "gemini")}
               {modelField(fallbackKey, "Fallback Model", "Optional", candidates, "Primary 失败后尝试。", true)}
             </div>
           </SettingRow>
         );
       })}
-
-      {/* ══════════ GEMINI TTS MODELS ══════════ */}
-      <SectionHeader>Gemini TTS Models</SectionHeader>
-
-      <SettingRow
-        title="TTS Model"
-        subtitle="Gemini 原生语音合成模型"
-        value={draftValue("gemini_tts_model") || "gemini-2.5-flash-preview-tts"}
-      >
-        <div className="space-y-3">
-          {modelField("gemini_tts_model", "Primary", GEMINI_DEFAULTS.gemini_tts_model, geminiTtsCandidates)}
-          {modelField("gemini_tts_fallback_model", "Fallback", "Optional", geminiTtsCandidates, undefined, true)}
-          <div className="space-y-1.5">
-            <div className="text-[13px] font-medium">Gemini TTS Voice</div>
-            <select
-              className={SELECT_CLASS}
-              value={draftValue("gemini_tts_voice")}
-              onChange={(e) => setDraft("gemini_tts_voice", e.target.value)}
-            >
-              {GEMINI_VOICES.map((v) => (<option key={v} value={v}>{v}</option>))}
-            </select>
-          </div>
-        </div>
-      </SettingRow>
 
       {/* ══════════ USAGE LIMITS ══════════ */}
       <SectionHeader>Usage Limits</SectionHeader>
@@ -613,19 +559,10 @@ export function AIProvidersPage() {
       <SettingRow
         title="Daily Limits"
         subtitle="未登录用户每天的 AI 生成限额（按 IP）"
-        value={`Story ${draftValue("daily_story_limit") || "20"} · Cards ${draftValue("daily_cards_limit") || "50"} · Deep ${draftValue("daily_deep_limit") || "100"}`}
+        value={`Cards ${draftValue("daily_cards_limit") || "50"} · Deep ${draftValue("daily_deep_limit") || "100"}`}
         defaultOpen
       >
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <div className="text-[13px] font-medium">Story 生成</div>
-            <Input
-              value={draftValue("daily_story_limit") || "20"}
-              onChange={(e) => setDraft("daily_story_limit", e.target.value)}
-              placeholder="20"
-              className={`${INPUT_CLASS} font-mono text-sm`}
-            />
-          </div>
           <div className="space-y-1.5">
             <div className="text-[13px] font-medium">Cards 生成</div>
             <Input

@@ -30,7 +30,7 @@ describe("runJob", () => {
   });
 
   it("records the error of work that throws", async () => {
-    const id = await createJob("story", {});
+    const id = await createJob("cards", {});
     await runJob(id, async () => {
       throw new Error("upstream said no");
     });
@@ -103,7 +103,7 @@ describe("failOrphanedJobs", () => {
   // still says queued/running, and a client polling it would wait forever.
   it("fails jobs left queued or running by a previous process and reports how many", async () => {
     const queued = await createJob("cards", {});
-    const running = await createJob("story", {});
+    const running = await createJob("cards", {});
     await db.update(jobs).set({ status: "running" }).where(eq(jobs.id, running));
 
     expect(await failOrphanedJobs()).toBe(2);
