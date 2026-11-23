@@ -1,13 +1,11 @@
 import {
   aiCardsResponseSchema,
   aiDeepLayerSchema,
-  aiChunkResponseSchema,
   practiceBriefSchema,
   practiceFeedbackSchema,
 } from "../../shared/validation.js";
 import type {
   GroundingSource,
-  ChunkGenerateResult,
   StoryArtifact,
   PracticeBrief,
   PracticeFeedback,
@@ -22,7 +20,6 @@ import {
 import {
   parseJsonLenient,
   normalizeCardsPayload,
-  normalizeChunkResponse,
   normalizeStoryArtifact,
   buildFallbackStoryArtifact,
 } from "./ai-normalize.js";
@@ -31,7 +28,6 @@ import {
   buildPracticeBriefPrompt,
   CARDS_PROMPT,
   DEEP_PROMPT,
-  CHUNKS_PROMPT,
   PRACTICE_GRADE_PROMPT,
   getExplanationLanguageInstruction,
 } from "./ai-prompts.js";
@@ -364,61 +360,6 @@ export async function openaiGenerateDeepLayer(
     });
   } finally {
     openaiDeepSemaphore.release();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// openaiGenerateChunk — chunk analysis (is_chunk + parse fields)
-// ---------------------------------------------------------------------------
-
-export async function openaiGenerateChunk(input: string): Promise<ChunkGenerateResult> {
-  await acquireSemaphore(openaiSemaphore);
-  try {
-    return await runWithModelFallback({
-      primaryKeys: ["chunks_openai_model"],
-      primaryFallback: "",
-      fallbackKeys: ["chunks_openai_fallback_model"],
-      label: "generateChunk (OpenAI)",
-      run: async (model, signal) => {
-        const text = await openaiChat({
-          signal,
-          model,
-          messages: [
-            {
-              role: "system",
-              content: `${CHUNKS_PROMPT}\n\nRespond in JSON only. No markdown fences, no explanation — just the JSON object.`,
-            },
-            {
-              role: "user",
-              content: `Candidate: ${JSON.stringify(input)}`,
-            },
-          ],
-        });
-
-        let parsed: unknown;
-        try {
-          parsed = parseJsonLenient(text);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          throw new Error(`Failed to parse chunk JSON: ${msg}`);
-        }
-
-        parsed = normalizeChunkResponse(parsed);
-
-        const result = aiChunkResponseSchema.safeParse(parsed);
-        if (!result.success) {
-          const issues = result.error.issues
-            .slice(0, 3)
-            .map((i) => `${i.path.join(".")}: ${i.message}`)
-            .join("; ");
-          throw new Error(`Chunk validation failed: ${issues}`);
-        }
-
-        return result.data as ChunkGenerateResult;
-      },
-    });
-  } finally {
-    openaiSemaphore.release();
   }
 }
 

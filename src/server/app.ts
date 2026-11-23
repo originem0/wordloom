@@ -8,7 +8,6 @@ import { requireAuthForWrites } from "./middleware/writeGuard.js";
 import { authRoutes } from "./routes/auth.js";
 import { storyRoutes } from "./routes/stories.js";
 import { cardRoutes } from "./routes/cards.js";
-import { chunkRoutes } from "./routes/chunks.js";
 import { settingRoutes } from "./routes/settings.js";
 import { jobRoutes } from "./routes/jobs.js";
 import { practiceRoutes } from "./routes/practice.js";
@@ -108,7 +107,6 @@ app.route("/api/auth", authRoutes);
 export const apiRoutes = app
   .route("/api/stories", storyRoutes)
   .route("/api/cards", cardRoutes)
-  .route("/api/chunks", chunkRoutes)
   .route("/api/settings", settingRoutes)
   .route("/api/jobs", jobRoutes)
   .route("/api/practice", practiceRoutes);

@@ -11,7 +11,6 @@ vi.mock("../../services/ai-router.js", () => ({
   generateCards: vi.fn(),
   generateDeepLayer: (word: string) => mockDeep(word),
   extractWords: vi.fn(),
-  generateChunk: vi.fn(),
   generatePracticeImage: vi.fn(),
   generatePracticeBrief: vi.fn(),
   gradePracticeDescription: vi.fn(),

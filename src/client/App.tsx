@@ -23,15 +23,6 @@ const WordForgePage = lazy(() =>
   }),
 );
 
-const ChunkForgePage = lazy(() =>
-  import("./components/chunks/ChunkForgePage").then((m) => ({
-    default: m.ChunkForgePage,
-  })).catch(() => {
-    window.location.reload();
-    return { default: () => <></> };
-  }),
-);
-
 const PracticePage = lazy(() =>
   import("./components/practice/PracticePage").then((m) => ({
     default: m.PracticePage,
@@ -73,19 +64,6 @@ function AppContent() {
                 }
               >
                 <WordForgePage />
-              </Suspense>
-            }
-          />
-          <Route path="chunks"
-            element={
-              <Suspense
-                fallback={
-                  <div className="flex items-center justify-center p-12">
-                    <div className="size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                  </div>
-                }
-              >
-                <ChunkForgePage />
               </Suspense>
             }
           />

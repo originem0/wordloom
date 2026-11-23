@@ -2,13 +2,11 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import {
   aiCardsResponseSchema,
   aiDeepLayerSchema,
-  aiChunkResponseSchema,
   practiceBriefSchema,
   practiceFeedbackSchema,
 } from "../../shared/validation.js";
 import type {
   GroundingSource,
-  ChunkGenerateResult,
   StoryArtifact,
   PracticeBrief,
   PracticeFeedback,
@@ -23,7 +21,6 @@ import {
 import {
   parseJsonLenient,
   normalizeCardsPayload,
-  normalizeChunkResponse,
   normalizeStoryArtifact,
   buildFallbackStoryArtifact,
 } from "./ai-normalize.js";
@@ -32,7 +29,6 @@ import {
   buildPracticeBriefPrompt,
   CARDS_PROMPT,
   DEEP_PROMPT,
-  CHUNKS_PROMPT,
   PRACTICE_GRADE_PROMPT,
   getExplanationLanguageInstruction,
 } from "./ai-prompts.js";
@@ -398,57 +394,6 @@ export async function geminiGenerateDeepLayer(
     });
   } finally {
     geminiDeepSemaphore.release();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// geminiGenerateChunk — chunk analysis (is_chunk + parse fields)
-// ---------------------------------------------------------------------------
-
-export async function geminiGenerateChunk(input: string): Promise<ChunkGenerateResult> {
-  await acquireSemaphore(geminiSemaphore);
-  try {
-    return await runWithModelFallback({
-      primaryKeys: ["chunks_model", "general_model"],
-      primaryFallback: "gemini-2.5-flash",
-      fallbackKeys: ["chunks_fallback_model", "general_fallback_model"],
-      label: "generateChunk",
-      run: async (model, signal) => {
-        const ai = await getClient();
-        const response = await ai.models.generateContent({
-          model,
-          contents: `${CHUNKS_PROMPT}\n\nCandidate: ${JSON.stringify(input)}`,
-          config: {
-            abortSignal: signal,
-            responseMimeType: "application/json",
-          },
-        });
-
-        const text = response.text ?? "{}";
-        let parsed: unknown;
-        try {
-          parsed = parseJsonLenient(text);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          throw new Error(`Failed to parse chunk JSON: ${msg}`);
-        }
-
-        parsed = normalizeChunkResponse(parsed);
-
-        const result = aiChunkResponseSchema.safeParse(parsed);
-        if (!result.success) {
-          const issues = result.error.issues
-            .slice(0, 3)
-            .map((i) => `${i.path.join(".")}: ${i.message}`)
-            .join("; ");
-          throw new Error(`Chunk validation failed: ${issues}`);
-        }
-
-        return result.data as ChunkGenerateResult;
-      },
-    });
-  } finally {
-    geminiSemaphore.release();
   }
 }
 

@@ -79,16 +79,6 @@ describe("Gemini model probes", () => {
     expect((await run({ target: "utilityModel", ...gemini, model: "g" })).ok).toBe(true);
   });
 
-  it("chunksModel passes on a verdict/confidence/payload object", async () => {
-    upstream(geminiText('```json\n{"verdict":"chunk","confidence":0.9,"payload":null}\n```'));
-    expect((await run({ target: "chunksModel", ...gemini, model: "g" })).ok).toBe(true);
-  });
-
-  it("chunksModel fails when the JSON lacks the expected keys", async () => {
-    upstream(geminiText('{"verdict":"chunk"}'));
-    expect((await run({ target: "chunksModel", ...gemini, model: "g" })).ok).toBe(false);
-  });
-
   it("deepModel passes on a complete deep structure", async () => {
     upstream(geminiText('{"schemaAnalysis":{"coreSchema":"path"},"familyComparison":[],"boundaryTests":[]}'));
     expect((await run({ target: "deepModel", ...gemini, model: "g" })).ok).toBe(true);

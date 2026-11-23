@@ -60,7 +60,7 @@ export const sessions = sqliteTable("sessions", {
 
 export const jobs = sqliteTable("jobs", {
   id: text("id").primaryKey(),
-  type: text("type").notNull(), // story | cards | chunks | practice
+  type: text("type").notNull(), // story | cards | practice (rows from before the refactor may say chunks)
   status: text("status").notNull(), // queued | running | done | failed | cancelled
   input: text("input").notNull(), // JSON payload
   result: text("result"), // JSON payload
@@ -75,6 +75,10 @@ export const jobs = sqliteTable("jobs", {
 
 // ---------------------------------------------------------------------------
 // Chunks: multi-word prefabricated patterns (separate from word-level cards)
+//
+// Data kept, code removed: the page, routes and prompt that used this table
+// are gone. The definition stays so the rows survive and drizzle-kit does not
+// generate a DROP TABLE; tools/export-chunks.mjs dumps the rows to Markdown.
 // ---------------------------------------------------------------------------
 
 export const chunks = sqliteTable("chunks", {

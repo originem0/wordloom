@@ -7,7 +7,6 @@ import {
   Check,
   Sparkles,
   ArrowRight,
-  Puzzle,
 } from "lucide-react";
 import { Button } from "@/client/components/ui/button";
 import { Badge } from "@/client/components/ui/badge";
@@ -21,11 +20,9 @@ interface StoryViewProps {
   story: Story;
   /** Single-word activation → look up / generate a word card. */
   onWordClick: (word: string) => void;
-  /** Multi-word chunk activation → send the phrase to Chunk Forge. */
-  onChunkClick: (phrase: string) => void;
 }
 
-export function StoryView({ story, onWordClick, onChunkClick }: StoryViewProps) {
+export function StoryView({ story, onWordClick }: StoryViewProps) {
   const [translation, setTranslation] = useState<string | null>(
     story.artifact?.translation || null,
   );
@@ -125,7 +122,6 @@ export function StoryView({ story, onWordClick, onChunkClick }: StoryViewProps) 
           <KeyExpressionsPanel
             expressions={story.artifact.keyExpressions}
             onActivate={onWordClick}
-            onChunkActivate={onChunkClick}
           />
         )}
 
@@ -181,18 +177,16 @@ const TYPE_COLORS: Record<StoryKeyExpression["type"], string> = {
 function KeyExpressionsPanel({
   expressions,
   onActivate,
-  onChunkActivate,
 }: {
   expressions: StoryKeyExpression[];
   onActivate: (word: string) => void;
-  onChunkActivate: (phrase: string) => void;
 }) {
   return (
     <div className="space-y-2">
       <div className="flex items-baseline justify-between">
         <h4 className="text-sm font-medium">表达精选</h4>
         <span className="text-[11px] text-muted-foreground">
-          多词组块送入 Chunk Forge；单词进词卡
+          单词进词卡
         </span>
       </div>
       <ul className="divide-y rounded-lg border bg-card">
@@ -201,7 +195,6 @@ function KeyExpressionsPanel({
             key={`${expr.phrase}-${i}`}
             expr={expr}
             onActivate={onActivate}
-            onChunkActivate={onChunkActivate}
           />
         ))}
       </ul>
@@ -212,11 +205,9 @@ function KeyExpressionsPanel({
 function ExpressionRow({
   expr,
   onActivate,
-  onChunkActivate,
 }: {
   expr: StoryKeyExpression;
   onActivate: (word: string) => void;
-  onChunkActivate: (phrase: string) => void;
 }) {
   const isFromVocab = expr.fromVocab != null;
   const isSingleWord = expr.type === "single-word";
@@ -252,7 +243,7 @@ function ExpressionRow({
           )}
         </p>
       </div>
-      {isSingleWord ? (
+      {isSingleWord && (
         <Button
           type="button"
           size="sm"
@@ -272,18 +263,6 @@ function ExpressionRow({
               生成
             </>
           )}
-        </Button>
-      ) : (
-        <Button
-          type="button"
-          size="sm"
-          variant="default"
-          onClick={() => onChunkActivate(expr.phrase)}
-          className="shrink-0"
-          title="送入 Chunk Forge 分析"
-        >
-          <Puzzle className="size-3.5" />
-          分析
         </Button>
       )}
     </li>

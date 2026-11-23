@@ -335,13 +335,9 @@ export function SettingsPage() {
             <span className="font-medium text-foreground">Word Forge</span>：
             查/造合一的词卡工坊——搜得到就用，搜不到一键生成；分层卡片含音标、词源、认知意象与边界测试。
           </li>
-          <li>
-            <span className="font-medium text-foreground">Chunk Forge</span>：
-            多词组块词典——AI 判定搭配/句型/习语，结构化呈现槽位、语域与 L1 干扰陷阱。
-          </li>
         </ul>
         <p className="text-muted-foreground/60">
-          三个模块共享同一词库：故事里学到的表达可一键沉淀为词卡或组块，下次写作时
+          两个模块共享同一词库：故事里学到的表达可一键沉淀为词卡，下次写作时
           AI 会优先复现你尚未用过的词。
         </p>
       </div>

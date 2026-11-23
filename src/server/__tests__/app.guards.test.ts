@@ -3,16 +3,19 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // AI calls are the only external dependency of these routes; everything else
 // (Hono wiring, middleware order, SQLite) is the real thing on an in-memory DB.
 const mockExtract = vi.fn<(text: string) => Promise<string[]>>(async () => ["alpha"]);
-const NOT_CHUNK = { verdict: "not_chunk", confidence: 0.9, reason: "n/a", payload: null };
-const mockChunk = vi.fn<(input: string) => Promise<typeof NOT_CHUNK>>(async () => NOT_CHUNK);
+// Stands in for the model: one bare card per word it is asked for.
+const writeCards = async (words: string[]) => ({
+  success: words.map((word) => ({ word })),
+  failed: [] as { word: string; error: string }[],
+});
+const mockCards = vi.fn(writeCards);
 vi.mock("../services/ai-router.js", () => ({
   generateStory: vi.fn(),
   generateTTS: vi.fn(),
   translateText: vi.fn(async () => "译文"),
-  generateCards: vi.fn(),
+  generateCards: (words: string[]) => mockCards(words),
   generateDeepLayer: vi.fn(),
   extractWords: (text: string) => mockExtract(text),
-  generateChunk: (input: string) => mockChunk(input),
   generatePracticeImage: vi.fn(),
   generatePracticeBrief: vi.fn(),
   gradePracticeDescription: vi.fn(async () => ({ overall: "ok" })),
@@ -20,7 +23,7 @@ vi.mock("../services/ai-router.js", () => ({
 
 import { app } from "../app.js";
 import { db } from "../db/index.js";
-import { cards, chunks, jobs, sessions, settings, stories, practices } from "../db/schema.js";
+import { cards, jobs, sessions, settings, stories, practices } from "../db/schema.js";
 import { hashSessionId } from "../middleware/auth.js";
 import { eq } from "drizzle-orm";
 
@@ -46,24 +49,6 @@ async function seedCard(word = "anchor") {
   return row;
 }
 
-async function seedChunk() {
-  const now = Date.now();
-  const [row] = await db
-    .insert(chunks)
-    .values({
-      form: "in terms of X",
-      category: "prep-intuition",
-      coreMeaning: "with respect to",
-      register: "neutral",
-      frequency: "high",
-      examples: JSON.stringify([{ sentence: "In terms of cost, it wins.", register: "neutral" }]),
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning();
-  return row;
-}
-
 async function adminCookie() {
   const raw = "admin-session";
   const now = Date.now();
@@ -82,12 +67,12 @@ beforeEach(async () => {
   process.env.AUTH_TOKEN = "secret-token";
   process.env.AUTH_SECRET = "secret";
   delete process.env.ALLOWED_ORIGINS;
-  for (const t of [cards, chunks, jobs, sessions, settings, stories, practices]) {
+  for (const t of [cards, jobs, sessions, settings, stories, practices]) {
     await db.delete(t);
   }
   mockExtract.mockClear();
-  mockChunk.mockReset();
-  mockChunk.mockImplementation(async () => NOT_CHUNK);
+  mockCards.mockReset();
+  mockCards.mockImplementation(writeCards);
 });
 
 afterEach(() => {
@@ -100,25 +85,6 @@ describe("anonymous visitors cannot destroy or rewrite library data", () => {
     const res = await req(`/api/cards/${card.id}`, { method: "DELETE" });
     expect(res.status).toBe(401);
     expect(await db.select().from(cards).where(eq(cards.id, card.id)).get()).toBeTruthy();
-  });
-
-  it("DELETE /api/chunks/:id is refused and the chunk survives", async () => {
-    const chunk = await seedChunk();
-    const res = await req(`/api/chunks/${chunk.id}`, { method: "DELETE" });
-    expect(res.status).toBe(401);
-    expect(await db.select().from(chunks).where(eq(chunks.id, chunk.id)).get()).toBeTruthy();
-  });
-
-  it("PATCH /api/chunks/:id is refused and the chunk is unchanged", async () => {
-    const chunk = await seedChunk();
-    const res = await req(`/api/chunks/${chunk.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ coreMeaning: "defaced" }),
-    });
-    expect(res.status).toBe(401);
-    const row = await db.select().from(chunks).where(eq(chunks.id, chunk.id)).get();
-    expect(row?.coreMeaning).toBe("with respect to");
   });
 
   it("DELETE on stories and practices is refused", async () => {
@@ -163,8 +129,6 @@ describe("generation and its bookkeeping are admin-only", () => {
     ["POST", "/api/cards/generate"],
     ["POST", "/api/cards/extract"],
     ["POST", "/api/cards/1/deep"],
-    ["POST", "/api/chunks/generate"],
-    ["PATCH", "/api/chunks/1/usage"],
     ["POST", "/api/practice/generate"],
     ["POST", "/api/practice/1/grade"],
   ])("%s %s is refused without a session", async (method, path) => {
@@ -311,10 +275,10 @@ describe("response hardening", () => {
 
 describe("async generation, end to end", () => {
   async function submit(cookie: string) {
-    const res = await req("/api/chunks/generate?async=1", {
+    const res = await req("/api/cards/generate?async=1", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ input: "in terms of" }),
+      body: JSON.stringify({ words: ["alpha"] }),
     });
     expect(res.status).toBe(202);
     return ((await res.json()) as { jobId: string }).jobId;
@@ -332,11 +296,12 @@ describe("async generation, end to end", () => {
     const cookie = await adminCookie();
     const jobId = await submit(cookie);
     await vi.waitFor(async () => expect((await poll(jobId, cookie)).status).toBe("done"));
-    expect((await poll(jobId, cookie)).result).toEqual(NOT_CHUNK);
+    expect((await poll(jobId, cookie)).result).toMatchObject({ success: [{ word: "alpha" }], failed: [] });
+    expect(await db.select().from(cards).where(eq(cards.word, "alpha")).get()).toBeTruthy();
   });
 
   it("a generator failure surfaces to the poller as a failed job, not a hung one", async () => {
-    mockChunk.mockRejectedValue(new Error("model unavailable"));
+    mockCards.mockRejectedValue(new Error("model unavailable"));
     const cookie = await adminCookie();
     const jobId = await submit(cookie);
     await vi.waitFor(async () => expect((await poll(jobId, cookie)).status).toBe("failed"));

@@ -1,6 +1,5 @@
 import type {
   GroundingSource,
-  ChunkGenerateResult,
   StoryArtifact,
   PracticeBrief,
   PracticeFeedback,
@@ -10,7 +9,6 @@ import {
   geminiGenerateStory,
   geminiGenerateCards,
   geminiGenerateDeepLayer,
-  geminiGenerateChunk,
   geminiExtractWords,
   geminiTranslateText,
   geminiGeneratePracticeBrief,
@@ -24,7 +22,6 @@ import {
   openaiGenerateStory,
   openaiGenerateCards,
   openaiGenerateDeepLayer,
-  openaiGenerateChunk,
   openaiExtractWords,
   openaiTranslateText,
   openaiGenerateImage,
@@ -94,14 +91,6 @@ export async function extractWords(text: string): Promise<string[]> {
     return openaiExtractWords(text);
   }
   return geminiExtractWords(text);
-}
-
-export async function generateChunk(input: string): Promise<ChunkGenerateResult> {
-  const provider = await getProvider("chunks");
-  if (provider === "openai") {
-    return openaiGenerateChunk(input);
-  }
-  return geminiGenerateChunk(input);
 }
 
 export async function translateText(text: string): Promise<string> {
