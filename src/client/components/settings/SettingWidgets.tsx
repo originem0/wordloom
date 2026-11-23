@@ -1,5 +1,5 @@
 import type React from "react";
-import { ChevronRight, Loader2, Zap } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
 // --- Style constants shared across Settings and AI Providers ---
 
@@ -81,37 +81,5 @@ export function SettingRow({
       </summary>
       <div className="pt-2 pb-4 ml-[22px]">{children}</div>
     </details>
-  );
-}
-
-export function RouteTestBtn({
-  healthKey,
-  testing,
-  testingAll,
-  onClick,
-}: {
-  healthKey: string;
-  testing: string | null;
-  testingAll: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={`Test ${healthKey}`}
-      disabled={testing === healthKey || testingAll}
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onClick();
-      }}
-      className="rounded-md p-1 text-muted-foreground/40 hover:text-sky-500 hover:bg-sky-500/10 disabled:opacity-40 transition-colors"
-    >
-      {testing === healthKey ? (
-        <Loader2 className="size-3 animate-spin" />
-      ) : (
-        <Zap className="size-3" />
-      )}
-    </button>
   );
 }

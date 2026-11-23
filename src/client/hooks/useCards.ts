@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiPost } from "@/client/lib/api";
-import type { Card, CardGenerateResult } from "@/shared/types";
+import type { Card } from "@/shared/types";
 
 export function useCards(params: { search?: string; cefr?: string; page?: number; limit?: number }) {
   return useQuery({
@@ -14,23 +14,6 @@ export function useCards(params: { search?: string; cefr?: string; page?: number
       return apiFetch<{ cards: Card[]; total: number; page: number; limit: number }>(`/api/cards?${sp}`);
     },
     placeholderData: (prev) => prev,
-  });
-}
-
-export function useCard(id: number) {
-  return useQuery({
-    queryKey: ["cards", id],
-    queryFn: () => apiFetch<Card>(`/api/cards/${id}`),
-    enabled: !!id,
-  });
-}
-
-export function useGenerateCards() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (words: string[]) =>
-      apiPost<CardGenerateResult>("/api/cards/generate", { words }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["cards"] }),
   });
 }
 

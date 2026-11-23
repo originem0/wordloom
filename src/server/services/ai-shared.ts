@@ -33,10 +33,6 @@ export async function getFirstSetting(keys: string[]): Promise<string> {
   return "";
 }
 
-export async function getModel(settingKey: string, fallback: string): Promise<string> {
-  return (await getSetting(settingKey)) || fallback;
-}
-
 export function parsePositiveInt(raw: string, fallback: number, min: number, max: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return fallback;

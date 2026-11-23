@@ -62,10 +62,6 @@ export async function createJob(type: JobType, input: JsonLike): Promise<string>
   return id;
 }
 
-export async function getJobRow(jobId: string) {
-  return await db.select().from(jobs).where(eq(jobs.id, jobId)).get();
-}
-
 // The three transitions below only apply to a job that is still active. A
 // cancel that lands while the work is in flight therefore wins by construction
 // — there is no window between "check cancelled" and "write result".
@@ -114,11 +110,6 @@ export async function setJobCancelled(jobId: string) {
     .update(jobs)
     .set({ status: "cancelled", updatedAt: ts, completedAt: ts })
     .where(eq(jobs.id, jobId));
-}
-
-export async function isJobCancelled(jobId: string): Promise<boolean> {
-  const row = await getJobRow(jobId);
-  return row?.status === "cancelled";
 }
 
 /**
