@@ -1,7 +1,11 @@
 import { create } from "zustand";
-import type { ExpressionSummary, SourceType } from "@/shared/expressions";
+import type { ExpressionSummary, SourceType, Verdict } from "@/shared/expressions";
 
 export const SOURCE_LABELS: Record<SourceType | "find", string> = { chat: "AI 对话", book: "书", video: "影视", other: "其他", find: "找" };
+
+// The three things a judgement can say. Getting the meaning across another
+// way is not called wrong: only the target expression was not used.
+export const VERDICT_LABELS: Record<Verdict, string> = { used: "用上了", conveyed: "绕开但说通了", missed: "没说通" };
 
 export const AREA_CLASS =
   "w-full rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 md:text-sm dark:bg-input/30";

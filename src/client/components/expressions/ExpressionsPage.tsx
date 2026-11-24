@@ -8,6 +8,8 @@ import { useExpressions, useGlossWatch } from "@/client/hooks/useExpressions";
 import { ApiError } from "@/client/lib/api";
 import { CaptureBox } from "./CaptureBox";
 import { ExpressionDetailDialog, Marked } from "./ExpressionDetail";
+import { StatsLine } from "./StatsLine";
+import { TryPanel } from "./TryPanel";
 import { SOURCE_LABELS, day, titleOf } from "./shared";
 
 function ExpressionsInner() {
@@ -33,6 +35,8 @@ function ExpressionsInner() {
       <section className="space-y-1">
         <h2 className="text-2xl font-semibold">表达</h2>
         <p className="text-sm text-muted-foreground">遇到想留下的说法就收下，原文逐字保存。收下之后，原文会发给你配置的模型补一条注。</p>
+        {/* This and 试一条 ask the server on their own. They wait for the list, which only an admin is given. */}
+        {list.data && <StatsLine />}
       </section>
       {/* Without AUTH_TOKEN the app treats everyone as the admin, and the server refuses to serve private data. */}
       {list.error instanceof ApiError && list.error.code === "AUTH_NOT_CONFIGURED" ? (
@@ -40,6 +44,7 @@ function ExpressionsInner() {
       ) : (
         <>
           <CaptureBox onSaved={watchGloss} />
+          {list.data && <TryPanel />}
           <section className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Input aria-label="筛选" className="max-w-xs flex-1" placeholder="筛选：原文、焦点、意思、出处" value={query} onChange={(e) => setQuery(e.target.value)} />

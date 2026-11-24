@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, apiFetch } from "@/client/lib/api";
-import type { CaptureRequest, EncounterRequest, ExpressionDetail, ExpressionListResponse, ExpressionPatch } from "@/shared/expressions";
+import type {
+  AttemptRequest, AttemptResponse, CaptureRequest, EncounterRequest, ExpressionDetail, ExpressionListResponse, ExpressionPatch,
+  FindRequest, FindResponse, OverturnRequest, PickResponse, RevealRequest, SceneResponse, StatsResponse, TryResponse,
+} from "@/shared/expressions";
 
 // Private data. Every key starts with this prefix, and signing out drops the
 // whole cache (useLogout), so nothing under it outlives the session.
 export const EXPRESSIONS_KEY = ["expressions"] as const;
+const STATS_KEY = [...EXPRESSIONS_KEY, "stats"] as const;
 
 // The open page holds the list in the cache, so a missing list means the cache
 // was dropped. What is still on its way then must not put an entry back.
@@ -15,18 +19,29 @@ const signedOut = (qc: QueryClient) => !qc.getQueryState(EXPRESSIONS_KEY);
 // only a request that got none is worth repeating.
 const retry = (failures: number, error: Error) => failures < 1 && !(error instanceof ApiError);
 
-const fetchDetail = (id: number) => apiFetch<ExpressionDetail>(`/api/expressions/${id}`);
+const read = <T>(path: string) => apiFetch<T>(`/api/expressions${path}`);
+const fetchDetail = (id: number) => read<ExpressionDetail>(`/${id}`);
 
-const send = (method: string, path: string, body: unknown = {}) =>
-  apiFetch<ExpressionDetail>(`/api/expressions${path}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const send = <T = ExpressionDetail>(method: string, path: string, body: unknown = {}) =>
+  apiFetch<T>(`/api/expressions${path}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 /** Admin-only on the server, so only ask when there is an admin to ask for. */
 export function useExpressions(enabled: boolean) {
-  return useQuery({ queryKey: EXPRESSIONS_KEY, queryFn: () => apiFetch<ExpressionListResponse>("/api/expressions"), enabled, retry });
+  return useQuery({ queryKey: EXPRESSIONS_KEY, queryFn: () => read<ExpressionListResponse>(""), enabled, retry });
 }
 
 export function useExpression(id: number | null) {
   return useQuery({ queryKey: [...EXPRESSIONS_KEY, id], queryFn: () => fetchDetail(id!), enabled: id !== null, retry });
+}
+
+/** The numbers on the page: how many entries were produced, and the two day counts. */
+export function useStats(enabled: boolean) {
+  return useQuery({ queryKey: STATS_KEY, queryFn: () => read<StatsResponse>("/stats"), enabled, retry });
+}
+
+/** The second hint in 试一条: where the entry was met, with its focus blanked out. Reading it writes nothing. */
+export function useScene(id: number, enabled: boolean) {
+  return useQuery({ queryKey: [...EXPRESSIONS_KEY, id, "scene"], queryFn: () => read<SceneResponse>(`/${id}/scene`), enabled, retry });
 }
 
 function useWrite<V>(request: (vars: V) => Promise<ExpressionDetail>) {
@@ -34,10 +49,11 @@ function useWrite<V>(request: (vars: V) => Promise<ExpressionDetail>) {
   return useMutation({
     mutationFn: request,
     // Every write answers with the entry as it now is: keep that, and reload
-    // only the list.
+    // only the list and the numbers.
     onSuccess: (detail) => {
       if (signedOut(qc)) return;
       qc.setQueryData([...EXPRESSIONS_KEY, detail.id], detail);
+      void qc.invalidateQueries({ queryKey: STATS_KEY });
       return qc.invalidateQueries({ queryKey: EXPRESSIONS_KEY, exact: true });
     },
   });
@@ -49,6 +65,40 @@ export const useMetAgain = () =>
 export const usePatchExpression = () =>
   useWrite(({ id, ...patch }: ExpressionPatch & { id: number }) => send("PATCH", `/${id}`, patch));
 export const useAnnotate = () => useWrite((id: number) => send("POST", `/${id}/annotate`));
+
+/**
+ * A reveal, an attempt, a question in 找. What these answer with is not the
+ * entry as the page may keep it: a judgement, the hits, or the English of a
+ * masked entry this once. So the answer goes to the caller and nowhere else
+ * (a reveal left in the cache would be shown again with no row saying so), and
+ * since each of them wrote to a timeline, whatever is on screen of the library
+ * is read again.
+ */
+function useAct<V, R>(request: (vars: V) => Promise<R>) {
+  const qc = useQueryClient();
+  // Not waited for: the caller gets its answer before the lists have reloaded.
+  // After signing out there is nothing left to reload, so no guard is needed.
+  return useMutation({ mutationFn: request, gcTime: 0, onSuccess: () => void qc.invalidateQueries({ queryKey: EXPRESSIONS_KEY }) });
+}
+
+/** Answers with the entry unmasked, once. Hold it in the component that asked; the next read is masked again. */
+export const useReveal = () => useAct(({ id, cue }: RevealRequest & { id: number }) => send("POST", `/${id}/reveal`, { cue }));
+export const useAttempt = () =>
+  useAct(({ id, ...body }: AttemptRequest & { id: number }) => send<AttemptResponse>("POST", `/${id}/attempts`, body));
+/** Asks again for a judgement that did not come back; it lands on the same row. */
+export const useJudge = () => useAct((encounterId: number) => send<AttemptResponse>("POST", `/attempts/${encounterId}/judge`));
+export const useOverturn = () =>
+  useAct(({ encounterId, outcome }: OverturnRequest & { encounterId: number }) =>
+    send<AttemptResponse>("POST", `/attempts/${encounterId}/overturn`, { outcome }));
+export const useFind = () => useAct((body: FindRequest) => send<FindResponse>("POST", "/find", body));
+
+// Asked for by hand, held by whoever asked, never in the query cache. 帮我挑
+// writes nothing. 试一条 must not change under a sentence being typed, which a
+// query reloading itself after every write would do.
+export const usePick = () => useMutation({ mutationFn: (text: string) => send<PickResponse>("POST", "/pick", { text }), gcTime: 0 });
+/** At most three entries that are due; `exclude` is the ids already on screen (ids are not private text). */
+export const useTry = () =>
+  useMutation({ mutationFn: (exclude: number[]) => read<TryResponse>(`/try${exclude.length ? `?exclude=${exclude.join(",")}` : ""}`), gcTime: 0 });
 
 const GLOSS_TRIES = 3;
 const GLOSS_WAIT_MS = 3000;
