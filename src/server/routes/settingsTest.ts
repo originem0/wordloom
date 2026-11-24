@@ -274,190 +274,10 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
 
   const { target } = parsed.data;
 
-  const apiKey = (parsed.data.apiKey ?? (await getSetting("gemini_api_key"))).trim();
-  const baseUrlRaw = (parsed.data.baseUrl ?? (await getSetting("gemini_base_url"))).trim();
-
-  // Build requestRoot in the same way @google/genai does for Gemini API
-  let requestRoot = "";
-  let warnings: string[] = [];
-  try {
-    const built = buildRequestRoot(baseUrlRaw);
-    requestRoot = built.requestRoot;
-    warnings = built.warnings;
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return c.json({
-      ok: false,
-      target,
-      warnings,
-      latencyMs: Date.now() - started,
-      request: {
-        baseUrl: baseUrlRaw,
-        apiVersion: GEMINI_API_VERSION,
-        requestRoot: null,
-      },
-      error: {
-        message: msg,
-        hint: buildHint(msg, warnings, target),
-      },
-    });
-  }
-
-  const baseRequest = {
-    target,
-    warnings,
-    latencyMs: 0,
-    request: {
-      baseUrl: baseUrlRaw,
-      apiVersion: GEMINI_API_VERSION,
-      requestRoot,
-    },
-  };
-
-  async function fail(
-    msg: string,
-    extra: Record<string, unknown> = {},
-  ) {
-    const isProd = process.env.NODE_ENV === "production";
-    const safeExtra = isProd
-      ? Object.fromEntries(Object.entries(extra).filter(([k]) => k !== "upstream" && k !== "rawText"))
-      : extra;
-    return c.json({
-      ok: false,
-      ...baseRequest,
-      latencyMs: Date.now() - started,
-      ...safeExtra,
-      error: {
-        message: msg,
-        hint: buildHint(msg, warnings, target),
-        ...(isProd ? {} : extra["upstream"] ? { upstream: extra["upstream"] } : {}),
-      },
-    });
-  }
-
-  // --- Tests ---
-
-  // Base URL reachability test (does NOT require API key)
-  if (target === "baseUrl") {
-    const url = `${requestRoot}/models`;
-    try {
-      const res = await fetchJson(url, { method: "GET", timeoutMs: 15000 });
-      const upstream = extractUpstreamError(res.json);
-
-      // Treat 200/401/403 as "reachable". 401/403 usually means "API key required".
-      if (res.status === 200 || res.status === 401 || res.status === 403) {
-        const isProd = process.env.NODE_ENV === "production";
-        const result: Record<string, unknown> = {
-          status: res.status,
-          note:
-            res.status === 200
-              ? "Base URL reachable."
-              : "Base URL reachable (auth required).",
-        };
-        if (!isProd) result.upstream = upstream;
-        return c.json({
-          ok: true,
-          ...baseRequest,
-          latencyMs: Date.now() - started,
-          requestUrl: url,
-          result,
-        });
-      }
-
-      const msg = upstream.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
-      return fail(msg, {
-        status: res.status,
-        requestUrl: url,
-        upstream,
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return fail(msg, {
-        requestUrl: url,
-        code: "NETWORK_ERROR",
-      });
-    }
-  }
-
-  // All other tests require an API key
-  if (!apiKey) {
-    const msg = "Gemini API Key not configured.";
-    return c.json({
-      ok: false,
-      ...baseRequest,
-      latencyMs: Date.now() - started,
-      error: {
-        message: msg,
-        hint: "Set the API key in Settings first.",
-      },
-    });
-  }
-
-  const headers = {
-    "Content-Type": "application/json",
-    "x-goog-api-key": apiKey,
-  };
-
-  if (target === "apiKey" || target === "listModels") {
-    const url = `${requestRoot}/models`;
-    try {
-      const res = await fetchJson(url, { headers, method: "GET", timeoutMs: 15000 });
-      const upstream = extractUpstreamError(res.json);
-      if (res.status >= 400 || upstream.message) {
-        const msg = upstream.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
-        return fail(msg, {
-          status: res.status,
-          requestUrl: url,
-          upstream,
-        });
-      }
-
-      const models = dig(res.json, "models");
-      const names: string[] = Array.isArray(models)
-        ? models.map((m: unknown) => asString(dig(m, "name"))).filter(Boolean)
-        : [];
-
-      const list = target === "listModels" ? names : names.slice(0, 20);
-
-      // When verify=true, ping each model and filter to usable ones
-      const shouldVerify = parsed.data.verify === true && target === "listModels";
-      const finalModels = shouldVerify
-        ? await verifyGeminiModels(list, requestRoot, headers)
-        : list;
-
-      const isProd = process.env.NODE_ENV === "production";
-      const result =
-        target === "listModels"
-          ? { modelCount: finalModels.length, models: finalModels, truncated: false, totalListed: names.length, verified: shouldVerify }
-          : isProd
-            ? { modelCount: names.length }
-            : { modelCount: names.length, models: list, truncated: list.length !== names.length };
-      return c.json({
-        ok: true,
-        ...baseRequest,
-        latencyMs: Date.now() - started,
-        requestUrl: url,
-        result,
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return fail(msg, {
-        requestUrl: url,
-        code: "NETWORK_ERROR",
-      });
-    }
-  }
-
-  // Resolve model name (override > first non-empty setting > fallback)
-  const resolveModel = async (keys: string[], fallback: string) => {
-    const override = (parsed.data.model ?? "").trim();
-    if (override) return override;
-    for (const key of keys) {
-      const stored = (await getSetting(key)).trim();
-      if (stored) return stored;
-    }
-    return fallback;
-  };
+  // The request's apiKey and baseUrl are those of the provider the target
+  // talks to. The OpenAI-compatible probes are answered here, ahead of the
+  // Gemini setup further down: that setup takes the same two fields for
+  // Gemini's and stops at a missing Gemini key, which says nothing about these.
 
   // --- OpenAI-compatible model tests ---
   // When provider=openai, handle cardsModel/deepModel/utilityModel via chat completions
@@ -575,6 +395,292 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
       return c.json({ ok: false, target, latencyMs: Date.now() - started, model, error: { message: msg } });
     }
   }
+
+  // --- OpenAI-compatible test targets ---
+
+  if (target === "openaiBaseUrl" || target === "openaiListModels") {
+    const openaiApiKey = (parsed.data.apiKey ?? (await getSetting("openai_api_key"))).trim();
+    const openaiBaseUrlRaw = (parsed.data.baseUrl ?? (await getSetting("openai_base_url"))).trim();
+
+    if (!openaiBaseUrlRaw) {
+      return c.json({
+        ok: false,
+        target,
+        latencyMs: Date.now() - started,
+        error: { message: "OpenAI Base URL not configured.", hint: "Set the Base URL in AI Providers first." },
+      });
+    }
+
+    const normalizedBase = openaiBaseUrlRaw.replace(/\/+$/, "");
+    const modelsUrl = /\/v1\/?$/i.test(normalizedBase)
+      ? `${normalizedBase}/models`
+      : `${normalizedBase}/v1/models`;
+
+    if (target === "openaiBaseUrl") {
+      try {
+        const res = await fetchJson(modelsUrl, { method: "GET", timeoutMs: 15000 });
+        if (res.status === 200 || res.status === 401 || res.status === 403) {
+          return c.json({
+            ok: true,
+            target,
+            latencyMs: Date.now() - started,
+            requestUrl: modelsUrl,
+            result: {
+              status: res.status,
+              note: res.status === 200 ? "Base URL reachable." : "Base URL reachable (auth required).",
+            },
+          });
+        }
+        return c.json({
+          ok: false, target, latencyMs: Date.now() - started, requestUrl: modelsUrl,
+          error: { message: `HTTP ${res.status}: ${res.text.slice(0, 200)}` },
+        });
+      } catch (e) {
+        return c.json({
+          ok: false, target, latencyMs: Date.now() - started, requestUrl: modelsUrl,
+          error: { message: e instanceof Error ? e.message : String(e) },
+        });
+      }
+    }
+
+    // openaiListModels
+    if (!openaiApiKey) {
+      return c.json({
+        ok: false, target, latencyMs: Date.now() - started,
+        error: { message: "OpenAI API Key not configured.", hint: "Set the API key in AI Providers first." },
+      });
+    }
+
+    try {
+      const res = await fetchJson(modelsUrl, {
+        method: "GET",
+        headers: { "Authorization": `Bearer ${openaiApiKey}` },
+        timeoutMs: 15000,
+      });
+      if (res.status >= 400) {
+        const msg = asString(dig(res.json, "error", "message")) || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
+        return c.json({
+          ok: false, target, latencyMs: Date.now() - started, requestUrl: modelsUrl,
+          error: { message: msg },
+        });
+      }
+
+      // OpenAI format: { data: [{ id: "model-name" }] }
+      const data = dig(res.json, "data");
+      const models: string[] = Array.isArray(data)
+        ? data.map((m: unknown) => asString(dig(m, "id"))).filter(Boolean)
+        : [];
+
+      // When verify=true, ping each model and filter to usable ones
+      const shouldVerify = parsed.data.verify === true;
+      let finalModels = models;
+      if (shouldVerify && finalModels.length > 0) {
+        const chatPath = /\/v1\/?$/i.test(normalizedBase) ? "chat/completions" : "v1/chat/completions";
+        const chatUrl = `${normalizedBase}/${chatPath}`;
+        finalModels = await verifyOpenaiModels(finalModels, chatUrl, openaiApiKey);
+      }
+
+      return c.json({
+        ok: true,
+        target,
+        latencyMs: Date.now() - started,
+        requestUrl: modelsUrl,
+        result: { modelCount: finalModels.length, models: finalModels, truncated: false, totalListed: models.length, verified: shouldVerify },
+      });
+    } catch (e) {
+      return c.json({
+        ok: false, target, latencyMs: Date.now() - started, requestUrl: modelsUrl,
+        error: { message: e instanceof Error ? e.message : String(e) },
+      });
+    }
+  }
+
+  // --- Gemini: every target left is one of its probes ---
+
+  const apiKey = (parsed.data.apiKey ?? (await getSetting("gemini_api_key"))).trim();
+  const baseUrlRaw = (parsed.data.baseUrl ?? (await getSetting("gemini_base_url"))).trim();
+
+  // Build requestRoot in the same way @google/genai does for Gemini API
+  let requestRoot = "";
+  let warnings: string[] = [];
+  try {
+    const built = buildRequestRoot(baseUrlRaw);
+    requestRoot = built.requestRoot;
+    warnings = built.warnings;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return c.json({
+      ok: false,
+      target,
+      warnings,
+      latencyMs: Date.now() - started,
+      request: {
+        baseUrl: baseUrlRaw,
+        apiVersion: GEMINI_API_VERSION,
+        requestRoot: null,
+      },
+      error: {
+        message: msg,
+        hint: buildHint(msg, warnings, target),
+      },
+    });
+  }
+
+  const baseRequest = {
+    target,
+    warnings,
+    latencyMs: 0,
+    request: {
+      baseUrl: baseUrlRaw,
+      apiVersion: GEMINI_API_VERSION,
+      requestRoot,
+    },
+  };
+
+  async function fail(
+    msg: string,
+    extra: Record<string, unknown> = {},
+  ) {
+    const isProd = process.env.NODE_ENV === "production";
+    const safeExtra = isProd
+      ? Object.fromEntries(Object.entries(extra).filter(([k]) => k !== "upstream" && k !== "rawText"))
+      : extra;
+    return c.json({
+      ok: false,
+      ...baseRequest,
+      latencyMs: Date.now() - started,
+      ...safeExtra,
+      error: {
+        message: msg,
+        hint: buildHint(msg, warnings, target),
+        ...(isProd ? {} : extra["upstream"] ? { upstream: extra["upstream"] } : {}),
+      },
+    });
+  }
+
+  // --- Tests ---
+
+  // Base URL reachability test (does NOT require API key)
+  if (target === "baseUrl") {
+    const url = `${requestRoot}/models`;
+    try {
+      const res = await fetchJson(url, { method: "GET", timeoutMs: 15000 });
+      const upstream = extractUpstreamError(res.json);
+
+      // Treat 200/401/403 as "reachable". 401/403 usually means "API key required".
+      if (res.status === 200 || res.status === 401 || res.status === 403) {
+        const isProd = process.env.NODE_ENV === "production";
+        const result: Record<string, unknown> = {
+          status: res.status,
+          note:
+            res.status === 200
+              ? "Base URL reachable."
+              : "Base URL reachable (auth required).",
+        };
+        if (!isProd) result.upstream = upstream;
+        return c.json({
+          ok: true,
+          ...baseRequest,
+          latencyMs: Date.now() - started,
+          requestUrl: url,
+          result,
+        });
+      }
+
+      const msg = upstream.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
+      return fail(msg, {
+        status: res.status,
+        requestUrl: url,
+        upstream,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return fail(msg, {
+        requestUrl: url,
+        code: "NETWORK_ERROR",
+      });
+    }
+  }
+
+  // All other tests require an API key
+  if (!apiKey) {
+    const msg = "Gemini API Key not configured.";
+    return c.json({
+      ok: false,
+      ...baseRequest,
+      latencyMs: Date.now() - started,
+      error: {
+        message: msg,
+        hint: "Set the API key in AI Providers first.",
+      },
+    });
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+    "x-goog-api-key": apiKey,
+  };
+
+  if (target === "apiKey" || target === "listModels") {
+    const url = `${requestRoot}/models`;
+    try {
+      const res = await fetchJson(url, { headers, method: "GET", timeoutMs: 15000 });
+      const upstream = extractUpstreamError(res.json);
+      if (res.status >= 400 || upstream.message) {
+        const msg = upstream.message || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
+        return fail(msg, {
+          status: res.status,
+          requestUrl: url,
+          upstream,
+        });
+      }
+
+      const models = dig(res.json, "models");
+      const names: string[] = Array.isArray(models)
+        ? models.map((m: unknown) => asString(dig(m, "name"))).filter(Boolean)
+        : [];
+
+      const list = target === "listModels" ? names : names.slice(0, 20);
+
+      // When verify=true, ping each model and filter to usable ones
+      const shouldVerify = parsed.data.verify === true && target === "listModels";
+      const finalModels = shouldVerify
+        ? await verifyGeminiModels(list, requestRoot, headers)
+        : list;
+
+      const isProd = process.env.NODE_ENV === "production";
+      const result =
+        target === "listModels"
+          ? { modelCount: finalModels.length, models: finalModels, truncated: false, totalListed: names.length, verified: shouldVerify }
+          : isProd
+            ? { modelCount: names.length }
+            : { modelCount: names.length, models: list, truncated: list.length !== names.length };
+      return c.json({
+        ok: true,
+        ...baseRequest,
+        latencyMs: Date.now() - started,
+        requestUrl: url,
+        result,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return fail(msg, {
+        requestUrl: url,
+        code: "NETWORK_ERROR",
+      });
+    }
+  }
+
+  // Resolve model name (override > first non-empty setting > fallback)
+  const resolveModel = async (keys: string[], fallback: string) => {
+    const override = (parsed.data.model ?? "").trim();
+    if (override) return override;
+    for (const key of keys) {
+      const stored = (await getSetting(key)).trim();
+      if (stored) return stored;
+    }
+    return fallback;
+  };
 
   if (target === "generalModel") {
     const model = await resolveModel(["general_model"], "gemini-2.5-flash");
@@ -744,105 +850,6 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return fail(msg, { requestUrl: url, model, code: "NETWORK_ERROR" });
-    }
-  }
-
-  // --- OpenAI-compatible test targets ---
-
-  if (target === "openaiBaseUrl" || target === "openaiListModels") {
-    const openaiApiKey = (parsed.data.apiKey ?? (await getSetting("openai_api_key"))).trim();
-    const openaiBaseUrlRaw = (parsed.data.baseUrl ?? (await getSetting("openai_base_url"))).trim();
-
-    if (!openaiBaseUrlRaw) {
-      return c.json({
-        ok: false,
-        target,
-        latencyMs: Date.now() - started,
-        error: { message: "OpenAI Base URL not configured.", hint: "Set the Base URL in AI Providers first." },
-      });
-    }
-
-    const normalizedBase = openaiBaseUrlRaw.replace(/\/+$/, "");
-    const modelsUrl = /\/v1\/?$/i.test(normalizedBase)
-      ? `${normalizedBase}/models`
-      : `${normalizedBase}/v1/models`;
-
-    if (target === "openaiBaseUrl") {
-      try {
-        const res = await fetchJson(modelsUrl, { method: "GET", timeoutMs: 15000 });
-        if (res.status === 200 || res.status === 401 || res.status === 403) {
-          return c.json({
-            ok: true,
-            target,
-            latencyMs: Date.now() - started,
-            requestUrl: modelsUrl,
-            result: {
-              status: res.status,
-              note: res.status === 200 ? "Base URL reachable." : "Base URL reachable (auth required).",
-            },
-          });
-        }
-        return c.json({
-          ok: false, target, latencyMs: Date.now() - started, requestUrl: modelsUrl,
-          error: { message: `HTTP ${res.status}: ${res.text.slice(0, 200)}` },
-        });
-      } catch (e) {
-        return c.json({
-          ok: false, target, latencyMs: Date.now() - started, requestUrl: modelsUrl,
-          error: { message: e instanceof Error ? e.message : String(e) },
-        });
-      }
-    }
-
-    // openaiListModels
-    if (!openaiApiKey) {
-      return c.json({
-        ok: false, target, latencyMs: Date.now() - started,
-        error: { message: "OpenAI API Key not configured.", hint: "Set the API key in AI Providers first." },
-      });
-    }
-
-    try {
-      const res = await fetchJson(modelsUrl, {
-        method: "GET",
-        headers: { "Authorization": `Bearer ${openaiApiKey}` },
-        timeoutMs: 15000,
-      });
-      if (res.status >= 400) {
-        const msg = asString(dig(res.json, "error", "message")) || `HTTP ${res.status}: ${res.text.slice(0, 200)}`;
-        return c.json({
-          ok: false, target, latencyMs: Date.now() - started, requestUrl: modelsUrl,
-          error: { message: msg },
-        });
-      }
-
-      // OpenAI format: { data: [{ id: "model-name" }] }
-      const data = dig(res.json, "data");
-      const models: string[] = Array.isArray(data)
-        ? data.map((m: unknown) => asString(dig(m, "id"))).filter(Boolean)
-        : [];
-
-      // When verify=true, ping each model and filter to usable ones
-      const shouldVerify = parsed.data.verify === true;
-      let finalModels = models;
-      if (shouldVerify && finalModels.length > 0) {
-        const chatPath = /\/v1\/?$/i.test(normalizedBase) ? "chat/completions" : "v1/chat/completions";
-        const chatUrl = `${normalizedBase}/${chatPath}`;
-        finalModels = await verifyOpenaiModels(finalModels, chatUrl, openaiApiKey);
-      }
-
-      return c.json({
-        ok: true,
-        target,
-        latencyMs: Date.now() - started,
-        requestUrl: modelsUrl,
-        result: { modelCount: finalModels.length, models: finalModels, truncated: false, totalListed: models.length, verified: shouldVerify },
-      });
-    } catch (e) {
-      return c.json({
-        ok: false, target, latencyMs: Date.now() - started, requestUrl: modelsUrl,
-        error: { message: e instanceof Error ? e.message : String(e) },
-      });
     }
   }
 
