@@ -9,7 +9,7 @@ import { EXPRESSIONS_KEY, useExpressions } from "@/client/hooks/useExpressions";
 import { EXPRESSION_LIMITS, type AttemptResponse, type ExpressionDetail, type SceneResponse, type TryItem } from "@/shared/expressions";
 import { TryPanel } from "../TryPanel";
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 
 const SCENE = "朋友问起那次争吵。你想说，是过了几天自己才想通的。";
 const INTENT = "想说：我突然明白了";
@@ -42,6 +42,8 @@ const refuses = (status: number, error: string, code?: string) => says({ error, 
 // one answer per request, in the order the requests arrive.
 let server: {
   due: Array<TryItem[] | "fails">;
+  /** When set, what is due is not answered before this. */
+  hold: Promise<void> | null;
   scene: Answer;
   reveal: Answer;
   /** An attempt, a second judgement and an overturn all take the next one; a pass with the answer when there is none. */
@@ -65,7 +67,7 @@ function route(url: string): Promise<Response> {
   if (last === "expressions") return reply(says({ expressions: [] }));
   if (last === "try") {
     const due = server.due.shift() ?? [];
-    return reply(due === "fails" ? refuses(500, "boom") : says({ items: due }));
+    return Promise.resolve(server.hold).then(() => reply(due === "fails" ? refuses(500, "boom") : says({ items: due })));
   }
   if (last === "scene") return reply(server.scene);
   if (last === "reveal") return reply(server.reveal);
@@ -75,8 +77,9 @@ function route(url: string): Promise<Response> {
 beforeEach(() => {
   sent = [];
   hanging = [];
-  server = { due: [[item()]], scene: says(ORIGINAL), reveal: says(REVEALED), judgements: [] };
+  server = { due: [[item()]], hold: null, scene: says(ORIGINAL), reveal: says(REVEALED), judgements: [] };
   vi.mocked(toast.error).mockClear();
+  vi.mocked(toast.info).mockClear();
   // The prototype of the storage that is really there. Under Node 26 that is
   // Node's own, not the `Storage` jsdom puts on the global: a spy on
   // `Storage.prototype` would see no write at all.
@@ -99,7 +102,9 @@ afterEach(() => {
     // Unmounted here as well: a failure above would otherwise leave this test's page standing under the next one.
     cleanup();
     hanging.forEach((end) => end());
-    stored.mockRestore();
+    // The storage spy, and a clock or a hidden page some test left behind.
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(document, "visibilityState");
     vi.unstubAllGlobals();
   }
 });
@@ -166,14 +171,19 @@ describe("试一条: what it asks for", () => {
     expect(urls("/try")).toEqual(["/api/expressions/try", "/api/expressions/try"]);
   });
 
-  it("says so when nothing is due, and has nothing more to offer", async () => {
-    server.due = [[]];
+  it("says so when nothing is due, and looks again when asked", async () => {
+    server.due = [[], [item(), item({ id: 8, prompt: "另一个处境" })]];
     renderPanel();
     expect(screen.getByRole("heading", { name: "试一条" })).toBeInTheDocument();
     expect(screen.queryByRole("button")).toBeNull();
 
     expect(await screen.findByText("现在没有到时间的。放进「想用」的条目，隔一天会出现在这里。")).toBeInTheDocument();
-    expect(screen.queryByRole("button")).toBeNull();
+    // What is not due now will be later, with the page still open. All of it comes, as on opening the page.
+    press(screen, "再看一次");
+    await card("另一个处境");
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.queryByText(/现在没有到时间的/)).toBeNull();
+    expect(urls("/try")).toEqual(["/api/expressions/try", "/api/expressions/try"]);
   });
 
   it("offers to ask again when the request failed", async () => {
@@ -255,10 +265,10 @@ describe("the hint ladder", () => {
     await waitFor(() => expect(posted("attempts")).toEqual([{ text: "It dawned on me.", cue: "need", prompt: SCENE }]));
   });
 
-  // Every write on the page has what is on screen of the library read again,
-  // a scene that was refused too. While that request is out the card says what
-  // it said: it does not go back to waiting.
-  it("goes on saying so while the scene is read again after a write", async () => {
+  // A scene on screen can be read again (the connection coming back does
+  // it), a scene that was refused too. While that request is out the card says
+  // what it said: it does not go back to waiting.
+  it("goes on saying so while the scene is read again", async () => {
     server.scene = refuses(404, "No scene", "NO_SCENE");
     const client = renderPanel();
     const c = await card();
@@ -285,6 +295,18 @@ describe("the hint ladder", () => {
     press(c, "给点提示");
     answerWith(c, "It dawned on me.");
     await waitFor(() => expect(posted("attempts")).toEqual([{ text: "It dawned on me.", cue: "need", prompt: SCENE }]));
+  });
+
+  // The other writes have what is on screen of the library read again. Where
+  // an entry was first met does not change with a sentence written about it.
+  it("does not read the scene again after an attempt", async () => {
+    renderPanel();
+    const c = await card();
+    await climb(c, 2);
+    answerWith(c, "It dawned on me.");
+    await c.findByText("用上了");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(urls("/scene")).toEqual(["/api/expressions/7/scene"]);
   });
 
   // The scene stays in the query cache for a while. A card for the same entry
@@ -524,8 +546,9 @@ describe("再来一条", () => {
     expect(screen.getAllByRole("listitem").map((li) => li.firstChild?.textContent)).toEqual(["甲", "丙", "丁"]);
 
     press(screen, "再来一条");
-    expect(await screen.findByText("没有到时间的了")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "再来一条" })).toBeNull();
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith("没有到时间的了"));
+    // Still offered: what is not due now will be later, with the page still open.
+    expect(screen.getByRole("button", { name: "再来一条" })).toBeEnabled();
     expect(urls("/try")).toEqual(["/api/expressions/try", "/api/expressions/try?exclude=1,2,3", "/api/expressions/try?exclude=1,2,3,4"]);
     // Never a count of what is due or done.
     expect(screen.getByRole("heading", { name: "试一条" }).closest("section")).not.toHaveTextContent(/\d/);
@@ -541,6 +564,95 @@ describe("再来一条", () => {
 
     press(screen, "再来一条");
     await card("另一个处境");
+  });
+});
+
+// The page is not always opened anew: a pinned tab stays for days. Coming back
+// to it is what opening it was, once enough time has gone by.
+describe("a page left open", () => {
+  /** The page comes into view again, so many hours after this is called. */
+  function comeBack(hours: number) {
+    const then = Date.now() + hours * 3_600_000;
+    vi.spyOn(Date, "now").mockReturnValue(then);
+    act(() => void document.dispatchEvent(new Event("visibilitychange")));
+  }
+
+  it("starts over when it is looked at again hours later", async () => {
+    // By then the entry answered yesterday is due again, asked for by its intent.
+    server.due = [[item()], [item({ id: 8, prompt: "另一个处境" }), item({ prompt: INTENT, cue: "need" })]];
+    renderPanel();
+    answerWith(await card(), "It dawned on me.");
+    await screen.findByText("用上了");
+
+    comeBack(20);
+    await card("另一个处境");
+    // Asked as on opening the page: nothing is held back for having been on screen.
+    expect(urls("/try")).toEqual(["/api/expressions/try", "/api/expressions/try"]);
+    // Yesterday's judgement is gone, and its entry has a card of its own again, to be answered.
+    expect(screen.queryByText("用上了")).toBeNull();
+    expect(document.body.innerHTML).not.toContain("dawned");
+    expect(box(await card(INTENT))).toHaveValue("");
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  // A card dropped for a question gone stale was dropped for that question, not for good.
+  it("asks again for an entry whose card had been dropped", async () => {
+    server.due = [[item()], [item({ prompt: INTENT, cue: "need" })]];
+    server.judgements = [refuses(400, "The question is not the stored scene", "VALIDATION_ERROR")];
+    renderPanel();
+    answerWith(await card(), "It dawned on me.");
+    await waitFor(() => expect(screen.queryByText(SCENE)).toBeNull());
+
+    comeBack(20);
+    expect(box(await card(INTENT))).toHaveValue("");
+  });
+
+  it("looks again by itself where it had nothing to show", async () => {
+    server.due = [[], [item()]];
+    renderPanel();
+    await screen.findByText(/现在没有到时间的/);
+    comeBack(20);
+    await card();
+  });
+
+  it("leaves everything as it is while a sentence is half written", async () => {
+    server.due = [[item()], [item({ id: 8, prompt: "另一个处境" })]];
+    renderPanel();
+    const c = await card();
+    fireEvent.change(box(c), { target: { value: "It dawned" } });
+    comeBack(20);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(urls("/try")).toEqual(["/api/expressions/try"]);
+    expect(box(c)).toHaveValue("It dawned");
+  });
+
+  it("keeps a sentence begun while the new round was on its way", async () => {
+    server.due = [[item()], [item({ id: 8, prompt: "另一个处境" })]];
+    renderPanel();
+    const c = await card();
+    let arrive!: () => void;
+    server.hold = new Promise((resolve) => (arrive = resolve));
+    comeBack(20);
+    await waitFor(() => expect(urls("/try")).toHaveLength(2));
+    fireEvent.change(box(c), { target: { value: "It dawned" } });
+    await act(async () => {
+      arrive();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(box(c)).toHaveValue("It dawned");
+    expect(screen.queryByText("另一个处境")).toBeNull();
+  });
+
+  it("does not ask again within the hour, or while it is out of view", async () => {
+    server.due = [[item()], [item({ id: 8, prompt: "另一个处境" })]];
+    renderPanel();
+    await card();
+    comeBack(0.9);
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    comeBack(20);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(urls("/try")).toEqual(["/api/expressions/try"]);
+    expect(screen.getByText(SCENE)).toBeInTheDocument();
   });
 });
 

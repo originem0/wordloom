@@ -72,13 +72,15 @@ export const useAnnotate = () => useWrite((id: number) => send("POST", `/${id}/a
  * masked entry this once. So the answer goes to the caller and nowhere else
  * (a reveal left in the cache would be shown again with no row saying so), and
  * since each of them wrote to a timeline, whatever is on screen of the library
- * is read again.
+ * is read again. Except the scenes in 试一条: none of these writes changes
+ * where an entry was first met.
  */
 function useAct<V, R>(request: (vars: V) => Promise<R>) {
   const qc = useQueryClient();
   // Not waited for: the caller gets its answer before the lists have reloaded.
   // After signing out there is nothing left to reload, so no guard is needed.
-  return useMutation({ mutationFn: request, gcTime: 0, onSuccess: () => void qc.invalidateQueries({ queryKey: EXPRESSIONS_KEY }) });
+  const reload = () => void qc.invalidateQueries({ queryKey: EXPRESSIONS_KEY, predicate: (q) => q.queryKey[2] !== "scene" });
+  return useMutation({ mutationFn: request, gcTime: 0, onSuccess: reload });
 }
 
 /** Answers with the entry unmasked, once. Hold it in the component that asked; the next read is masked again. */

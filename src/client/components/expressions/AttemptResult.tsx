@@ -6,6 +6,18 @@ import type { AttemptResponse } from "@/shared/expressions";
 import { Marked } from "./ExpressionDetail";
 import { VERDICT_LABELS } from "./shared";
 
+/** The English of an entry with its gloss, as a judgement or a reveal brought it. */
+export function Answer({ text, focus, gloss }: NonNullable<AttemptResponse["answer"]>) {
+  return (
+    <div className="space-y-1 rounded-md bg-muted/50 p-3">
+      <p className="whitespace-pre-line">
+        <Marked text={text} mark={focus} />
+      </p>
+      {gloss && <p className="whitespace-pre-line text-xs text-muted-foreground">补注 · AI 写的：{gloss}</p>}
+    </div>
+  );
+}
+
 /**
  * What came back for a sentence the user wrote, in 试一条 or against a masked
  * hit in 找. The caller holds the result and gets every later state of it (a
@@ -52,12 +64,7 @@ export function AttemptResult({ result, onChange }: { result: AttemptResponse; o
         </p>
       ))}
       {result.answer ? (
-        <div className="space-y-1 rounded-md bg-muted/50 p-3">
-          <p className="whitespace-pre-line">
-            <Marked text={result.answer.text} mark={result.answer.focus} />
-          </p>
-          {result.answer.gloss && <p className="whitespace-pre-line text-xs text-muted-foreground">补注 · AI 写的：{result.answer.gloss}</p>}
-        </div>
+        <Answer {...result.answer} />
       ) : (
         result.intent && <p className="text-muted-foreground">没用上要练的那个说法。给你一句提示再试：{result.intent}</p>
       )}

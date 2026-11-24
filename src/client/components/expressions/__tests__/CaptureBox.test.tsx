@@ -56,6 +56,11 @@ function renderBox(entry = "/") {
 
 const type = (box: HTMLTextAreaElement, value: string) => fireEvent.change(box, { target: { value } });
 
+// The prototype of the storage that is really there. Under Node 26 that is
+// Node's own, not the `Storage` jsdom puts on the global: a spy on
+// `Storage.prototype` would see no write at all.
+const watchStorage = () => vi.spyOn(Object.getPrototypeOf(sessionStorage) as Storage, "setItem");
+
 /** React builds onSelect from focus plus mouse and key events, not from the native "select" event. */
 function select(box: HTMLTextAreaElement, part: string) {
   const start = box.value.indexOf(part);
@@ -163,7 +168,7 @@ describe("the source tag", () => {
   });
 
   it("is cleared with one click, and lives in memory only", async () => {
-    const stored = vi.spyOn(Storage.prototype, "setItem");
+    const stored = watchStorage();
     const { box, onSaved } = renderBox();
     fireEvent.click(screen.getByRole("button", { name: "影视" }));
     expect(stored).not.toHaveBeenCalled();
@@ -317,7 +322,7 @@ async function askAndWait(box: HTMLTextAreaElement, need: string, answer = found
 
 describe("问", () => {
   it("sends the whole box, trimmed, in the body, and never in a URL or in storage", async () => {
-    const stored = vi.spyOn(Storage.prototype, "setItem");
+    const stored = watchStorage();
     const { box, onSaved } = renderBox();
     answers.push(found());
     type(box, `  ${NEED}  `);

@@ -8,7 +8,7 @@ import { useAttempt, useCapture, usePatchExpression, useReveal } from "@/client/
 import {
   EXPRESSION_LIMITS, type AttemptResponse, type CaptureRequest, type ExpressionDetail, type ExpressionSummary, type FindHit, type FindResponse, type Suggestion,
 } from "@/shared/expressions";
-import { AttemptResult } from "./AttemptResult";
+import { Answer, AttemptResult } from "./AttemptResult";
 import { Marked } from "./ExpressionDetail";
 import { SOURCE_LABELS, day, titleOf } from "./shared";
 
@@ -81,14 +81,7 @@ function Masked({ e, need, onResolved }: { e: ExpressionSummary; need: string; o
       <p className="whitespace-pre-line">{titleOf(e)}</p>
       <p className={MUTED}>{where(e)}</p>
       {result && <AttemptResult result={result} onChange={setResult} />}
-      {shown && !result?.answer && (
-        <div className="space-y-1 rounded-md bg-muted/50 p-3">
-          <p className="whitespace-pre-line">
-            <Marked text={titleOf(shown)} mark={shown.focus} />
-          </p>
-          {shown.gloss && <p className={`whitespace-pre-line ${MUTED}`}>补注 · AI 写的：{shown.gloss}</p>}
-        </div>
-      )}
+      {shown && !result?.answer && <Answer text={titleOf(shown)} focus={shown.focus} gloss={shown.gloss} />}
       {/* A judgement that did not come back leaves the English unseen: looking at it stays possible. */}
       {!shown && !result?.answer && (
         <div className="flex flex-wrap items-center gap-1.5">

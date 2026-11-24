@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/client/components/ui/button";
 import { useAttempt, useReveal, useScene, useTry } from "@/client/hooks/useExpressions";
 import { ApiError } from "@/client/lib/api";
 import { EXPRESSION_LIMITS, type AttemptResponse, type ExpressionDetail, type TryItem } from "@/shared/expressions";
-import { AttemptResult } from "./AttemptResult";
-import { Marked } from "./ExpressionDetail";
+import { Answer, AttemptResult } from "./AttemptResult";
 import { AREA_CLASS } from "./shared";
+
+const HOUR = 3_600_000;
 
 /**
  * One question. The level is how much was on screen before the answer: the
@@ -42,7 +43,7 @@ function TryCard({ item, onGone }: { item: TryItem; onGone: () => void }) {
       <p className="whitespace-pre-line">{original.scene}</p>
     </div>
   ) : (
-    // Answered, and nothing to show: refused. Not `isError`, which is off again whenever a write has the scene read anew.
+    // Answered, and nothing to show: refused. Not `isError`, which is off again whenever the scene is read anew.
     wantScene && (scene.isFetched ? <p className="text-muted-foreground">这一条没有原场景</p> : <Loader2 className="size-4 animate-spin text-muted-foreground" />)
   );
 
@@ -83,14 +84,7 @@ function TryCard({ item, onGone }: { item: TryItem; onGone: () => void }) {
       {/* Once the box is gone, the sentence the judgement is about stays readable. */}
       {!open && <p className="whitespace-pre-line text-muted-foreground">你写的：{said}</p>}
       {result && <AttemptResult result={result} onChange={setResult} />}
-      {answer && !result?.answer && (
-        <div className="space-y-1 rounded-md bg-muted/50 p-3">
-          <p className="whitespace-pre-line">
-            <Marked text={answer.text ?? ""} mark={answer.focus} />
-          </p>
-          {answer.gloss && <p className="whitespace-pre-line text-xs text-muted-foreground">补注 · AI 写的：{answer.gloss}</p>}
-        </div>
-      )}
+      {answer && !result?.answer && <Answer text={answer.text ?? ""} focus={answer.focus} gloss={answer.gloss} />}
       {open && (
         <>
           {answer && <p className="text-xs text-muted-foreground">看过答案再写一句，不计档位</p>}
@@ -120,24 +114,43 @@ export function TryPanel() {
   const [items, setItems] = useState<TryItem[] | null>(null);
   // Cards taken off again. Their ids stay in `items`: what was shown once is not asked for a second time.
   const [gone, setGone] = useState<number[]>([]);
-  const [dry, setDry] = useState(false);
+  // How many times the panel has started over. Its cards are keyed by it: none carries over into the next round.
+  const [round, setRound] = useState(0);
+  const panel = useRef<HTMLElement>(null);
+  const drafting = () => [...panel.current!.querySelectorAll("textarea")].some((box) => box.value.trim());
 
-  const load = () => more.mutate([], { onSuccess: (r) => setItems(r.items) });
-  // Once, on mount. Not a query: that would reload with the list after every
-  // write, and the question must not change under a sentence being typed.
-  // (Twice under StrictMode in development; the second answer is the one kept.)
+  const load = () =>
+    more.mutate([], {
+      onSuccess: (r) => {
+        // A sentence begun while this was on its way keeps its card.
+        if (drafting()) return;
+        setItems(r.items);
+        setGone([]);
+        setRound((n) => n + 1);
+      },
+    });
+  // Asked on mount, and anew when the page comes back into view an hour or
+  // more after the panel last asked: left open overnight, it would go on
+  // showing yesterday's judgements, keep those entries from being asked again,
+  // and say nothing is due when something is. Never over a half-written
+  // sentence, and not a query, which would reload with the list after every
+  // write: the question must not change under a sentence being typed. (Twice
+  // under StrictMode in development; the second answer is the one kept.)
   useEffect(() => {
-    load();
+    const look = () => document.visibilityState === "visible" && Date.now() - more.submittedAt >= HOUR && !drafting() && load();
+    look();
+    document.addEventListener("visibilitychange", look);
+    return () => document.removeEventListener("visibilitychange", look);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [more.submittedAt]);
   const another = (shown: TryItem[]) =>
     more.mutate(shown.map((i) => i.id), {
-      onSuccess: ({ items: [next] }) => (next ? setItems([...shown, next]) : setDry(true)),
+      onSuccess: ({ items: [next] }) => (next ? setItems([...shown, next]) : toast.info("没有到时间的了")),
       onError: (e) => toast.error(`没有取到：${e.message}`),
     });
 
   return (
-    <section className="space-y-2">
+    <section ref={panel} className="space-y-2">
       <h3 className="font-medium">试一条</h3>
       {!items ? (
         more.isError ? (
@@ -148,23 +161,22 @@ export function TryPanel() {
         ) : (
           <Loader2 className="size-4 animate-spin text-muted-foreground" />
         )
-      ) : !items.length ? (
-        <p className="text-sm text-muted-foreground">现在没有到时间的。放进「想用」的条目，隔一天会出现在这里。</p>
       ) : (
         <>
-          <ul className="space-y-2">
-            {items.filter((i) => !gone.includes(i.id)).map((item) => (
-              <TryCard key={item.id} item={item} onGone={() => setGone((ids) => [...ids, item.id])} />
-            ))}
-          </ul>
-          {dry ? (
-            <p className="text-sm text-muted-foreground">没有到时间的了</p>
+          {items.length ? (
+            <ul key={round} className="space-y-2">
+              {items.filter((i) => !gone.includes(i.id)).map((item) => (
+                <TryCard key={item.id} item={item} onGone={() => setGone((ids) => [...ids, item.id])} />
+              ))}
+            </ul>
           ) : (
-            <Button size="sm" variant="outline" disabled={more.isPending} onClick={() => another(items)}>
-              {more.isPending && <Loader2 className="animate-spin" />}
-              再来一条
-            </Button>
+            <p className="text-sm text-muted-foreground">现在没有到时间的。放进「想用」的条目，隔一天会出现在这里。</p>
           )}
+          {/* Always offered: what is not due now will be later, with the page still open. */}
+          <Button size="sm" variant="outline" disabled={more.isPending} onClick={() => (items.length ? another(items) : load())}>
+            {more.isPending && <Loader2 className="animate-spin" />}
+            {items.length ? "再来一条" : "再看一次"}
+          </Button>
         </>
       )}
     </section>
