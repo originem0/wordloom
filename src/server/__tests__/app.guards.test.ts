@@ -117,6 +117,15 @@ describe("what a visitor can reach", () => {
         "PATCH /api/expressions/:id{[0-9]+}",
         "POST /api/expressions/:id{[0-9]+}/encounters",
         "POST /api/expressions/:id{[0-9]+}/annotate",
+        "POST /api/expressions/:id{[0-9]+}/reveal",
+        "GET /api/expressions/:id{[0-9]+}/scene",
+        "GET /api/expressions/try",
+        "POST /api/expressions/:id{[0-9]+}/attempts",
+        "POST /api/expressions/attempts/:encounterId{[0-9]+}/judge",
+        "POST /api/expressions/attempts/:encounterId{[0-9]+}/overturn",
+        "POST /api/expressions/find",
+        "POST /api/expressions/pick",
+        "GET /api/expressions/stats",
       ]),
     );
 

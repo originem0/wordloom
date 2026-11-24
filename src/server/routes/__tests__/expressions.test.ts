@@ -119,14 +119,23 @@ describe("the guard on the expression library", () => {
   const send = (method: string, path: string, cookie: boolean) =>
     req(path, { method, cookie, ...(method === "GET" ? {} : { body: {} }) });
 
-  it("is probed on all six routes", () => {
+  it("is probed on all fifteen routes", () => {
     expect(routes().map(([method, path]) => `${method} ${path}`).sort()).toEqual([
       "GET /api/expressions",
       "GET /api/expressions/1",
+      "GET /api/expressions/1/scene",
+      "GET /api/expressions/stats",
+      "GET /api/expressions/try",
       "PATCH /api/expressions/1",
       "POST /api/expressions",
       "POST /api/expressions/1/annotate",
+      "POST /api/expressions/1/attempts",
       "POST /api/expressions/1/encounters",
+      "POST /api/expressions/1/reveal",
+      "POST /api/expressions/attempts/1/judge",
+      "POST /api/expressions/attempts/1/overturn",
+      "POST /api/expressions/find",
+      "POST /api/expressions/pick",
     ]);
   });
 
