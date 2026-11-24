@@ -317,7 +317,8 @@ describe("capture", () => {
   it("is all or nothing: an entry is never left without its met row", async () => {
     await db.run(sql`create trigger refuse_met before insert on encounters begin select raise(abort, 'refused'); end`);
     try {
-      const res = await req("/api/expressions", { body: { text: `kind of ${MARKER}` } });
+      // The second line is shaped like a stack frame, the one thing the log keeps.
+      const res = await req("/api/expressions", { body: { text: `kind of ${MARKER}\n    at ${MARKER} (home:1:1)` } });
       expect(res.status).toBe(500);
       expect(await res.json()).toEqual({ error: "Internal server error", code: "INTERNAL_ERROR" });
     } finally {
@@ -325,8 +326,9 @@ describe("capture", () => {
     }
     expect(await stored()).toHaveLength(0);
     expect(model).not.toHaveBeenCalled();
-    // The query that failed had the sentence among its values.
-    expect(printed()).toContain("Unhandled error: DrizzleQueryError in POST /api/expressions");
+    // The query that failed had the sentence among its values: the log says
+    // what kind of error it was and where, and not what the error said.
+    expect(printed()).toMatch(/Unhandled error: DrizzleQueryError in POST \/api\/expressions\n\s+at \S/);
     expect(printed()).not.toContain(MARKER);
   });
 });

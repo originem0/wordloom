@@ -193,6 +193,7 @@ export interface JsonCall {
 const JSON_CALL_TIMEOUT_MS = 45_000;
 
 export async function runJsonCall(opts: {
+  semaphore: Semaphore;
   modelKeys: string[];
   defaultModel: string;
   label: string;
@@ -200,7 +201,18 @@ export async function runJsonCall(opts: {
 }): Promise<unknown> {
   const model = (await getFirstSetting(opts.modelKeys)) || opts.defaultModel;
   if (!model) throw new Error(`No model configured for ${opts.label}. Set it in AI Providers.`);
-  const text = await withTimeout((signal) => opts.run(model, signal), JSON_CALL_TIMEOUT_MS);
+  // The wait for a slot runs on the same clock as the call. Taken before the
+  // clock started, a call queued behind a batch of cards could hold its
+  // request for the queue's 30 s and then for 45 more.
+  const text = await withTimeout(async (signal) => {
+    await acquireSemaphore(opts.semaphore);
+    try {
+      signal.throwIfAborted();
+      return await opts.run(model, signal);
+    } finally {
+      opts.semaphore.release();
+    }
+  }, JSON_CALL_TIMEOUT_MS);
   try {
     return parseJsonLenient(text);
   } catch {

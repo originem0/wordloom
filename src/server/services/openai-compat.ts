@@ -304,26 +304,22 @@ ${text}`,
 // ---------------------------------------------------------------------------
 
 export async function openaiJson(opts: JsonCall): Promise<unknown> {
-  await acquireSemaphore(openaiSemaphore);
-  try {
-    return await runJsonCall({
-      modelKeys: [`${opts.route}_openai_model`, "cards_openai_model"],
-      defaultModel: "",
-      label: `${opts.label} (OpenAI)`,
-      run: (model, signal) =>
-        openaiChat({
-          signal,
-          model,
-          messages: [
-            {
-              role: "system",
-              content: `${opts.system}\n\nRespond in JSON only. No markdown fences, no explanation — just the JSON object.`,
-            },
-            { role: "user", content: opts.user },
-          ],
-        }),
-    });
-  } finally {
-    openaiSemaphore.release();
-  }
+  return runJsonCall({
+    semaphore: openaiSemaphore,
+    modelKeys: [`${opts.route}_openai_model`, "cards_openai_model"],
+    defaultModel: "",
+    label: `${opts.label} (OpenAI)`,
+    run: (model, signal) =>
+      openaiChat({
+        signal,
+        model,
+        messages: [
+          {
+            role: "system",
+            content: `${opts.system}\n\nRespond in JSON only. No markdown fences, no explanation — just the JSON object.`,
+          },
+          { role: "user", content: opts.user },
+        ],
+      }),
+  });
 }

@@ -157,6 +157,16 @@ app.get("*", (c) => {
   return c.text("Not found", 404);
 });
 
+// Where an error was thrown, without what it says: its stack past the message.
+// Cut at the message rather than filtered for "at" lines, because a message
+// that quotes user text can contain a line of that shape.
+function framesOf(err: Error): string {
+  const stack = err.stack ?? "";
+  const at = stack.indexOf(err.message);
+  if (at < 0) return "";
+  return stack.slice(at + err.message.length).split("\n").filter((line) => /^\s+at /.test(line)).join("\n");
+}
+
 // Global error handler. The real error goes to the journal; the client gets a
 // fixed string, because err.message here can carry upstream URLs, SQL, or
 // parser internals to anonymous callers.
@@ -165,10 +175,13 @@ app.onError((err, c) => {
   if (err instanceof SyntaxError) {
     return c.json({ error: "Malformed request body", code: "BAD_REQUEST" }, 400);
   }
-  // Under a private route not even the journal gets the error itself: a
-  // failed query's message carries its bound values, there the user's text.
-  const isPrivate = c.req.path.startsWith("/api/expressions");
-  console.error("Unhandled error:", isPrivate ? `${err.constructor.name} in ${c.req.method} ${c.req.path}` : err);
+  // Under a private route not even the journal gets the message: a failed
+  // query's carries its bound values, there the user's text.
+  if (c.req.path.startsWith("/api/expressions")) {
+    console.error(`Unhandled error: ${err.constructor.name} in ${c.req.method} ${c.req.path}\n${framesOf(err)}`);
+  } else {
+    console.error("Unhandled error:", err);
+  }
   return c.json({ error: "Internal server error", code: "INTERNAL_ERROR" }, 500);
 });
 

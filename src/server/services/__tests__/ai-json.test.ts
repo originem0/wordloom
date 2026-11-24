@@ -159,6 +159,26 @@ describe("a JSON call is one attempt with its own deadline", () => {
     expect(gateway).toHaveBeenCalledTimes(1);
   });
 
+  it("spends the wait for a slot out of the same 45 s", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await configure(GATEWAY);
+    gateway.mockImplementation(hang);
+    // Three run at a time, so a fourth queues until one of them gives up.
+    const first = [1, 2, 3].map(() => generateJson("expressions", CALL).catch(() => "gave up"));
+    await vi.waitFor(() => expect(gateway).toHaveBeenCalledTimes(3));
+    await vi.advanceTimersByTimeAsync(20_000);
+    const fourth = generateJson("expressions", CALL).catch((err: Error) => err.message);
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(await Promise.all(first)).toEqual(["gave up", "gave up", "gave up"]);
+    await vi.waitFor(() => expect(gateway).toHaveBeenCalledTimes(4));
+    // It queued for 25 s, so the request it finally sends has 20 s, not 45.
+    await vi.advanceTimersByTimeAsync(19_000);
+    expect(gateway.mock.calls[3][1].signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(gateway.mock.calls[3][1].signal?.aborted).toBe(true);
+    expect(await fourth).toBe("timeout after 45000ms");
+  });
+
   it("gives its slot back when it fails", async () => {
     await configure(GATEWAY);
     gateway.mockResolvedValue(new Response("no", { status: 500 }));
