@@ -136,10 +136,12 @@ describe("a visitor at /", () => {
     await authAsked();
     answerAuth(me(true));
     expect(await screen.findByText("还没有收下任何表达。")).toBeInTheDocument();
-    // The numbers are asked for once the list has answered; 试一条 asks at the same point.
+    // The numbers are asked for once the list has answered; 试一条 asks at the same point, on its own, once.
     await waitFor(() => expect(requested()).toContain("/api/expressions/stats"));
+    await waitFor(() => expect(requested()).toContain("/api/expressions/try"));
     expect(requested().slice(0, 2)).toEqual(["/api/auth/me", "/api/expressions"]);
     expect(requested().filter((url) => url === "/api/expressions")).toHaveLength(1);
+    expect(requested().filter((url) => url === "/api/expressions/try")).toHaveLength(1);
     expect(requested().filter((url) => url !== "/api/auth/me" && !(url in EMPTY))).toEqual([]);
   });
 });

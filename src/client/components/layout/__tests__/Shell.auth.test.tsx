@@ -172,8 +172,9 @@ describe("Shell sign-out", () => {
     expect(await screen.findByText("login page")).toBeInTheDocument();
     await new Promise((r) => setTimeout(r, 20));
     expect(kept()).toEqual([]);
-    // Whatever the page read while signed in, the sign-out is the last thing asked.
+    // Whatever the page read while signed in (试一条 had asked too), the sign-out is the last thing asked.
     const asked = vi.mocked(fetch).mock.calls.map(([url]) => url);
+    expect(asked).toContain("/api/expressions/try");
     expect(asked.at(-1)).toBe("/api/auth/logout");
     expect(asked.filter((url) => url === "/api/auth/logout")).toHaveLength(1);
   });
