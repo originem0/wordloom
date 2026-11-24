@@ -86,7 +86,7 @@ Return one JSON object and nothing else:
 - mine: the entries of the index that say what "need" asks for, best first, at most five. Use only ids that appear in the index, and only entries that really fit: an empty list is a good answer.
 - fix: null unless "attempt" is present. The learner's own sentence with the smallest change that makes it correct and natural; if it already works, return it unchanged and say so.
 - fresh: at most two natural English ways to say it that are not in the index. Never repeat or rephrase an entry listed in "mine"; an empty list is fine when the library covers the need.
-- why: one short sentence on why it fits, or on what was changed.`;
+- why: one short sentence on why it fits, or on what was changed. Do not quote any other entry of the index in it.`;
 
 const suggestion = z.object({ text: z.string(), why: z.string().nullish() });
 const foundShape = z.object({

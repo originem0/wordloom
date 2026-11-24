@@ -19,10 +19,11 @@ export const phrasePattern = (phrase: string) =>
   phrase.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+").replace(/['‘’]/g, "['‘’]");
 
 /** Whether `s` says the target of `e`, as whole words. `norm` is that target;
- *  the punctuation around a whole sentence is not part of it. */
+ *  the punctuation around a whole sentence is not part of it. A word ends where
+ *  the Latin letters do: a reason written in Chinese quotes English unspaced. */
 function says(s: string, e: Entry): boolean {
   const target = e.row.norm.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
-  return target !== "" && new RegExp(`(?<![\\p{L}\\p{N}])${phrasePattern(target)}(?![\\p{L}\\p{N}])`, "iu").test(s);
+  return target !== "" && new RegExp(`(?<![\\p{Script=Latin}\\p{N}])${phrasePattern(target)}(?![\\p{Script=Latin}\\p{N}])`, "iu").test(s);
 }
 
 // Characters of index per call. What does not fit is not searched this time,

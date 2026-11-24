@@ -755,8 +755,9 @@ describe("找", () => {
     expect(fixed.mine).toEqual([{ expression: expect.objectContaining({ id: wanted.id, masked: false, text: wanted.text }), why: null }]);
     expect((await lookups()).map((r) => [r.expressionId, r.cue])).toEqual([[wanted.id, null]]);
 
+    // A reason written in Chinese quotes English with no space around it.
     answer({
-      mine: [{ id: seen.id, why: `like "kind of ${MARKER}", but shorter` }],
+      mine: [{ id: seen.id, why: `和kind of ${MARKER}差不多，更短` }],
       fresh: [{ text: "I'm slammed.", why: `stronger than Kind Of ${MARKER}` }, { text: "I'm tied up.", why: "neutral" }],
     });
     const text = await (await ask()).text();
