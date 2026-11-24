@@ -181,4 +181,31 @@ describe("foldTimeline", () => {
     expect(foldTimeline([met(), second, first], T0)).toEqual(foldTimeline([met(), first, second], T0));
     expect(foldTimeline([met(), second, first], T0)).toMatchObject({ level: 0, promotions: 1 });
   });
+
+  // Beyond the eighteen cases of the plan: its reference fold reads "was the
+  // answer shown" off the outcome, and an overturn rewrites the outcome.
+  it("s: a pass at the fresh scene showed the answer, and taking that pass back does not unsee it", () => {
+    const at = T0 + DAY;
+    const shown = at + MIN;
+    const judged = attempt(at, "none", "pass", shown);
+    expect(foldTimeline([met(), judged], T0)).toMatchObject({ level: 1, answerSeenAt: shown });
+    const takenBack = { ...judged, outcome: "fail", modelOutcome: "pass" };
+    expect(foldTimeline([met(), takenBack], T0)).toMatchObject({
+      level: 0,
+      promotions: 0,
+      answerSeenAt: shown,
+      dueAt: shown + DAY,
+    });
+    // The other way round: a miss showed nothing, and the answer comes with the overturn.
+    const missed = attempt(at, "none", "fail", shown);
+    expect(foldTimeline([met(), missed], T0).answerSeenAt).toBe(T0 - 5 * DAY);
+    const turned = { ...missed, outcome: "pass", modelOutcome: "fail" };
+    expect(foldTimeline([met(), turned], T0)).toMatchObject({ level: 1, answerSeenAt: shown });
+    // Turned back again, it is a miss once more, but the answer has been on screen.
+    expect(foldTimeline([met(), { ...turned, outcome: "fail" }], T0)).toMatchObject({
+      level: 0,
+      answerSeenAt: shown,
+      dueAt: shown + DAY,
+    });
+  });
 });

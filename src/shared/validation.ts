@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EXPRESSION_LIMITS, SOURCE_TYPES } from "./expressions.js";
+import { EXPRESSION_LIMITS, EXPRESSION_STATUSES, FIND_HISTORY_TURNS, SOURCE_TYPES } from "./expressions.js";
 
 // --- Request schemas ---
 
@@ -19,6 +19,9 @@ export const extractWordsRequestSchema = z.object({
 // text is the one thing capture refuses; the bounds only stop runaway input.
 const verbatimText = z.string().max(EXPRESSION_LIMITS.text).refine((s) => s.trim().length > 0);
 const label = (max: number) => z.string().trim().max(max);
+// What the user wanted to say, and the English they tried for it.
+const need = z.string().trim().min(1).max(EXPRESSION_LIMITS.need);
+const attempt = z.string().max(EXPRESSION_LIMITS.attempt);
 
 const encounterSource = {
   textBefore: z.string().max(EXPRESSION_LIMITS.text).optional(),
@@ -32,6 +35,7 @@ export const captureRequestSchema = z.object({
   text: verbatimText,
   focus: label(EXPRESSION_LIMITS.focus).optional(),
   force: z.boolean().optional(),
+  found: z.object({ need, attempt: attempt.optional() }).optional(),
   ...encounterSource,
 });
 
@@ -42,10 +46,39 @@ export const expressionPatchSchema = z.object({
   focus: label(EXPRESSION_LIMITS.focus).nullable().optional(),
   intent: label(EXPRESSION_LIMITS.intent).nullable().optional(),
   intentBy: z.enum(["self", "find", "paste", "ai"]).optional(),
-  // "active" is the 想用 layer, which does not exist yet: until it does an
-  // entry can only be shelved and brought back.
-  status: z.enum(["seen", "retired"]).optional(),
+  status: z.enum(EXPRESSION_STATUSES).optional(),
   occurredAt: z.number().int().positive().optional(),
+});
+
+export const revealRequestSchema = z.object({ cue: z.enum(["masked", "none", "need", "scene"]) });
+
+export const attemptRequestSchema = z.object({
+  text: attempt.refine((s) => s.trim().length > 0),
+  cue: z.enum(["none", "need", "scene", "revealed"]),
+  // A stored scene, the intent, or in 找 the need of that turn.
+  prompt: z.string().min(1).max(EXPRESSION_LIMITS.need),
+});
+
+export const overturnRequestSchema = z.object({ outcome: z.enum(["pass", "fail"]) });
+
+const findTurn = z.object({
+  need,
+  attempt: attempt.optional(),
+  mine: z.array(z.number().int().positive()).max(50),
+  fix: attempt.nullable(),
+  fresh: z.array(attempt).max(2),
+});
+
+export const findRequestSchema = z.object({
+  need,
+  attempt: attempt.optional(),
+  history: z.array(findTurn).max(FIND_HISTORY_TURNS),
+  turn: z.number().int().positive(),
+  thread: z.number().int().positive(),
+});
+
+export const pickRequestSchema = z.object({
+  text: z.string().max(EXPRESSION_LIMITS.paste).refine((s) => s.trim().length > 0),
 });
 
 // --- AI output schemas ---

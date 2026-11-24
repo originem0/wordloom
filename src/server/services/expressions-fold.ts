@@ -16,6 +16,8 @@ export interface TimelineRow {
   createdAt: number;
   /** When the judgement came back (kept in `feedback`). */
   judgedAt?: number | null;
+  /** What the model had said, once the user has overturned it (kept in `feedback`). */
+  modelOutcome?: string | null;
 }
 
 export interface Folded {
@@ -91,8 +93,10 @@ export function foldTimeline(rows: TimelineRow[], activeSince: number | null): F
     }
     // cue "revealed": no level change either way.
     // The answer is shown after every judgement except none + fail, at the
-    // moment the judgement came back.
-    if (!(r.cue === "none" && !pass)) seen(r.judgedAt ?? t);
+    // moment the judgement came back. A row the user has overturned showed it
+    // whichever way that went: a pass taken back had been shown already, and
+    // a miss turned into a pass is shown then.
+    if (r.cue !== "none" || pass || r.modelOutcome != null) seen(r.judgedAt ?? t);
   }
 
   const graduated = level >= GRADUATED;

@@ -231,6 +231,24 @@ describe("capture", () => {
     expect((await metRows(detail.id))[0]).toMatchObject(source);
   });
 
+  it("keeps an entry taken from 找 with that turn as its scene", async () => {
+    const { res, detail } = await capture({
+      text: "That said, I'd still go.", focus: "That said",
+      found: { need: " 想说虽然如此，我还是会去 ", attempt: "But say that, I still go." },
+      // The scene of such an entry is the turn it came from, whatever else is sent.
+      sourceType: "book", textBefore: "not the scene",
+    });
+    expect(res.status).toBe(201);
+    expect(detail.sourceType).toBe("find");
+    expect(detail.timeline[0]).toMatchObject({
+      kind: "met", sourceType: "find", textBefore: "想说虽然如此，我还是会去", myAttempt: "But say that, I still go.",
+    });
+    // Asked without an attempt of their own, there is only the need.
+    const bare = await capture({ text: "Fair enough.", found: { need: "想说行吧" } });
+    expect(bare.detail.timeline[0]).toMatchObject({ sourceType: "find", textBefore: "想说行吧", myAttempt: null });
+    expect((await req("/api/expressions", { body: { text: "By and large.", found: { need: "  " } } })).status).toBe(400);
+  });
+
   it.each([
     [{ text: "I'm kind of swamped.", focus: "  Kind   OF " }, "Kind   OF", "kind of"],
     [{ text: " Fair\tENOUGH,  then.\n" }, null, "fair enough, then."],
@@ -336,6 +354,7 @@ describe("capture", () => {
 describe("a sentence that is already there", () => {
   it("is not saved again: 409 with the entries it matches", async () => {
     const first = await entry({ text: "I'm kind of swamped.", focus: "kind of" });
+    await entry({ text: "Fair enough." });
     const res = await req("/api/expressions", { body: { text: "It's kind of late.", focus: " KIND  of" } });
     expect(res.status).toBe(409);
     const body = (await res.json()) as DuplicateResponse;
@@ -343,8 +362,8 @@ describe("a sentence that is already there", () => {
     expect(body.existing).toEqual([
       { id: first.id, masked: false, text: "I'm kind of swamped.", intent: null, createdAt: first.createdAt },
     ]);
-    expect(await stored()).toHaveLength(1);
-    expect(await db.select().from(encounters).all()).toHaveLength(1);
+    expect(await stored()).toHaveLength(2);
+    expect(await db.select().from(encounters).all()).toHaveLength(2);
     expect(model).not.toHaveBeenCalled();
   });
 
@@ -404,6 +423,7 @@ describe("the list and the detail", () => {
       id: a.detail.id, status: "seen", masked: false, text: "Fair enough.", focus: null,
       intent: null, intentBy: null, sourceType: "book", sourceTitle: "Normal People",
       occurredAt: 1_600_000_000_000, createdAt: a.detail.createdAt, updatedAt: a.detail.updatedAt,
+      produced: false, graduated: false, queued: false,
     });
     expect(list[1]).toMatchObject({ focus: "kind of", sourceType: null, sourceTitle: null });
     expect(list[0]).toMatchObject({ sourceType: "chat" });
@@ -433,7 +453,7 @@ describe("the list and the detail", () => {
     const read = await detailOf(detail.id);
     expect(read.timeline.map((e) => e.text)).toEqual(["Fair enough.", "second", "third"]);
     expect(Object.keys(read.timeline[0]).sort()).toEqual([
-      "createdAt", "cue", "id", "kind", "myAttempt", "occurredAt", "outcome",
+      "createdAt", "cue", "feedback", "id", "kind", "myAttempt", "occurredAt", "outcome",
       "sourceLocator", "sourceTitle", "sourceType", "text", "textBefore",
     ]);
     expect(read).not.toHaveProperty("norm");
@@ -516,9 +536,8 @@ describe("editing an entry", () => {
   });
 
   it.each([
-    ["the 想用 layer, which does not exist yet", { status: "active" }],
     ["a status nobody defined", { status: "archived" }],
-    ["an intent past the limit", { intent: "想".repeat(301) }],
+    ["an intent past the limit", { intent: "想".repeat(1001) }],
     ["an author nobody defined", { intent: "我想说…", intentBy: "robot" }],
     ["a date that is not a timestamp", { occurredAt: "yesterday" }],
   ])("refuses %s and changes nothing", async (_what, body) => {
@@ -636,6 +655,161 @@ describe("annotating on request", () => {
   });
 });
 
+describe("the 想用 layer", () => {
+  const DAY = 86_400_000;
+  const INTENT = "我想说手头有点忙";
+
+  /** Puts an entry into 想用 as of `since`, met the day before. */
+  async function activate(id: number, since = Date.now()) {
+    await db.update(encounters).set({ createdAt: since - DAY }).where(eq(encounters.expressionId, id));
+    await db
+      .update(expressions)
+      .set({ status: "active", intent: INTENT, intentBy: "self", activeSince: since })
+      .where(eq(expressions.id, id));
+  }
+  /** Passes that count: one on each lower bound after `since`. */
+  async function climb(id: number, since: number, times: number) {
+    let t = since;
+    for (const days of [1, 3, 7, 14, 30].slice(0, times)) {
+      t += days * DAY;
+      await db.insert(encounters).values({ expressionId: id, kind: "attempt", text: "I used it.", cue: "need", outcome: "pass", createdAt: t });
+    }
+  }
+
+  it("takes an entry only with an intent, and starts its clock then", async () => {
+    const { id } = await entry();
+    const before = await row(id);
+    const refused = await patch(id, { status: "active", note: "would have been saved" });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({ code: "INTENT_REQUIRED" });
+    expect(await row(id)).toEqual(before);
+
+    const started = Date.now();
+    const res = await patch(id, { status: "active", intent: INTENT, intentBy: "find" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: "active", intent: INTENT, intentBy: "find" });
+    const { activeSince } = await row(id);
+    expect(activeSince).toBeGreaterThanOrEqual(started);
+    // Saying it again restarts nothing, and none of this is on the timeline.
+    await patch(id, { status: "active" });
+    expect((await row(id)).activeSince).toBe(activeSince);
+    expect(await metRows(id)).toHaveLength(1);
+  });
+
+  it("keeps its intent for as long as it is there", async () => {
+    const { id } = await entry();
+    await patch(id, { intent: INTENT });
+    expect((await patch(id, { status: "active" })).status).toBe(200);
+    const cleared = await patch(id, { intent: null });
+    expect(cleared.status).toBe(400);
+    expect(await cleared.json()).toMatchObject({ code: "INTENT_REQUIRED" });
+    expect((await row(id)).intent).toBe(INTENT);
+    expect((await patch(id, { intent: "我想说现在腾不出手" })).status).toBe(200);
+  });
+
+  it("forgets when it entered on the way out, and starts again on the way back", async () => {
+    const { id } = await entry();
+    await activate(id, 1_700_000_000_000);
+    expect(await (await patch(id, { status: "seen" })).json()).toMatchObject({ status: "seen", activeSince: null });
+    const back = (await (await patch(id, { status: "active" })).json()) as ExpressionDetail;
+    expect(back.activeSince).toBeGreaterThan(1_700_000_000_000);
+    await patch(id, { status: "retired" });
+    expect((await row(id)).activeSince).toBeNull();
+    expect(await metRows(id)).toHaveLength(1);
+  });
+
+  // P2 acceptance: once an entry is in 想用, its English is in no response body.
+  it("is served without its English by every route that answers with it", async () => {
+    const { id, createdAt } = await entry({
+      text: `I'm kind of ${MARKER} right now.`, focus: `kind of ${MARKER}`, textBefore: `before ${MARKER}`,
+      sourceType: "book", sourceTitle: "Normal People", sourceLocator: `p. ${MARKER}`, occurredAt: 1_600_000_000_000,
+    });
+    await db
+      .update(expressions)
+      .set({ note: `note ${MARKER}`, gloss: `gloss ${MARKER}`, aiIntent: `我想说 ${MARKER}`, nextScene: `scene ${MARKER}` })
+      .where(eq(expressions.id, id));
+    await activate(id);
+    await db.insert(encounters).values({
+      expressionId: id, kind: "attempt", text: `attempt ${MARKER}`, cue: "need", outcome: "fail", createdAt: Date.now(),
+      feedback: JSON.stringify({ prompt: `prompt ${MARKER}`, status: "done", rewrites: [{ from: "a", to: MARKER, why: "w" }] }),
+    });
+
+    const answers = [
+      await patch(id, { note: `another ${MARKER}` }),
+      await req("/api/expressions"),
+      await req(`/api/expressions/${id}`),
+      await req(`/api/expressions/${id}/encounters`, { body: { text: `again ${MARKER}`, textBefore: `b ${MARKER}` } }),
+      await annotate(id),
+      await req("/api/expressions", { body: { text: "It is late.", focus: ` Kind  of ${MARKER}` } }),
+    ];
+    expect(answers.map((res) => res.status)).toEqual([200, 200, 200, 201, 200, 409]);
+    const bodies = await Promise.all(answers.map((res) => res.text()));
+    for (const body of bodies) expect(body).not.toContain(MARKER);
+
+    // What is left: the intent, where and when it was met, and the bare timeline.
+    const detail = await detailOf(id);
+    expect(detail).toMatchObject({
+      status: "active", masked: true, text: null, focus: null, note: null, gloss: null, aiIntent: null, annotated: true,
+      intent: INTENT, sourceType: "book", sourceTitle: "Normal People", occurredAt: 1_600_000_000_000,
+    });
+    expect(detail.timeline.map((e) => [e.kind, e.cue, e.outcome])).toEqual([
+      ["met", null, null], ["attempt", "need", "fail"], ["met", null, null],
+    ]);
+    for (const e of detail.timeline) {
+      expect(e).toMatchObject({
+        text: null, textBefore: null, myAttempt: null, feedback: null,
+        sourceType: null, sourceTitle: null, sourceLocator: null, occurredAt: null,
+      });
+    }
+    expect((JSON.parse(bodies[5]) as DuplicateResponse).existing).toEqual([
+      { id, masked: true, text: null, intent: INTENT, createdAt },
+    ]);
+  });
+
+  it("shows everything again once the entry is back in 见过, or has graduated", async () => {
+    const since = Date.now() - 100 * DAY;
+    const climbing = await entry({ text: `kind of ${MARKER}` });
+    await activate(climbing.id, since);
+    await climb(climbing.id, since, 4);
+    expect(await detailOf(climbing.id)).toMatchObject({ masked: true, text: null, produced: true, graduated: false });
+    expect(await (await patch(climbing.id, { status: "seen" })).json()).toMatchObject({
+      masked: false, text: `kind of ${MARKER}`, produced: true,
+    });
+
+    const done = await capture({ text: `sort of ${MARKER}` });
+    await activate(done.detail.id, since);
+    await climb(done.detail.id, since, 5);
+    const read = await detailOf(done.detail.id);
+    expect(read).toMatchObject({ status: "active", masked: false, text: `sort of ${MARKER}`, produced: true, graduated: true });
+    expect(read.timeline[0].text).toBe(`sort of ${MARKER}`);
+  });
+
+  it("asks the twelve that entered first, and lets the thirteenth wait for a place", async () => {
+    const since = 1_700_000_000_000;
+    const ids: number[] = [];
+    for (let i = 0; i < 13; i++) {
+      const { detail } = await capture({ text: `entry ${i}` });
+      await activate(detail.id, since + i);
+      ids.push(detail.id);
+    }
+    const queued = async () => {
+      const { expressions: list } = (await (await req("/api/expressions")).json()) as ExpressionListResponse;
+      return list.filter((e) => e.queued).map((e) => e.id);
+    };
+    expect(await queued()).toEqual([ids[12]]);
+    // An entry that reaches level 3 gives its place up; back at zero it needs one again.
+    await climb(ids[0], since, 3);
+    expect(await queued()).toEqual([]);
+    await db.insert(encounters).values({
+      expressionId: ids[0], kind: "attempt", text: "I missed it.", cue: "need", outcome: "fail", createdAt: since + 40 * DAY,
+    });
+    expect(await queued()).toEqual([ids[12]]);
+    // Leaving the layer frees a place as well.
+    await patch(ids[3], { status: "seen" });
+    expect(await queued()).toEqual([]);
+  });
+});
+
 // P1 acceptance: a sentence that went through the server is in no log line.
 describe("what the server prints", () => {
   it("never includes the text, on any route or failure", async () => {
@@ -659,7 +833,7 @@ describe("what the server prints", () => {
       await req(`/api/expressions/${id}/encounters`, { body: { text: `again ${MARKER}`, sourceTitle: MARKER } }),
       await annotate(id),
       await req("/api/expressions", { raw: `{"text": "${MARKER}` }),
-      await patch(id, { note: MARKER, status: "active" }),
+      await patch(id, { note: MARKER, status: "archived" }),
       await req("/api/expressions", { body: { text: MARKER, sourceType: MARKER } }),
     ]) {
       statuses.push(res.status);

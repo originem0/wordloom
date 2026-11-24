@@ -1,22 +1,20 @@
 import { Hono, type Context } from "hono";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { encounters, expressions } from "../db/schema.js";
 import { failureReason } from "../services/ai-shared.js";
 import { annotate } from "../services/expressions-ai.js";
+import { loadEntry, loadLibrary, toDetail, toDuplicate, toSummary } from "../services/expressions-view.js";
 import { captureRequestSchema, encounterRequestSchema, expressionPatchSchema } from "../../shared/validation.js";
 import type {
-  DuplicateResponse, EncounterSource, EncounterView,
-  ExpressionDetail, ExpressionListResponse, ExpressionSummary,
+  CaptureRequest, DuplicateResponse, EncounterSource, ExpressionListResponse,
 } from "../../shared/expressions.js";
 
 // The admin's private text. Nothing here logs it or puts it in an error: a log
 // line carries an id and a reason from a fixed list, and an error that escapes
-// a handler is logged by the app as its class alone. No route takes a query
-// string either, because the request logger prints the URL.
+// a handler is logged by the app without its message. No route takes private
+// text in a query string either, because the request logger prints the URL.
 export const expressionRoutes = new Hono();
-
-type Met = Pick<typeof encounters.$inferSelect, "sourceType" | "sourceTitle" | "occurredAt">;
 
 const invalid = (c: Context) => c.json({ error: "Invalid request", code: "VALIDATION_ERROR" }, 400);
 const notFound = (c: Context) => c.json({ error: "Expression not found", code: "NOT_FOUND" }, 404);
@@ -24,51 +22,11 @@ const blank = (s: string | null | undefined) => (s && s.trim() ? s : null);
 /** What duplicates are found by: the focus, or the whole text without one. */
 const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 const oldestFirst = [asc(encounters.createdAt), asc(encounters.id)];
-// Listed rather than selected whole: `feedback`, and whatever column comes
-// later, stays on the server until someone decides it should leave.
-const timelineColumns = {
-  id: encounters.id, kind: encounters.kind, createdAt: encounters.createdAt,
-  cue: encounters.cue, outcome: encounters.outcome,
-  text: encounters.text, textBefore: encounters.textBefore, myAttempt: encounters.myAttempt,
-  sourceType: encounters.sourceType, sourceTitle: encounters.sourceTitle,
-  sourceLocator: encounters.sourceLocator, occurredAt: encounters.occurredAt,
-};
 
-function toSummary(row: typeof expressions.$inferSelect, met: Met | undefined): ExpressionSummary {
-  return {
-    id: row.id,
-    status: row.status as ExpressionSummary["status"],
-    masked: false, // nothing is withheld before the 想用 layer exists
-    text: row.text,
-    focus: row.focus,
-    intent: row.intent,
-    intentBy: row.intentBy as ExpressionSummary["intentBy"],
-    sourceType: (met?.sourceType ?? null) as ExpressionSummary["sourceType"],
-    sourceTitle: met?.sourceTitle ?? null,
-    occurredAt: met?.occurredAt ?? null,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-async function loadDetail(id: number): Promise<ExpressionDetail | null> {
-  const row = await db.select().from(expressions).where(eq(expressions.id, id)).get();
-  if (!row) return null;
-  const timeline = (await db
-    .select(timelineColumns)
-    .from(encounters)
-    .where(eq(encounters.expressionId, id))
-    .orderBy(...oldestFirst)
-    .all()) as EncounterView[];
-  return {
-    ...toSummary(row, timeline.find((e) => e.kind === "met")),
-    note: row.note,
-    gloss: row.gloss,
-    aiIntent: row.aiIntent,
-    annotated: row.gloss != null,
-    activeSince: row.activeSince,
-    timeline,
-  };
+/** One entry as its own routes answer with it: masked while it is in 想用. */
+async function detailOf(id: number) {
+  const entry = await loadEntry(id);
+  return entry && toDetail(entry);
 }
 
 /** The scene an entry came from. Capture writes it, so it is the oldest. */
@@ -80,12 +38,17 @@ const firstMet = (id: number) =>
     .orderBy(...oldestFirst)
     .get();
 
-const metRow = (expressionId: number, text: string, source: EncounterSource, now: number) => ({
+const metRow = (
+  expressionId: number, text: string, source: EncounterSource, now: number, found?: CaptureRequest["found"],
+) => ({
   expressionId,
   kind: "met",
   text, // verbatim, like the entry's own
-  textBefore: blank(source.textBefore),
-  sourceType: source.sourceType ?? null,
+  // An entry kept from 找 has that turn as its scene: what the user needed to
+  // say, and the English they had tried.
+  textBefore: blank(found ? found.need : source.textBefore),
+  myAttempt: blank(found?.attempt),
+  sourceType: found ? "find" : (source.sourceType ?? null),
   sourceTitle: blank(source.sourceTitle),
   sourceLocator: blank(source.sourceLocator),
   occurredAt: source.occurredAt ?? now,
@@ -115,42 +78,23 @@ const annotateFailed = (id: number, err: unknown) =>
 
 // GET / — every entry, newest first
 expressionRoutes.get("/", async (c) => {
-  const rows = await db.select().from(expressions).orderBy(desc(expressions.createdAt), desc(expressions.id)).all();
-  // One pass over the met rows instead of a query per entry. Oldest first, so
-  // the first one seen for an entry is where it was first met.
-  const met = await db
-    .select({
-      expressionId: encounters.expressionId, sourceType: encounters.sourceType,
-      sourceTitle: encounters.sourceTitle, occurredAt: encounters.occurredAt,
-    })
-    .from(encounters)
-    .where(eq(encounters.kind, "met"))
-    .orderBy(...oldestFirst)
-    .all();
-  const first = new Map<number | null, Met>();
-  for (const m of met) if (!first.has(m.expressionId)) first.set(m.expressionId, m);
-  return c.json({ expressions: rows.map((r) => toSummary(r, first.get(r.id))) } satisfies ExpressionListResponse);
+  const library = await loadLibrary();
+  return c.json({ expressions: library.map((e) => toSummary(e)) } satisfies ExpressionListResponse);
 });
 
 // POST / — capture. The entry is stored before the model hears of it.
 expressionRoutes.post("/", async (c) => {
   const parsed = captureRequestSchema.safeParse(await c.req.json());
   if (!parsed.success) return invalid(c);
-  const { text, force } = parsed.data;
+  const { text, force, found } = parsed.data;
   const focus = blank(parsed.data.focus);
   const norm = normalize(focus ?? text);
 
-  if (!force) {
-    const existing = await db
-      .select({ id: expressions.id, text: expressions.text, intent: expressions.intent, createdAt: expressions.createdAt })
-      .from(expressions)
-      .where(eq(expressions.norm, norm))
-      .orderBy(desc(expressions.createdAt), desc(expressions.id))
-      .all();
-    if (existing.length > 0) {
-      const masked = existing.map((e) => ({ ...e, masked: false }));
-      return c.json({ error: "Already saved", code: "DUPLICATE", existing: masked } satisfies DuplicateResponse, 409);
-    }
+  // The check has to live here: for an entry in 想用 the page does not hold
+  // the text to compare with, and is told only its intent and date.
+  if (!force && (await db.select({ id: expressions.id }).from(expressions).where(eq(expressions.norm, norm)).get())) {
+    const existing = (await loadLibrary()).filter((e) => e.row.norm === norm).map(toDuplicate);
+    return c.json({ error: "Already saved", code: "DUPLICATE", existing } satisfies DuplicateResponse, 409);
   }
 
   const now = Date.now();
@@ -159,10 +103,10 @@ expressionRoutes.post("/", async (c) => {
       .insert(expressions)
       .values({ text, norm, focus, createdAt: now, updatedAt: now })
       .returning({ id: expressions.id });
-    await tx.insert(encounters).values(metRow(row.id, text, parsed.data, now));
+    await tx.insert(encounters).values(metRow(row.id, text, parsed.data, now, found));
     return row.id;
   });
-  const detail = await loadDetail(id);
+  const detail = await detailOf(id);
   // Not awaited, and not a job: a job row would keep the sentence as its input.
   void annotateEntry(id).catch((err) => annotateFailed(id, err));
   return c.json(detail, 201);
@@ -170,7 +114,7 @@ expressionRoutes.post("/", async (c) => {
 
 // GET /:id — one entry with its timeline
 expressionRoutes.get("/:id{[0-9]+}", async (c) => {
-  const detail = await loadDetail(Number(c.req.param("id")));
+  const detail = await detailOf(Number(c.req.param("id")));
   return detail ? c.json(detail) : notFound(c);
 });
 
@@ -183,7 +127,8 @@ expressionRoutes.patch("/:id{[0-9]+}", async (c) => {
   if (!row) return notFound(c);
 
   const patch = parsed.data;
-  const set: Partial<typeof expressions.$inferInsert> = { updatedAt: Date.now() };
+  const now = Date.now();
+  const set: Partial<typeof expressions.$inferInsert> = { updatedAt: now };
   if (patch.note !== undefined) set.note = blank(patch.note);
   if (patch.focus !== undefined) {
     set.focus = blank(patch.focus);
@@ -193,13 +138,23 @@ expressionRoutes.patch("/:id{[0-9]+}", async (c) => {
     set.intent = blank(patch.intent);
     set.intentBy = set.intent ? (patch.intentBy ?? "self") : null;
   }
-  if (patch.status) set.status = patch.status;
+  const status = patch.status ?? row.status;
+  // In 想用 an entry is asked for by its intent, in the user's own words.
+  if (status === "active" && !(set.intent !== undefined ? set.intent : row.intent)) {
+    return c.json({ error: "An entry in 想用 needs an intent", code: "INTENT_REQUIRED" }, 400);
+  }
+  if (status !== row.status) {
+    set.status = status;
+    // Entering starts the first 24 hours. Leaving is not kept anywhere, so
+    // coming back starts them again: whatever was shown in between is unknown.
+    set.activeSince = status === "active" ? now : null;
+  }
   const met = patch.occurredAt === undefined ? undefined : await firstMet(id);
   await db.transaction(async (tx) => {
     await tx.update(expressions).set(set).where(eq(expressions.id, id));
     if (met) await tx.update(encounters).set({ occurredAt: patch.occurredAt }).where(eq(encounters.id, met.id));
   });
-  return c.json(await loadDetail(id));
+  return c.json(await detailOf(id));
 });
 
 // POST /:id/encounters — met again
@@ -210,7 +165,7 @@ expressionRoutes.post("/:id{[0-9]+}/encounters", async (c) => {
   const row = await db.select({ id: expressions.id }).from(expressions).where(eq(expressions.id, id)).get();
   if (!row) return notFound(c);
   await db.insert(encounters).values(metRow(id, parsed.data.text, parsed.data, Date.now()));
-  return c.json(await loadDetail(id), 201);
+  return c.json(await detailOf(id), 201);
 });
 
 // POST /:id/annotate — the retry for an entry whose annotation never arrived
@@ -222,6 +177,6 @@ expressionRoutes.post("/:id{[0-9]+}/annotate", async (c) => {
     annotateFailed(id, err);
     return c.json({ error: "Annotation failed", code: "ANNOTATE_FAILED" }, 502);
   }
-  const detail = await loadDetail(id);
+  const detail = await detailOf(id);
   return detail ? c.json(detail) : notFound(c);
 });
