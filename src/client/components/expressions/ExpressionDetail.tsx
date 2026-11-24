@@ -39,7 +39,7 @@ const HINT_LABELS: Partial<Record<Cue, string>> = { none: "只有新情境", nee
  * the row holds. Of a masked entry the server sends only the first of the two,
  * so nothing here has to decide what may be shown.
  */
-function TimelineRow({ row, own }: { row: EncounterView; own: string | null }) {
+function TimelineRow({ row, own, first }: { row: EncounterView; own: string | null; first: boolean }) {
   const tried = row.kind === "attempt";
   const said = row.feedback;
   return (
@@ -48,9 +48,11 @@ function TimelineRow({ row, own }: { row: EncounterView; own: string | null }) {
         day(row.occurredAt ?? row.createdAt), KIND_LABELS[row.kind], tried && row.cue && HINT_LABELS[row.cue],
         tried && (row.outcome === "pass" ? "算用上" : row.outcome === "fail" ? "不算" : "没判"), said?.overturned && "你改过",
         row.kind === "looked_up" && row.cue === "masked" && "遮着给的", row.kind === "reveal" && row.cue !== "masked" && "放弃",
-        row.sourceType && SOURCE_LABELS[row.sourceType], row.sourceTitle,
+        row.sourceType && SOURCE_LABELS[row.sourceType], row.sourceTitle, row.sourceLocator,
       ].filter(Boolean).join(" · ")}
       {[
+        // What came before the scene the entry is from stands above its sentence, at the top of the dialog.
+        !first && row.textBefore && `上文：${row.textBefore}`,
         // A `met` row repeats the entry's own sentence unless it was met in other words.
         (row.kind !== "met" || row.text !== own) && row.text, row.myAttempt && `试写：${row.myAttempt}`, said && `题面：${said.prompt}`,
         said?.status === "done" && VERDICT_LABELS[said.used ? "used" : said.conveyed ? "conveyed" : "missed"],
@@ -85,6 +87,20 @@ function Detail({ e, glossing, draft, unsavedRef }: { e: ExpressionDetail; gloss
   // they lead to a pass. One that 帮我起草 filled in is the AI's from then on,
   // however much of it was rewritten: the draft has been read.
   const [drafted, setDrafted] = useState(false);
+  const fill = (text: string) => {
+    setIntent(text);
+    setDrafted(true);
+  };
+  // An entry can have its gloss and still no intent of the AI's: one that gave
+  // the target away was dropped. 帮我起草 is then the retry of 补注, which
+  // fills only what is empty.
+  const drawUp = () =>
+    e.aiIntent
+      ? fill(e.aiIntent)
+      : annotate.mutate(e.id, {
+          onSuccess: (now) => (now.aiIntent ? fill(now.aiIntent) : toast.info("这次没有起草出来：可以再点一次，或者自己写一句")),
+          onError: (err) => toast.error(`没有起草成：${err.message}`),
+        });
   const intentBy: IntentBy =
     drafted || e.intentBy === "ai" ? "ai" : suggested && intent === suggested ? (e.sourceType === "find" ? "find" : "paste") : "self";
   const newIntent = intent !== (e.intent ?? "") && { intent: intent.trim() || null, intentBy };
@@ -137,8 +153,8 @@ function Detail({ e, glossing, draft, unsavedRef }: { e: ExpressionDetail; gloss
           <Input maxLength={EXPRESSION_LIMITS.intent} value={intent} onChange={(ev) => setIntent(ev.target.value)} />
         </label>
         {/* While the switch is off the AI's intent is not on screen in any form: it would end up in the prompts the user writes. */}
-        {draft && e.aiIntent && (
-          <Button size="sm" variant="outline" onClick={() => { setIntent(e.aiIntent ?? ""); setDrafted(true); }}>帮我起草</Button>
+        {draft && !e.masked && (
+          <Button size="sm" variant="outline" disabled={annotate.isPending || glossing} onClick={drawUp}>帮我起草</Button>
         )}
       </div>
       {/* An entry in 想用 is not edited: its focus and note are not here to edit. After 看答案 they are shown, read-only. */}
@@ -185,7 +201,7 @@ function Detail({ e, glossing, draft, unsavedRef }: { e: ExpressionDetail; gloss
         </label>
       </div>
       <ol className="space-y-1 border-t pt-3 text-xs text-muted-foreground">
-        {full.timeline.map((row) => <TimelineRow key={row.id} row={row} own={full.text} />)}
+        {full.timeline.map((row) => <TimelineRow key={row.id} row={row} own={full.text} first={row === scene} />)}
       </ol>
       <div className="flex flex-wrap justify-between gap-2">
         <div className="flex flex-wrap gap-2">

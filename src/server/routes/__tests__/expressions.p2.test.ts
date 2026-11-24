@@ -943,6 +943,21 @@ describe("帮我挑", () => {
     expect(opts.system).toMatch(/Prefer the other side's rewrite of a sentence the learner wrote themselves/);
   });
 
+  // A pick is there to be saved: one that capture would refuse for its length
+  // is not offered, and an 上文 that long is left out.
+  it("offers nothing longer than an entry takes", async () => {
+    const long = "a".repeat(4001);
+    model.mockResolvedValueOnce({
+      picks: [
+        { text: long, before: null, why: "too long to keep" },
+        { text: "it dawned on me", before: long, why: "fine, but for what came before it" },
+      ],
+    });
+    expect(await json(post("/pick", { text: `${long}\nYou could say: it dawned on me.` }))).toEqual({
+      picks: [{ text: "it dawned on me", before: null, why: "fine, but for what came before it" }],
+    });
+  });
+
   it("answers 502 when the model fails or answers out of shape", async () => {
     model.mockRejectedValueOnce(new Error("not configured"));
     model.mockResolvedValueOnce({ picks: [{ before: "no text" }] });

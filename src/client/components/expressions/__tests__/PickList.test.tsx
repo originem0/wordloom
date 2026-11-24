@@ -15,7 +15,14 @@ const PICKS: PickResponse["picks"] = [
   { text: "break the ice", before: "AI: one more for you", why: "a set phrase" },
 ];
 
-const DUPLICATE = { status: 409, body: { error: "An entry with the same norm exists", code: "DUPLICATE", existing: [] } };
+const DUPLICATE = {
+  status: 409,
+  body: {
+    error: "Already saved",
+    code: "DUPLICATE",
+    existing: [{ id: 7, masked: false, text: "It dawned on me that I was wrong.", intent: null, createdAt: new Date(2026, 9, 3).getTime() }],
+  },
+};
 
 /** Every save the list sent, and what the server is to answer to the next ones (201 by default), after `hold` if there is one. */
 let sent: Array<{ method: string; url: string; body: unknown }>;
@@ -126,25 +133,80 @@ describe("收下选中的", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(sent).toHaveLength(1);
     expect(screen.getByRole("button", { name: "收下选中的" })).toBeDisabled();
-    // What is being saved is what was ticked at the click: no tick changes under it.
+    // What is being saved is what was ticked at the click: no tick changes under it, and the list stays.
     for (const box of screen.getAllByRole("checkbox")) expect(box).toBeDisabled();
+    expect(screen.getByRole("button", { name: "关掉" })).toBeDisabled();
     release();
     await waitFor(() => expect(sent).toHaveLength(2));
     await waitFor(() => expect(screen.getAllByText("已收下")).toHaveLength(2));
   });
 
-  it("marks a pick the library already has and goes on with the rest", async () => {
-    const { onSaved } = show();
+  // The rule of the box holds here as well: the library having the same words
+  // already is a question for the user, not a refusal and not a thing to settle
+  // for them.
+  async function meetDuplicate(from: { sourceType?: "chat" } = {}) {
+    const view = show(PICKS, from);
     answers.push(DUPLICATE, { status: 201, body: { id: 8 } });
     tick("it dawned on me");
     tick("it hit me");
     keep();
-
     expect(await screen.findByText("已收下")).toBeInTheDocument();
+    return view;
+  }
+
+  it("asks about a pick the library already has, under that pick, and goes on with the rest", async () => {
+    const { onSaved } = await meetDuplicate();
     expect(screen.getByText("已收过")).toBeInTheDocument();
+    expect(screen.getByText("已经收过同样的。是又一次遇到，还是另一个意思？")).toBeInTheDocument();
+    expect(screen.getByText("It dawned on me that I was wrong.")).toBeInTheDocument();
+    expect(screen.getByText("2026/10/3")).toBeInTheDocument();
     expect(sent.map((s) => (s.body as { text: string }).text)).toEqual(["it dawned on me", "it hit me"]);
     expect(onSaved.mock.calls).toEqual([[8]]);
     expect(toast.error).not.toHaveBeenCalled();
+    // While the question stands the pick cannot be ticked again: only the third still can.
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+  });
+
+  it("records one more encounter when the user says 又一次遇到, with the 上文 and the tag of the pick", async () => {
+    const { onSaved } = await meetDuplicate({ sourceType: "chat" });
+    fireEvent.click(screen.getByRole("button", { name: "又一次遇到" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "另存" })).toBeNull());
+    expect(sent[2]).toEqual({
+      method: "POST",
+      url: "/api/expressions/7/encounters",
+      body: { text: "it dawned on me", textBefore: "Me: how do I say 我突然意识到?", sourceType: "chat" },
+    });
+    expect(screen.getByText("又一次遇到")).toBeInTheDocument();
+    expect(screen.queryByText("已收过")).toBeNull();
+    // Not a fresh entry: there is no gloss to wait for.
+    expect(onSaved.mock.calls).toEqual([[8]]);
+  });
+
+  it("saves a separate entry when the user says 另存", async () => {
+    const { onSaved } = await meetDuplicate();
+    answers.push({ status: 201, body: { id: 9 } });
+    fireEvent.click(screen.getByRole("button", { name: "另存" }));
+
+    await waitFor(() => expect(screen.getAllByText("已收下")).toHaveLength(2));
+    expect(sent[2]).toEqual({
+      method: "POST",
+      url: "/api/expressions",
+      body: { text: "it dawned on me", textBefore: "Me: how do I say 我突然意识到?", force: true },
+    });
+    expect(onSaved.mock.calls).toEqual([[8], [9]]);
+    expect(screen.queryByRole("button", { name: "又一次遇到" })).toBeNull();
+  });
+
+  it("keeps the question when its answer does not go through", async () => {
+    await meetDuplicate();
+    answers.push({ status: 500, body: { error: "boom" } });
+    fireEvent.click(screen.getByRole("button", { name: "又一次遇到" }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有存上：boom"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "又一次遇到" })).toBeEnabled());
+    expect(screen.getByRole("button", { name: "另存" })).toBeEnabled();
+    expect(screen.getByText("已收过")).toBeInTheDocument();
   });
 
   it("stops at any other error, says so, and leaves the rest ticked", async () => {

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ExpressionSummary, SourceType, Verdict } from "@/shared/expressions";
+import { EXPRESSION_LIMITS, type ExpressionSummary, type SourceType, type Verdict } from "@/shared/expressions";
 
 export const SOURCE_LABELS: Record<SourceType | "find", string> = { chat: "AI 对话", book: "书", video: "影视", other: "其他", find: "找" };
 
@@ -32,5 +32,7 @@ export function readBox(box: string, start: number, end: number): { text: string
   if (!picked || picked === whole) return { text: whole };
   if (!whole.includes("\n")) return { text: whole, focus: picked };
   const above = box.slice(0, start).split("\n").slice(0, -1);
-  return { text: picked, before: above.reverse().find((line) => line.trim())?.trim() ?? "" };
+  // No longer than the server takes, or a long paragraph the user never typed
+  // would refuse the save. The end is kept: it is what the selection follows.
+  return { text: picked, before: (above.reverse().find((line) => line.trim())?.trim() ?? "").slice(-EXPRESSION_LIMITS.text) };
 }

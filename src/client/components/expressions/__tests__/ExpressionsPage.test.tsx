@@ -9,7 +9,7 @@ import type { Cue, EncounterView, ExpressionDetail, StatsResponse } from "@/shar
 import { ExpressionsPage } from "../ExpressionsPage";
 import { useLastSource } from "../shared";
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 
 const MET_AT = new Date(2026, 10, 20, 9, 30).getTime();
 
@@ -41,7 +41,7 @@ function addRow(e: ExpressionDetail, over: Partial<EncounterView> & Pick<Encount
 // gives it (newest first, each with its English) and answers the routes of the
 // contract that this page uses.
 let server: {
-  authenticated: boolean; configured: boolean; entries: ExpressionDetail[]; glossOnAnnotate: string | null;
+  authenticated: boolean; configured: boolean; entries: ExpressionDetail[]; glossOnAnnotate: string | null; draftOnAnnotate: string | null;
   settings: Record<string, string>; stats: StatsResponse | null;
 };
 let requests: Array<{ method: string; url: string; body: Record<string, unknown> | null }>;
@@ -77,7 +77,8 @@ function answer(method: string, url: string, body: Record<string, unknown> | nul
   }
   if (action === "annotate") {
     if (!server.glossOnAnnotate) return json({ error: "The model did not answer", code: "ANNOTATE_FAILED" }, 502);
-    Object.assign(found, { gloss: server.glossOnAnnotate, annotated: true });
+    // Only what is still empty is filled, as on the real server.
+    Object.assign(found, { gloss: found.gloss ?? server.glossOnAnnotate, aiIntent: found.aiIntent ?? server.draftOnAnnotate, annotated: true });
   }
   if (action === "reveal") {
     // The row is written before the English leaves, and only for an entry that was masked.
@@ -90,9 +91,12 @@ function answer(method: string, url: string, body: Record<string, unknown> | nul
 const asked = (method: string, url: string) => requests.filter((r) => r.method === method && r.url === url);
 
 beforeEach(() => {
-  server = { authenticated: true, configured: true, entries: [], glossOnAnnotate: "to begin to be understood", settings: {}, stats: NO_STATS };
+  server = {
+    authenticated: true, configured: true, entries: [], glossOnAnnotate: "to begin to be understood", draftOnAnnotate: null, settings: {}, stats: NO_STATS,
+  };
   requests = [];
   vi.mocked(toast.error).mockClear();
+  vi.mocked(toast.info).mockClear();
   useLastSource.setState({ source: null });
   vi.stubGlobal(
     "fetch",
@@ -720,11 +724,47 @@ describe("帮我起草", () => {
     await waitFor(() => expect(patches(99)).toEqual([{ status: "active", intent: DRAFT, intentBy: "ai" }]));
   });
 
-  it("is not offered for an entry the model wrote no intent for", async () => {
+  // An entry can have a gloss and no intent of the AI's: the first one gave the
+  // target away and was dropped. 帮我起草 is then the retry of 补注, and the
+  // server fills only what is still empty.
+  it("asks for the annotation again when the entry has no intent of the AI's, and takes what comes back", async () => {
+    library(1, 0, 0);
+    Object.assign(server.entries[0], { aiIntent: null, gloss: "to stop for today", annotated: true });
+    server.settings = { expressions_draft: "1" };
+    server.draftOnAnnotate = DRAFT;
+    const intent = await open();
+    fireEvent.click(await screen.findByRole("button", { name: "帮我起草" }));
+    await waitFor(() => expect(intent).toHaveValue(DRAFT));
+    expect(asked("POST", "/api/expressions/99/annotate")).toHaveLength(1);
+    expect(screen.getByText("to stop for today")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(patches(99)).toEqual([{ intent: DRAFT, intentBy: "ai" }]));
+  });
+
+  it("says so when no draft comes back or the model fails, and leaves the field alone", async () => {
     library(1, 0, 0);
     server.entries[0].aiIntent = null;
     server.settings = { expressions_draft: "1" };
-    await open();
+    const intent = await open();
+    fireEvent.click(await screen.findByRole("button", { name: "帮我起草" }));
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith("这次没有起草出来：可以再点一次，或者自己写一句"));
+
+    server.glossOnAnnotate = null;
+    await waitFor(() => expect(screen.getByRole("button", { name: "帮我起草" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "帮我起草" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有起草成：The model did not answer"));
+    expect(intent).toHaveValue("");
+    expect(patches(99)).toEqual([]);
+  });
+
+  it("is not offered for an entry in 想用, whose intent of the AI's stays on the server", async () => {
+    library(1, 0, 0);
+    Object.assign(server.entries[0], { status: "active", intent: "想说：今天到此为止" });
+    server.settings = { expressions_draft: "1" };
+    renderPage();
+    await openRow("今天到此为止");
+    await screen.findByRole("button", { name: "看答案" });
     await waitFor(() => expect(asked("GET", "/api/settings")).toHaveLength(1));
     await new Promise((r) => setTimeout(r, 20));
     expect(offered()).toBeNull();
@@ -756,13 +796,14 @@ describe("帮我起草", () => {
 // the page can be traced back to a row here.
 describe("the timeline, in the detail", () => {
   /** Something of every text the rows hold, and of every wording that is derived from one. */
-  const WITHHELD = /sleep on|A novel|想说先别急着定|think one night|还是那个意思|decide later|朋友催你|Sleep it|Hmm|redundant|用上了|说通|你改过/i;
+  const WITHHELD = /sleep on|A novel|Rachel|S2E7|answer tonight|p\. 41|想说先别急着定|think one night|还是那个意思|decide later|朋友催你|Sleep it|Hmm|redundant|用上了|说通|你改过/i;
   const timeline = () =>
     Array.from(screen.getByRole("dialog").querySelectorAll("ol > li")).map((li) => Array.from(li.childNodes).map((node) => node.textContent));
 
   beforeEach(() => {
     const e = entry({ id: 7, text: "Let me sleep on it.", focus: "sleep on", sourceType: "video", sourceTitle: "Friends", intent: "想说：先放一放再决定" });
-    addRow(e, { kind: "met", text: "I'll sleep on it and call you.", sourceType: "book", sourceTitle: "A novel" });
+    Object.assign(e.timeline[0], { textBefore: "Rachel: so, are you in?", sourceLocator: "S2E7" });
+    addRow(e, { kind: "met", text: "I'll sleep on it and call you.", textBefore: "He wanted an answer tonight.", sourceType: "book", sourceTitle: "A novel", sourceLocator: "p. 41" });
     addRow(e, { kind: "looked_up", text: "想说先别急着定", myAttempt: "let me think one night", cue: "masked" });
     addRow(e, { kind: "looked_up", text: "还是那个意思" });
     addRow(e, {
@@ -782,8 +823,9 @@ describe("the timeline, in the detail", () => {
   });
 
   const FULL = [
-    ["2026/11/20 · 遇到 · 影视 · Friends"],
-    ["2026/11/21 · 遇到 · 书 · A novel", "I'll sleep on it and call you."],
+    // Its 上文 is the scene the entry came from, and stands above the sentence instead.
+    ["2026/11/20 · 遇到 · 影视 · Friends · S2E7"],
+    ["2026/11/21 · 遇到 · 书 · A novel · p. 41", "上文：He wanted an answer tonight.", "I'll sleep on it and call you."],
     ["2026/11/22 · 找 · 遮着给的", "想说先别急着定", "试写：let me think one night"],
     ["2026/11/23 · 找", "还是那个意思"],
     ["2026/11/24 · 作答 · 有提示句 · 算用上", "Let me sleep on it first.", "题面：想说：先放一放再决定", "用上了", "sleep on it first → sleep on it（first is redundant）"],
@@ -801,6 +843,9 @@ describe("the timeline, in the detail", () => {
     await openRow("Let me sleep on it.");
     await screen.findByRole("textbox", { name: "备注" });
     expect(timeline()).toEqual(FULL);
+    // Each 上文 once: the first above the sentence, a later one on its own row.
+    expect(screen.getByRole("dialog").textContent?.split("Rachel: so, are you in?")).toHaveLength(2);
+    expect(screen.getByRole("dialog").textContent?.split("He wanted an answer tonight.")).toHaveLength(2);
   });
 
   // The server sends a masked entry's rows without their text. What is left

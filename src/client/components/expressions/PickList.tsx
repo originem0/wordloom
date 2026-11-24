@@ -3,8 +3,9 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/client/components/ui/button";
 import { ApiError } from "@/client/lib/api";
-import { useCapture } from "@/client/hooks/useExpressions";
-import type { EncounterSource, PickResponse } from "@/shared/expressions";
+import { useCapture, useMetAgain } from "@/client/hooks/useExpressions";
+import type { DuplicateResponse, EncounterSource, PickResponse } from "@/shared/expressions";
+import { DuplicateQuestion } from "./DuplicateQuestion";
 
 /**
  * What the model picked out of a pasted conversation. It only points: nothing
@@ -18,52 +19,73 @@ export function PickList({ picks, from, onSaved, onClose }: {
   onClose: () => void;
 }) {
   const capture = useCapture();
+  const metAgain = useMetAgain();
   const [ticked, setTicked] = useState<number[]>([]);
-  // How each pick ended: 已收下, or 已收过 when the library had the same words.
+  // How each pick ended: 已收下, or 又一次遇到 on an entry the library had.
   const [done, setDone] = useState<Record<number, string>>({});
+  // The picks whose words the library has already, each with the entries it
+  // collides with. A question, as on the box: nothing was saved for them yet.
+  const [held, setHeld] = useState<Record<number, DuplicateResponse["existing"]>>({});
   const [saving, setSaving] = useState(false);
+  const met = (i: number) => ({ text: picks[i].text, textBefore: picks[i].before ?? undefined, ...from });
 
-  const keep = async () => {
-    setSaving(true);
-    for (const [i, p] of picks.entries()) {
-      if (!ticked.includes(i)) continue;
-      try {
-        const saved = await capture.mutateAsync({ text: p.text, textBefore: p.before ?? undefined, ...from });
-        onSaved(saved.id);
-        setDone((d) => ({ ...d, [i]: "已收下" }));
-      } catch (e) {
-        // A duplicate is said on that pick and the rest go on. Anything else
-        // stops here, with what was not saved still ticked.
-        if (!(e instanceof ApiError && e.code === "DUPLICATE")) {
-          toast.error(`没有存上：${e instanceof Error ? e.message : e}`);
-          break;
-        }
-        setDone((d) => ({ ...d, [i]: "已收过" }));
+  /** One write for one pick. False when it failed: that is said, and the pick stays as it was. */
+  const write = async (i: number, label: string, request: () => Promise<unknown>) => {
+    try {
+      await request();
+      setDone((d) => ({ ...d, [i]: label }));
+    } catch (e) {
+      if (!(e instanceof ApiError && e.code === "DUPLICATE")) {
+        toast.error(`没有存上：${e instanceof Error ? e.message : e}`);
+        return false;
       }
-      setTicked((t) => t.filter((x) => x !== i));
+      setHeld((h) => ({ ...h, [i]: (e.body as DuplicateResponse).existing ?? [] }));
     }
+    setTicked((t) => t.filter((x) => x !== i));
+    return true;
+  };
+  const save = (i: number, force?: true) => write(i, "已收下", async () => onSaved((await capture.mutateAsync({ ...met(i), force })).id));
+  const busy = async (work: () => Promise<unknown>) => {
+    setSaving(true);
+    await work();
     setSaving(false);
   };
+  // A duplicate is asked about under its pick and the rest go on. Anything
+  // else stops here, with what was not saved still ticked.
+  const keep = () =>
+    busy(async () => {
+      for (const i of picks.keys()) if (ticked.includes(i) && !(await save(i))) break;
+    });
 
   return (
     <div className="space-y-2 rounded-md border p-3 text-sm">
       {picks.length === 0 && <p className="text-muted-foreground">没有挑出来。可以自己选中一段再收下。</p>}
       {picks.map((p, i) => (
-        <label key={i} className="flex items-start gap-2">
-          {done[i] ? (
-            <span className="shrink-0 text-xs text-muted-foreground">{done[i]}</span>
-          ) : (
-            <input type="checkbox" className="mt-1" disabled={saving} checked={ticked.includes(i)} onChange={(e) => setTicked((t) => (e.target.checked ? [...t, i] : t.filter((x) => x !== i)))} />
+        <div key={i} className="space-y-2">
+          <label className="flex items-start gap-2">
+            {done[i] || held[i] ? (
+              <span className="shrink-0 text-xs text-muted-foreground">{done[i] ?? "已收过"}</span>
+            ) : (
+              <input type="checkbox" className="mt-1" disabled={saving} checked={ticked.includes(i)} onChange={(e) => setTicked((t) => (e.target.checked ? [...t, i] : t.filter((x) => x !== i)))} />
+            )}
+            <span className="min-w-0 whitespace-pre-line">
+              {p.before && <span className="block text-xs text-muted-foreground">{p.before}</span>}
+              {p.text}
+              <span className="block text-xs text-muted-foreground">{p.why}</span>
+            </span>
+          </label>
+          {held[i] && !done[i] && (
+            <DuplicateQuestion
+              existing={held[i]}
+              disabled={saving}
+              onAgain={(id) => busy(() => write(i, "又一次遇到", () => metAgain.mutateAsync({ id, ...met(i) })))}
+              onNew={() => busy(() => save(i, true))}
+            />
           )}
-          <span className="min-w-0 whitespace-pre-line">
-            {p.before && <span className="block text-xs text-muted-foreground">{p.before}</span>}
-            {p.text}
-            <span className="block text-xs text-muted-foreground">{p.why}</span>
-          </span>
-        </label>
+        </div>
       ))}
       <div className="flex justify-end gap-1.5">
-        <Button size="sm" variant="ghost" onClick={onClose}>关掉</Button>
+        <Button size="sm" variant="ghost" disabled={saving} onClick={onClose}>关掉</Button>
         {picks.length > 0 && (
           <Button size="sm" disabled={!ticked.length || saving} onClick={keep}>
             {saving && <Loader2 className="animate-spin" />}

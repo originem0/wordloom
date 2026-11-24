@@ -122,6 +122,21 @@ describe("what 收下 makes of the box", () => {
     expect(writes[0].body).toEqual({ text: "it hit me", textBefore: "how do I say 我突然意识到?" });
   });
 
+  // The paragraph above is whatever was pasted, not something the user typed:
+  // its length must not be what refuses the save.
+  it("offers no more 上文 than the server takes, and keeps the end of it", async () => {
+    const { box } = renderBox();
+    type(box, `${"a".repeat(4000)} and then this.\nYou could say it dawned on me.`);
+    select(box, "it dawned on me");
+    const offered = screen.getByRole<HTMLTextAreaElement>("textbox", { name: /上文/ }).value;
+    expect(offered).toHaveLength(4000);
+    expect(offered.endsWith("a and then this.")).toBe(true);
+    keep();
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0].body).toEqual({ text: "it dawned on me", textBefore: offered });
+  });
+
   it("has nothing to save while the box is empty", () => {
     const { box } = renderBox();
     type(box, "   ");
@@ -673,5 +688,16 @@ describe("帮我挑", () => {
     fireEvent.click(screen.getByRole("button", { name: "关掉" }));
     expect(screen.queryByRole("checkbox")).toBeNull();
     expect(box).toHaveValue(`${CHAT} more`);
+  });
+});
+
+// The plan's answer to "the index and a pasted conversation pass through the
+// relay" is to say so where it is done, not to stop it.
+describe("what goes to the model", () => {
+  it("is said beside the two buttons, before anything is typed", () => {
+    renderBox();
+    const told = screen.getByText(/发给你配置的模型/);
+    expect(told).toHaveTextContent("「问」会把这句话和整库的索引");
+    expect(told).toHaveTextContent("「帮我挑」发的是框里的整段对话");
   });
 });

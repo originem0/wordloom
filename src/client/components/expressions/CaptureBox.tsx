@@ -9,9 +9,10 @@ import { useCapture, useFind, useMetAgain, usePick } from "@/client/hooks/useExp
 import {
   EXPRESSION_LIMITS, FIND_HISTORY_TURNS, SOURCE_TYPES, type DuplicateResponse, type EncounterRequest, type FindTurn, type PickResponse, type SourceType,
 } from "@/shared/expressions";
+import { DuplicateQuestion } from "./DuplicateQuestion";
 import { FindThread, type Turn } from "./FindThread";
 import { PickList } from "./PickList";
-import { AREA_CLASS, SOURCE_LABELS, day, readBox, titleOf, useLastSource } from "./shared";
+import { AREA_CLASS, SOURCE_LABELS, readBox, useLastSource } from "./shared";
 
 /** A save the server held back: what was sent, and the entries it collides with. */
 type Held = { met: EncounterRequest; focus?: string; existing: DuplicateResponse["existing"] };
@@ -211,19 +212,10 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
           </Button>
         </div>
       </div>
+      {/* Told, not stopped: both leave through the provider the user set up themselves. */}
+      <p className="text-xs text-muted-foreground">「问」会把这句话和整库的索引（每条的焦点或原文开头、提示句）发给你配置的模型，「帮我挑」发的是框里的整段对话。</p>
       {held && (
-        <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-          <p>已经收过同样的。是又一次遇到，还是另一个意思？</p>
-          {held.existing.map((e) => (
-            <div key={e.id} className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate">
-                {titleOf(e)} <span className="text-xs text-muted-foreground">{day(e.createdAt)}</span>
-              </span>
-              <Button size="sm" variant="outline" disabled={busy || waiting} onClick={() => again(e.id, held.met)}>又一次遇到</Button>
-            </div>
-          ))}
-          <Button size="sm" variant="ghost" disabled={busy || waiting} onClick={() => save(held.met, held.focus, true)}>另存</Button>
-        </div>
+        <DuplicateQuestion existing={held.existing} disabled={busy || waiting} onAgain={(id) => again(id, held.met)} onNew={() => save(held.met, held.focus, true)} />
       )}
       {picks && <PickList picks={picks} from={from} onSaved={onSaved} onClose={() => setPicks(null)} />}
       {thread && <FindThread turns={thread.turns} busy={find.isPending} onSaved={onSaved} onReset={() => setThread(null)} />}

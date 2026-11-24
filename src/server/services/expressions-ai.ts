@@ -153,12 +153,15 @@ const pickedShape = z.object({
 export async function pick(conversation: string): Promise<PickResponse["picks"]> {
   const out = await ask("pick", PICK_PROMPT, { conversation }, pickedShape);
   const picks: PickResponse["picks"] = [];
+  // Verbatim or not at all: a sentence the model wrote must not be saved as one
+  // the user met. And no longer than an entry takes: a pick is there to be saved.
+  const quoted = (s: string | null | undefined) => {
+    const t = (s ?? "").trim();
+    return t && t.length <= EXPRESSION_LIMITS.text && conversation.includes(t) ? t : null;
+  };
   for (const p of out.picks ?? []) {
-    const text = p.text.trim();
-    // Verbatim or not at all: a sentence the model wrote must not be saved as one the user met.
-    if (!text || !conversation.includes(text)) continue;
-    const before = (p.before ?? "").trim();
-    picks.push({ text, before: before && conversation.includes(before) ? before : null, why: cut(p.why) });
+    const text = quoted(p.text);
+    if (text) picks.push({ text, before: quoted(p.before), why: cut(p.why) });
   }
   return picks.slice(0, 3);
 }
