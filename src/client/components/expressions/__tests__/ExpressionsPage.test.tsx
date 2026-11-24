@@ -28,13 +28,13 @@ function entry(over: Partial<ExpressionDetail> & { id: number; text: string | nu
 
 const NO_STATS: StatsResponse = { produced: 0, testableDays: 0, attemptDays: 0, since: null, judgeAt: null };
 const DAY_MS = 86_400_000;
-/** What a timeline row holds besides its kind, time, cue and outcome: all of it withheld while the entry is masked. */
-const BARE = { text: null, textBefore: null, myAttempt: null, sourceType: null, sourceTitle: null, sourceLocator: null, occurredAt: null, feedback: null };
+/** What a timeline row holds besides its kind, times, cue and outcome: all of it withheld while the entry is masked. */
+const BARE = { text: null, textBefore: null, myAttempt: null, sourceType: null, sourceTitle: null, sourceLocator: null, feedback: null };
 
 /** One more row at the end of an entry's timeline, a day after the last one. */
 function addRow(e: ExpressionDetail, over: Partial<EncounterView> & Pick<EncounterView, "kind">) {
   const last = e.timeline[e.timeline.length - 1];
-  e.timeline.push({ ...BARE, id: last.id + 1, createdAt: last.createdAt + DAY_MS, cue: null, outcome: null, ...over });
+  e.timeline.push({ ...BARE, id: last.id + 1, createdAt: last.createdAt + DAY_MS, occurredAt: null, cue: null, outcome: null, ...over });
 }
 
 // A stand-in for the API, small enough to read: it keeps the entries a test

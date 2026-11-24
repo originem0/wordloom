@@ -108,6 +108,8 @@ export interface EncounterView {
   id: number;
   kind: EncounterKind;
   createdAt: number;
+  /** On `met` rows: when it was met, which the user can set. A time, so it stays on a masked row. */
+  occurredAt: number | null;
   cue: Cue | null;
   outcome: Outcome | null;
   // Null on every row while the entry is masked.
@@ -117,7 +119,6 @@ export interface EncounterView {
   sourceType: SourceType | "find" | null;
   sourceTitle: string | null;
   sourceLocator: string | null;
-  occurredAt: number | null;
   /** Attempt rows only. */
   feedback: AttemptFeedback | null;
 }

@@ -767,9 +767,11 @@ describe("the 想用 layer", () => {
     for (const e of detail.timeline) {
       expect(e).toMatchObject({
         text: null, textBefore: null, myAttempt: null, feedback: null,
-        sourceType: null, sourceTitle: null, sourceLocator: null, occurredAt: null,
+        sourceType: null, sourceTitle: null, sourceLocator: null,
       });
     }
+    // A row keeps its time, the one the user gave included: the masked timeline dates it as the entry does.
+    expect(detail.timeline[0].occurredAt).toBe(1_600_000_000_000);
     expect((JSON.parse(bodies[5]) as DuplicateResponse).existing).toEqual([
       { id, masked: true, text: null, intent: INTENT, createdAt },
     ]);

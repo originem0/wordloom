@@ -149,6 +149,9 @@ function toEncounterView(r: EncounterRow, masked: boolean): EncounterView {
     id: r.id,
     kind: r.kind as EncounterView["kind"],
     createdAt: r.createdAt,
+    // A time is not private text. Withheld, the row would be dated by when it
+    // was written, and move to another day once the answer is looked at.
+    occurredAt: r.occurredAt,
     cue: r.cue as EncounterView["cue"],
     outcome: r.outcome as EncounterView["outcome"],
     text: masked ? null : r.text,
@@ -157,7 +160,6 @@ function toEncounterView(r: EncounterRow, masked: boolean): EncounterView {
     sourceType: masked ? null : (r.sourceType as EncounterView["sourceType"]),
     sourceTitle: masked ? null : r.sourceTitle,
     sourceLocator: masked ? null : r.sourceLocator,
-    occurredAt: masked ? null : r.occurredAt,
     feedback: masked ? null : attemptFeedback(r),
   };
 }
