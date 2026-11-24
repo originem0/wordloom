@@ -148,3 +148,53 @@ export const practices = sqliteTable("practices", {
 }, (table) => [
   index("practices_created_at_idx").on(table.createdAt),
 ]);
+
+// ---------------------------------------------------------------------------
+// Expressions: what the admin met and wants to be able to say. Private data:
+// every route that reads these two tables sits behind requirePrivate.
+// ---------------------------------------------------------------------------
+
+export const expressions = sqliteTable("expressions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  text: text("text").notNull(), // verbatim; the only required field
+  norm: text("norm").notNull(), // not unique: the same form can be saved as another sense
+  focus: text("focus"),
+  intent: text("intent"),
+  intentBy: text("intent_by"), // self | find | paste | ai
+  aiIntent: text("ai_intent"), // written once by the annotate call, never regenerated
+  gloss: text("gloss"), // AI-written, at most three lines
+  note: text("note"), // the user's own
+  status: text("status").notNull().default("seen"), // seen | active | retired
+  activeSince: integer("active_since"),
+  nextScene: text("next_scene"), // a cache for the next prompt, not a fact
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [
+  index("expressions_norm_idx").on(table.norm),
+  index("expressions_status_created_idx").on(table.status, table.createdAt),
+]);
+
+// The timeline. Rows are never deleted and `text` is never rewritten;
+// `outcome` and `feedback` may be filled in later on the same row. Level, due
+// time and "has produced it" are not columns: they are folded from these rows.
+export const encounters = sqliteTable("encounters", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  expressionId: integer("expression_id").references(() => expressions.id, {
+    onDelete: "cascade",
+  }),
+  kind: text("kind").notNull(), // met | looked_up | reveal | attempt | used
+  text: text("text").notNull(),
+  textBefore: text("text_before"),
+  myAttempt: text("my_attempt"),
+  sourceType: text("source_type"),
+  sourceTitle: text("source_title"),
+  sourceLocator: text("source_locator"),
+  outcome: text("outcome"), // pass | fail | null = not judged yet
+  cue: text("cue"),
+  feedback: text("feedback"), // JSON
+  occurredAt: integer("occurred_at"),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  index("encounters_expression_idx").on(table.expressionId, table.createdAt),
+  index("encounters_created_at_idx").on(table.createdAt),
+]);
