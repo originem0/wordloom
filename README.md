@@ -2,6 +2,8 @@
 
 一座公开可读的英语词卡库。任何人都能搜索、翻阅词卡；词卡由管理员用 AI 生成，一张卡上分层写着音标、词源、认知意象、家族对比和边界测试。
 
+管理员登录后另有一座只属于自己的表达库：把读到、聊到的说法连原句收下，要用的时候问得回来，隔些天再试着自己用出来。访客看不到它，也读不到它的任何接口。
+
 ## 功能
 
 **Word Forge** — 词卡库：谁都能查，管理员能造
@@ -36,6 +38,34 @@
   - **边界测试 (Boundary Tests)**：可折叠。填空题，答案先遮住；点"显示答案"后列出各备选词的对错和原因
 
 基础层还生成并存下了搭配、分级例句、语境阶梯、常用短语、近反义词和易混词，目前的词卡页面不展示它们（API 响应里有）；释义只出现在列表里，截到 40 个字符。
+
+**表达库** — 只属于管理员：收下、问回来、试着用出来
+
+管理员的首页就是它（访客的首页是词卡）。一个输入框做三件事：
+
+- **收**：贴一句话或一段对话，点"收下"。原文逐字保存，先落库再返回，不等模型
+  - 选中即焦点：一句话里选中的那几个词是焦点；一段对话里选中的那一段是原文，它前面最近的一段自动带作上文（可改）
+  - 来源标签：AI 对话 / 书 / 影视 / 其他，只在这一次停留里记住上一个选择
+  - 同一个说法再收一次，会问是"又一次遇到"还是"另存"为另一个意思
+  - 存下之后在后台请模型补一条注（至多三行，标明是 AI 写的）；没补上可以在详情里点"补注"重试
+- **问**：用自己的话说想表达什么（可以附上自己写的英文），先在自己存过的里面找，分"用出过的"和"存过没用出的"；模型再给至多两条新说法，附了英文时再给一处最小改动，点"收"才入库。可以接着追问：线程只在页面上，刷新即清，每次提问各记一行进时间线。问的是单个英文词而它有词卡时，直接给词卡链接，不调模型
+- **帮我挑**：框里是一段对话时出现。让模型挑出至多 3 句值得收的，每一句都必须是原文里逐字出现的，默认一条都不勾。勾了收下时，库里已经有同样说法的那一句不会直接存，照样在它下面问是"又一次遇到"还是"另存"
+
+收下的条目分两层：
+
+- **见过**：默认的一层，随时看得到原文
+- **想用**：写一句自己的提示句（"我想说……"）才放得进去。这一层的条目在列表、详情、时间线和"问"的结果里都不给英文——是服务端不发，不是页面上藏起来。要看就点"看答案"，这一眼会记在时间线上；在"问"里撞上遮着的命中，可以先试写一句再看（提问时附了自己的英文的，算已经试过，直接给）。档位不到 3 的条目同时出题的至多 12 条，多出来的排队
+
+**试一条**在输入框下面：到时间的"想用"条目每次至多出 3 条，给一个新情境（没有备用情境时给你的提示句），让你用一句英文说出来。
+
+- 提示逐级要：提示句 → 遮住目标的原场景 → 答案（等于放弃）
+- 模型只判三种："用上了" / "绕开但说通了" / "没说通"，并给至多两处最小改写；判错了可以推翻，算数的是你的结论
+- 隔 1、3、7、14、30 天各用出一次就毕业。看过答案之后 24 小时内的作答照记，不升档
+- 档位和到期时间都不存库，每次从时间线现算；时间线的行只增不删，详情里每一行都看得到
+
+页面上只有三个数：用出过几条、可测几天、其中作答几天，外加一个判定日期。没有进度条，没有连续天数。
+
+另外两个入口：词卡详情上有"收"（只有管理员看得到）；地址 `/#text=…&focus=…` 会预填输入框——只预填，不提交，并且用的是 `#` 片段而不是查询串，所以不会进任何访问日志。
 
 **移动端适配**
 
@@ -96,12 +126,12 @@ Windows（PowerShell）没有 `gunzip` 时可用 7-Zip 解压后改名为 `data/
 
 - **双 Provider 支持**：Gemini（官方或中转站）+ OpenAI-compatible（DeepSeek / GLM / Grok / Kimi 等），各自独立的 API Key 和 Base URL
 - **Detect & Verify**：探测中转站实际可用模型，逐个 ping 验证可用性（并发 5，自动过滤不可用模型）
-- **Model Routing**：Cards / Deep / Utility 三条路由，每条可独立选择 provider + primary model + fallback model
-- **Test Routes**：每条路由可单独 ⚡ 测试，也可 Test All Routes；Cards / Deep 检查返回的 JSON 结构，Utility 检查能否返回文本
+- **Model Routing**：Cards / Deep / Utility 三条路由，每条可独立选择 provider + primary model + fallback model；第四条 Expressions 给表达库用（补注、找、判定、帮我挑），留空的项沿用 Cards 路由，没有 fallback model
+- **Test Routes**：每条路由可单独 ⚡ 测试，也可 Test All Routes；Cards / Deep 检查返回的 JSON 结构，Utility 检查能否返回文本，Expressions 没有自己的探测，按 Cards 的方式测它那一行的 provider 和模型
 - **测试结果持久化**：绿点/红点 + 失败原因保留在 sessionStorage，刷新不丢失
 - **API Key 只写不读**：存下的 key 不会再发回浏览器，页面只知道"已配置"；输入框留空保存表示保留原值
 
-### Settings（`/settings`）— 公开，管理员多两项
+### Settings（`/settings`）— 公开，管理员多三项
 
 页面任何人可访问。存在浏览器里的偏好谁都能改；存在服务端的设置只有管理员看得到、改得了。
 
@@ -110,6 +140,7 @@ Windows（PowerShell）没有 `gunzip` 时可用 7-Zip 解压后改名为 `data/
 - **Account**：管理员登录 / 退出登录（手机上没有侧边栏，这里是唯一的入口）
 - **Language**（管理员）：解释性文本语言偏好（简体中文 / English / Bilingual）
 - **Network Tolerance**（管理员）：可调 `api_timeout_ms`（默认 60s，deep 路由自动 ×2）和 `api_max_retries`（默认 3）
+- **表达：帮我起草**（管理员）：在提示句旁放一个按钮，填进 AI 写的那句意思；条目还没有这一句时（补注没回来，或者那句话漏了答案被丢掉了），点它会再补注一次。默认关着，库满两周、"见过"不少于 20 条而"想用"不到 5 条时自己打开；勾上就现在打开
 
 ### 容错机制
 
@@ -117,11 +148,18 @@ Windows（PowerShell）没有 `gunzip` 时可用 7-Zip 解压后改名为 `data/
 - **智能重试**：仅重试暂态错误（502/503/timeout/rate limit），配额超限（RPD/TPD/quota）和认证错误立即失败
 - **Model fallback**：primary 失败后自动尝试 fallback model
 - **日志可追溯**：retry 和 fallback 切换均打印具体错误原因
+- **表达库的调用是例外**：页面在等它，所以每次只试一次、最多等 45 秒，不重试也不换模型，上面两项设置管不到它。句子在调用模型之前已经落库，判定没回来可以在同一行上重判，补注没回来可以重试，"问"失败时问题还在输入框里
 
 ### 权限与安全
 
 - **默认拒绝**：`/api/*` 下除白名单外一律需要管理员会话，否则 401。白名单只有读词卡（`GET /api/cards`、`GET /api/cards/:id`）、登录 / 退出 / 查询登录状态、健康检查，清单在 `src/server/middleware/guard.ts`。新加的路由不进清单就是私有的
-- **访客只读**：搜索、翻页、看词卡不用登录；生成、抽词、深度分析、删除、任务队列和所有设置都是管理员的
+- **访客只读**：搜索、翻页、看词卡不用登录；生成、抽词、深度分析、删除、任务队列、所有设置和整座表达库都是管理员的
+- **表达库是私人数据**，在默认拒绝之外再过一道守卫（`/api/expressions/*`）：
+  - 没设 `AUTH_TOKEN` 时拒绝服务（503），不按"开发模式人人是管理员"放行
+  - 响应一律带 `Cache-Control: no-store`，Service Worker 不缓存它们；退出登录时清掉浏览器里已经取到的表达数据
+  - 原文、提问和作答只走请求体，不进查询串，不进服务端日志和报错信息，不进 `jobs` / `settings` 表，也不进 `seed/` 的快照。只有一处例外：问的是一个已经有词卡的单词时，回答里那条"词卡"链接走的是公开的词卡搜索（`/cards?prefill=…`，页面随后请求 `GET /api/cards?search=…`），这个词会进地址栏、访问日志和 Service Worker 的词卡缓存，和任何人搜一次这张公开词卡留下的痕迹一样
+  - 它们是不可信文本：进 prompt 时放在数据区，模型没有工具、发起不了写入，模型写回来的内容一律按纯文本显示
+  - **会发给模型的**（经过你自己配的 provider 或中转站）：收下的原文和上文（补注）；每次"问"的问题、附的英文、这条线程的前几轮，连同整库的索引（每条的焦点或原文开头、提示句、AI 写的意图）；点"帮我挑"时框里的整段对话；"试一条"里的题面、你写的句子和目标表达
 - **管理页面**：AI Providers (`/providers`) 需要管理员登录，未登录时导航里不出现
 - **API key 不回传**：`GET /api/settings` 只对管理员开放，对 key 只回答有没有配置，不返回值
 - **CSRF 防护**：GET / HEAD / OPTIONS 之外的请求强制检查 Origin header
@@ -149,6 +187,7 @@ Windows（PowerShell）没有 `gunzip` 时可用 7-Zip 解压后改名为 `data/
 | Cards Model / Fallback | 卡片生成（短 JSON）主/备模型 | 见表下说明 / 空 |
 | Deep Model / Fallback | 深度分析（长 JSON）主/备模型 | 见表下说明 / 空 |
 | Utility Model / Fallback | 轻量任务（抽词）主/备模型 | 见表下说明 / 空 |
+| Expressions Model | 表达库（补注、找、判定、帮我挑）的模型，没有备用模型 | 空（沿用 Cards 的 provider 和模型） |
 | API Timeout | 单次 AI 请求超时（deep 自动 ×2），可设 5–300 秒 | `60000` ms |
 | Max Retries | 每个模型最多尝试几次（含第一次），可设 1–6 | `3` |
 
@@ -168,17 +207,18 @@ src/
 ├── client/                 # React SPA
 │   ├── components/
 │   │   ├── cards/          # Word Forge（统一查/造输入、词卡详情、集合视图）
+│   │   ├── expressions/    # 表达库（输入框：收 / 问 / 帮我挑；试一条；列表、详情与时间线）
 │   │   ├── settings/       # SettingsPage + AIProvidersPage + SettingWidgets
-│   │   ├── layout/         # 导航壳（3 tab: Cards/AI/Settings，AI 仅管理员可见）、任务面板、错误边界
+│   │   ├── layout/         # 导航壳（4 tab: 表达/Cards/AI/Settings，表达和 AI 仅管理员可见）、任务面板、错误边界
 │   │   ├── auth/           # 登录页、AuthGuard、AdminOnly
 │   │   └── ui/             # shadcn/ui 组件
-│   ├── hooks/              # TanStack Query hooks（useCards / useSettings / useAuth）
+│   ├── hooks/              # TanStack Query hooks（useCards / useExpressions / useSettings / useAuth）
 │   ├── lib/                # API 客户端、SVG 转图片、工具函数
 │   └── store/              # Zustand（任务队列、主题）
 ├── server/                 # Hono 后端
 │   ├── index.ts            # 进程入口：生产环境缺 AUTH_TOKEN / AUTH_SECRET 时拒绝启动
 │   ├── app.ts              # 中间件顺序 + 路由装配（测试直接 import，不占端口）
-│   ├── routes/             # API 路由（auth, cards, settings, settingsTest, jobs）
+│   ├── routes/             # API 路由（auth, cards, settings, settingsTest, jobs, expressions）
 │   ├── services/
 │   │   ├── ai-router.ts    # Provider 分发（读 {route}_provider 设置）
 │   │   ├── ai-shared.ts    # Retry/timeout/settings/semaphore/fallback
@@ -186,13 +226,18 @@ src/
 │   │   ├── ai-normalize.ts # JSON 解析 + schema drift 容错
 │   │   ├── gemini.ts       # Gemini SDK 调用
 │   │   ├── openai-compat.ts # OpenAI-compatible raw fetch 调用
+│   │   ├── expressions-view.ts # 表达库唯一的读路径：折叠、遮挡、出给页面的形状
+│   │   ├── expressions-fold.ts # 从时间线算档位和到期时间（纯函数）
+│   │   ├── expressions-find.ts # 问：拼索引、认 id、遮挡、落 looked_up 行
+│   │   ├── expressions-try.ts  # 试一条：出题、作答、判定回填、推翻、页面上的数
+│   │   ├── expressions-ai.ts   # 表达库的四个 prompt（补注 / 找 / 判定 / 帮我挑）
 │   │   ├── jobs.ts         # 异步任务（建任务、状态流转、启动时清理孤儿任务）
 │   │   └── semaphore.ts    # AI 调用的并发上限
-│   ├── middleware/         # guard（/api 默认拒绝 + 公开白名单）、auth（httpOnly cookie + HMAC session）、rateLimit
-│   └── db/                 # Drizzle schema + 连接（stories / practices / chunks 只剩表定义）
-└── shared/                 # 前后端共享类型、校验和默认值（types.ts, validation.ts, defaults.ts）
+│   ├── middleware/         # guard（/api 默认拒绝 + 公开白名单 + 表达库的私有守卫）、auth（httpOnly cookie + HMAC session）、rateLimit
+│   └── db/                 # Drizzle schema + 连接（stories / practices / chunks 只剩表定义；expressions / encounters 是表达库的两张表）
+└── shared/                 # 前后端共享类型、校验和默认值（types.ts, validation.ts, defaults.ts, expressions.ts）
 
-drizzle/                    # SQL 迁移（0006 含 lower(word)/lower(form) 表达式索引）
+drizzle/                    # SQL 迁移（0006 含 lower(word)/lower(form) 表达式索引；0011 建表达库的两张表）
 tools/                      # 运维脚本（backup-db.sh 备份、export-chunks.mjs 导出语块）
 deploy/                     # systemd 单元文件、nginx 的 Cloudflare 真实 IP 片段
 seed/                       # 可选的词库快照
@@ -264,6 +309,8 @@ proxy_set_header X-Real-IP $remote_addr;
 
 `backups/` 与数据库在同一块盘上，只防误删和写坏，不防磁盘损坏；重要数据请再同步到机器之外。
 
+迁移在服务启动时自动应用。升级到带新迁移的版本之前（比如建表达库两张表的 `0011`），先跑一次备份、把文件拷出主机并确认解得开；本地的 `data/app.db` 同理，`pnpm dev` 一启动就会迁移。回滚就是换回上一个构建：新表留在库里，旧代码不读它们。
+
 ### Docker
 
 ```bash
@@ -295,11 +342,59 @@ pnpm test            # 使用内存 SQLite，不会碰 data/app.db
 
 CI（`.github/workflows/ci.yml`）在 push / PR 时跑同样的检查，外加构建和生产依赖审计。
 
+### 表达库的两份评测
+
+表达库有两处的结论出自模型：「问」从库里找回收过的说法，「试一条」判定一句话有没有用上目标表达。它们靠不靠得住，上面的测试量不出来（测试里的模型是假的），要拿你自己的句子真的调一遍。`tools/eval-expressions.ts` 做的就是这件事。它调的是应用自己的代码，量到的就是页面会得到的：同样的 prompt，Expressions 路由配的服务商和模型，只试一次，最多等 45 秒。
+
+评测只在数据库的**副本**上跑：每问一次，「问」都会往流水账里写一行，写进真库就成了你的使用记录。脚本拒绝在 `data/app.db` 上运行。副本里有你的 API Key，评测集是你自己的句子，两样都放在仓库外面。
+
+```bash
+# 做副本。数据库是 WAL 模式，服务开着时不要直接拷 app.db：
+# 用 sqlite3 做快照，或者先停服务，再把 app.db 连同还在的 app.db-wal、app.db-shm 一起拷走
+mkdir -p ../eval
+sqlite3 data/app.db ".backup ../eval/app.db"
+
+# 在仓库根目录运行
+DATABASE_URL=file:../eval/app.db npx tsx tools/eval-expressions.ts recall ../eval/recall.json
+DATABASE_URL=file:../eval/app.db npx tsx tools/eval-expressions.ts judge ../eval/judge.json
+```
+
+```powershell
+$env:DATABASE_URL = "file:../eval/app.db"
+npx tsx tools/eval-expressions.ts recall ../eval/recall.json
+npx tsx tools/eval-expressions.ts judge ../eval/judge.json
+Remove-Item Env:DATABASE_URL   # 不清掉的话，这个终端里接着 pnpm dev 用的就是副本
+```
+
+**召回**（`recall`）回答「库里有的，问得出来吗」。评测集是一组你真实想说的话，每条写明库里应该回来哪几条：
+
+```json
+[
+  { "need": "怎么说我突然意识到", "attempt": "I suddenly knew", "expect": ["dawned on"] },
+  { "need": "一句库里没有对应说法的话", "expect": [] }
+]
+```
+
+`expect` 里的每一项用条目的字面指认（焦点，或原文里的一段，不分大小写），也可以写 id；同样的字面对上了不止一条时，回来任何一条都算。写了库里对不上的字面，脚本在调用模型之前就停下并指出是哪一条。`attempt` 可不写，相当于页面上「我自己的英文」那一栏。输出每条一行：`whole`（应该回来的都回来了）、`part`、`missed`、`quiet`（本来就不该有，也确实没有）、`noisy`（不该有却给了）、`FAILED`（模型没有答上来，不算漏）；最后是应该回来的条目里回来了多少。这个比例是要不要引入全文检索或向量检索的唯一依据：库小的时候整库索引一次塞得进 prompt，它明显不够用了才值得加检索层。
+
+**判定**（`judge`）回答「它说我没用上，是真的没用上吗」。评测集是一组你已经知道对错的句子：
+
+```json
+[
+  { "text": "It dawned on me that I was wrong.", "focus": "dawned on",
+    "prompt": "你突然明白自己错了。", "answer": "It finally dawned on him.", "used": true }
+]
+```
+
+`text` 和 `focus` 是那条表达（`focus` 可不写），`prompt` 是当时给的处境，`answer` 是写下的句子，`used` 是你自己的判断。要特意放几句「对，但写法不寻常」的。输出里最要紧的是 `uses the target, judged as not` 那一行：用上了却被判成没用上的比例。它高，「用出过」那个数就不可信，判定结果也就不该拿来记对错。
+
+两份评测最后都会报单次调用耗时的中位数和最大值，对照 45 秒的上限看。
+
 ## 环境变量
 
 | 变量 | 说明 | 必填 |
 |---|---|---|
-| `AUTH_TOKEN` | 管理员登录密码（在 `/login` 输入） | 生产环境必填 |
+| `AUTH_TOKEN` | 管理员登录密码（在 `/login` 输入） | 生产环境必填；本地要用表达库也必须设 |
 | `AUTH_SECRET` | Cookie 签名密钥（随机字符串） | 生产环境必填 |
 | `ALLOWED_ORIGINS` | 允许跨域访问 API 的前端 Origin（逗号分隔）。不设置时只接受同站请求 | 否（前后端同域时不需要） |
 | `DATABASE_URL` | SQLite 连接字符串 | 否（默认 `file:data/app.db`） |
@@ -307,7 +402,14 @@ CI（`.github/workflows/ci.yml`）在 push / PR 时跑同样的检查，外加�
 
 开发环境不设置 `AUTH_TOKEN` 则跳过认证，所有人都按管理员对待。
 
-权限模型：访客只能读词卡；`/api/*` 下其余的一切（生成、抽词、深度分析、删除、任务、设置）都需要管理员登录。公开白名单见 `src/server/middleware/guard.ts`。
+表达库是例外：没设 `AUTH_TOKEN` 时它的接口一律拒绝服务（503），页面上会说明原因。它存的是私人数据，不能靠"没配置"放行。本地要用它，先在启动 `pnpm dev` 的终端里设好再启动，然后到 `/login` 登录——`pnpm dev` 不读 `.env`（只有 systemd 单元和 Docker 读），所以要设成环境变量：
+
+```bash
+AUTH_TOKEN=本地用的密码 pnpm dev            # bash
+$env:AUTH_TOKEN = "本地用的密码"; pnpm dev   # PowerShell
+```
+
+权限模型：访客只能读词卡；`/api/*` 下其余的一切（生成、抽词、深度分析、删除、任务、设置、表达库）都需要管理员登录。公开白名单见 `src/server/middleware/guard.ts`。
 
 ## License
 
