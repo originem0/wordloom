@@ -16,11 +16,12 @@ function entry(over: Partial<ExpressionDetail> & { id: number; text: string | nu
   const row = {
     id: 100 + over.id, kind: "met" as const, createdAt: MET_AT, cue: null, outcome: null, text: over.text, textBefore: null,
     myAttempt: null, sourceType: over.sourceType ?? null, sourceTitle: over.sourceTitle ?? null, sourceLocator: null, occurredAt: MET_AT,
+    feedback: null,
   };
   return {
     status: "seen", masked: false, focus: null, intent: null, intentBy: null, sourceType: null, sourceTitle: null,
-    occurredAt: MET_AT, createdAt: MET_AT, updatedAt: MET_AT, note: null, gloss: null, aiIntent: null, annotated: false,
-    activeSince: null, timeline: [row], ...over,
+    occurredAt: MET_AT, createdAt: MET_AT, updatedAt: MET_AT, produced: false, graduated: false, queued: false,
+    note: null, gloss: null, aiIntent: null, annotated: false, activeSince: null, timeline: [row], ...over,
   };
 }
 
