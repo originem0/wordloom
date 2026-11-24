@@ -115,6 +115,7 @@ describe("Shell sign-out", () => {
     id: 5, status: "seen", masked: false, text: "It dawned on me.", focus: null, intent: null, intentBy: null,
     sourceType: null, sourceTitle: null, occurredAt: null, createdAt: 0, updatedAt: 0,
   };
+  const NUMBERS = { produced: 1, testableDays: 2, attemptDays: 1, since: 0, judgeAt: 28 * 86_400_000 };
 
   function renderSignedIn(logoutStatus: number, home = <p>home</p>) {
     vi.stubGlobal(
@@ -123,6 +124,9 @@ describe("Shell sign-out", () => {
         if (url === "/api/auth/me") return new Response(JSON.stringify({ authenticated: true }), { status: 200 });
         if (url === "/api/auth/logout") return new Response(JSON.stringify({ ok: logoutStatus === 200 }), { status: logoutStatus });
         if (url === "/api/expressions") return new Response(JSON.stringify({ expressions: [KEPT] }), { status: 200 });
+        // What the 表达 page reads beside its list, once that has answered.
+        if (url === "/api/expressions/stats") return new Response(JSON.stringify(NUMBERS), { status: 200 });
+        if (url === "/api/expressions/try") return new Response(JSON.stringify({ items: [] }), { status: 200 });
         throw new Error(`unexpected fetch ${url}`);
       }),
     );
@@ -160,12 +164,18 @@ describe("Shell sign-out", () => {
     expect(await screen.findByText("It dawned on me.")).toBeInTheDocument();
     expect(queryClient.getQueryData(["expressions"])).toEqual({ expressions: [KEPT] });
     expect(queryClient.getQueryData(["expressions", KEPT.id])).toBeDefined();
+    // The numbers follow the list, so they too are on screen and in the cache when the session ends.
+    expect(await screen.findByText(/用出过 1 条/)).toBeInTheDocument();
+    expect(queryClient.getQueryData(["expressions", "stats"])).toEqual(NUMBERS);
 
     fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
     expect(await screen.findByText("login page")).toBeInTheDocument();
     await new Promise((r) => setTimeout(r, 20));
     expect(kept()).toEqual([]);
-    expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual(["/api/auth/me", "/api/expressions", "/api/auth/logout"]);
+    // Whatever the page read while signed in, the sign-out is the last thing asked.
+    const asked = vi.mocked(fetch).mock.calls.map(([url]) => url);
+    expect(asked.at(-1)).toBe("/api/auth/logout");
+    expect(asked.filter((url) => url === "/api/auth/logout")).toHaveLength(1);
   });
 
   // The cookie is still valid on the server. Showing the login page would

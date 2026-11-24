@@ -25,6 +25,13 @@ function Visit({ page }: { page: string }) {
 
 const requested = () => vi.mocked(fetch).mock.calls.map(([url]) => String(url));
 const me = (authenticated: boolean) => new Response(JSON.stringify({ authenticated }), { status: 200 });
+/** Everything the 表达 page reads for an admin, as an empty library answers it. */
+const EMPTY: Record<string, unknown> = {
+  "/api/expressions": { expressions: [] },
+  "/api/expressions/stats": { produced: 0, testableDays: 0, attemptDays: 0, since: null, judgeAt: null },
+  "/api/expressions/try": { items: [] },
+  "/api/settings": {},
+};
 
 beforeEach(() => {
   visited = [];
@@ -33,7 +40,7 @@ beforeEach(() => {
     vi.fn((url: string) =>
       url === "/api/auth/me"
         ? new Promise<Response>((resolve) => (answerAuth = resolve))
-        : Promise.resolve(new Response(JSON.stringify({ expressions: [] }), { status: 200 })),
+        : Promise.resolve(new Response(JSON.stringify(EMPTY[url] ?? { error: "Not found" }), { status: url in EMPTY ? 200 : 404 })),
     ),
   );
 });
@@ -129,6 +136,10 @@ describe("a visitor at /", () => {
     await authAsked();
     answerAuth(me(true));
     expect(await screen.findByText("还没有收下任何表达。")).toBeInTheDocument();
-    expect(requested()).toEqual(["/api/auth/me", "/api/expressions"]);
+    // The numbers are asked for once the list has answered; 试一条 asks at the same point.
+    await waitFor(() => expect(requested()).toContain("/api/expressions/stats"));
+    expect(requested().slice(0, 2)).toEqual(["/api/auth/me", "/api/expressions"]);
+    expect(requested().filter((url) => url === "/api/expressions")).toHaveLength(1);
+    expect(requested().filter((url) => url !== "/api/auth/me" && !(url in EMPTY))).toEqual([]);
   });
 });

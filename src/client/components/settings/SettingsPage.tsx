@@ -25,6 +25,7 @@ import {
 } from "./SettingWidgets";
 import { Input } from "@/client/components/ui/input";
 import { DEFAULT_API_MAX_RETRIES, DEFAULT_API_TIMEOUT_MS } from "@/shared/defaults";
+import { DRAFT_SETTING_KEY } from "@/shared/expressions";
 
 type Theme = "light" | "dark" | "system";
 
@@ -32,6 +33,7 @@ const DEFAULTS: Record<string, string> = {
   analysis_language: "zh-CN",
   api_timeout_ms: String(DEFAULT_API_TIMEOUT_MS),
   api_max_retries: String(DEFAULT_API_MAX_RETRIES),
+  [DRAFT_SETTING_KEY]: "",
 };
 
 export function SettingsPage() {
@@ -236,6 +238,24 @@ export function SettingsPage() {
             {textField("api_timeout_ms", "API timeout (ms)", DEFAULTS.api_timeout_ms)}
             {textField("api_max_retries", "Max retries", DEFAULTS.api_max_retries)}
           </div>
+        </SettingRow>
+      )}
+
+      {/* 帮我起草 on the 表达 page opens by itself under the rule below. Checked, it is on whatever the rule says; "" leaves it to the rule. */}
+      {serverSettings === "ready" && (
+        <SettingRow
+          title="表达：帮我起草"
+          subtitle="在提示句旁放一个按钮，填进 AI 写的那句意思。库满两周、「见过」不少于 20 条而「想用」不到 5 条时会自己打开"
+          value={draftValue(DRAFT_SETTING_KEY) === "1" ? "开" : "按规则"}
+        >
+          <label className="flex items-center gap-2 text-[13px] text-foreground">
+            <input
+              type="checkbox"
+              checked={draftValue(DRAFT_SETTING_KEY) === "1"}
+              onChange={(e) => setDrafts((prev) => ({ ...prev, [DRAFT_SETTING_KEY]: e.target.checked ? "1" : "" }))}
+            />
+            现在就打开「帮我起草」
+          </label>
         </SettingRow>
       )}
 

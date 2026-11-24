@@ -5,28 +5,46 @@ import { Button } from "@/client/components/ui/button";
 import { Input } from "@/client/components/ui/input";
 import { useIsAdmin } from "@/client/hooks/useAuth";
 import { useExpressions, useGlossWatch } from "@/client/hooks/useExpressions";
+import { useSettings } from "@/client/hooks/useSettings";
 import { ApiError } from "@/client/lib/api";
+import { DRAFT_SETTING_KEY } from "@/shared/expressions";
 import { CaptureBox } from "./CaptureBox";
 import { ExpressionDetailDialog, Marked } from "./ExpressionDetail";
 import { StatsLine } from "./StatsLine";
 import { TryPanel } from "./TryPanel";
 import { SOURCE_LABELS, day, titleOf } from "./shared";
 
+// 全部 leaves out only what was put away, and comes first: an entry just saved
+// or just moved to the other layer is then still on top of what is shown.
+const LAYERS = [["all", "全部"], ["active", "想用"], ["seen", "见过"], ["retired", "已收起"]] as const;
+
 function ExpressionsInner() {
   // The route only brings an admin here; asking again keeps the rule in the
   // page itself: no admin, no request for private data.
-  const list = useExpressions(useIsAdmin());
+  const isAdmin = useIsAdmin();
+  const list = useExpressions(isAdmin);
   const [glossing, watchGloss] = useGlossWatch();
   const [query, setQuery] = useState("");
-  const [retired, setRetired] = useState(false);
+  const [layer, setLayer] = useState<(typeof LAYERS)[number][0]>("all");
   const [openId, setOpenId] = useState<number | null>(null);
+  const all = list.data?.expressions ?? [];
+
+  // 帮我起草 is on once it was switched on in Settings, or by itself under the
+  // rule written down before launch: two weeks in, twenty or more kept in 见过
+  // and fewer than five moved to 想用. Counted when the page reads the list.
+  const settings = useSettings({ enabled: isAdmin });
+  const [now] = useState(Date.now);
+  const inLayer = (status: string) => all.filter((e) => e.status === status).length;
+  const draft =
+    settings.data?.[DRAFT_SETTING_KEY] === "1" ||
+    (all.some((e) => now - e.createdAt >= 14 * 86_400_000) && inLayer("seen") >= 20 && inLayer("active") < 5);
 
   // Filtered here: the library stays in the hundreds, and a search term sent
   // to the server would be private text in a URL.
   const needle = query.trim().toLowerCase();
-  const shown = (list.data?.expressions ?? []).filter(
+  const shown = all.filter(
     (e) =>
-      (e.status === "retired") === retired &&
+      (layer === "all" ? e.status !== "retired" : e.status === layer) &&
       (!needle || [e.text, e.focus, e.intent, e.sourceTitle].some((field) => field?.toLowerCase().includes(needle))),
   );
 
@@ -48,8 +66,9 @@ function ExpressionsInner() {
           <section className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Input aria-label="筛选" className="max-w-xs flex-1" placeholder="筛选：原文、焦点、意思、出处" value={query} onChange={(e) => setQuery(e.target.value)} />
-              <Button size="sm" variant={retired ? "outline" : "default"} aria-pressed={!retired} onClick={() => setRetired(false)}>见过</Button>
-              <Button size="sm" variant={retired ? "default" : "outline"} aria-pressed={retired} onClick={() => setRetired(true)}>已收起</Button>
+              {LAYERS.map(([value, label]) => (
+                <Button key={value} size="sm" variant={layer === value ? "default" : "outline"} aria-pressed={layer === value} onClick={() => setLayer(value)}>{label}</Button>
+              ))}
             </div>
             {list.isLoading && <Loader2 className="mx-auto my-8 size-5 animate-spin text-muted-foreground" />}
             {list.error && <p className="text-sm text-destructive">读取失败：{list.error.message}</p>}
@@ -65,17 +84,19 @@ function ExpressionsInner() {
                     <span className="line-clamp-3 whitespace-pre-line text-sm">
                       <Marked text={titleOf(e)} mark={e.text ? e.focus : null} />
                     </span>
+                    {/* What the timeline says of the entry, in words: no level, no due date, nothing to keep score with. */}
                     <span className="mt-1 block text-xs text-muted-foreground">
-                      {e.sourceType ? SOURCE_LABELS[e.sourceType] : "未记录"}
-                      {e.sourceTitle && ` · ${e.sourceTitle}`} · {day(e.occurredAt ?? e.createdAt)}
-                      {glossing === e.id && " · 补注中"}
+                      {[
+                        e.status === "active" && "想用", e.queued && "排队中", e.graduated && "已毕业", e.produced && "用出过",
+                        e.sourceType ? SOURCE_LABELS[e.sourceType] : "未记录", e.sourceTitle, day(e.occurredAt ?? e.createdAt), glossing === e.id && "补注中",
+                      ].filter(Boolean).join(" · ")}
                     </span>
                   </button>
                 </li>
               ))}
             </ul>
           </section>
-          <ExpressionDetailDialog id={openId} glossing={glossing === openId} onClose={() => setOpenId(null)} />
+          <ExpressionDetailDialog id={openId} glossing={glossing === openId} draft={draft} onClose={() => setOpenId(null)} />
         </>
       )}
     </div>
