@@ -9,10 +9,10 @@
 //   POST   /:id/encounters                  EncounterRequest → 201 ExpressionDetail
 //   POST   /:id/annotate                    → ExpressionDetail | 502 { code: "ANNOTATE_FAILED" }
 //   POST   /:id/reveal                      RevealRequest    → ExpressionDetail, unmasked this once
-//   GET    /:id/scene                       SceneResponse | 404
+//   GET    /:id/scene                       SceneResponse | 404 { code: "NO_SCENE" }
 //   POST   /:id/attempts                    AttemptRequest   → 201 AttemptResponse | 409 { code: "NOT_ACTIVE" }
 //   POST   /attempts/:encounterId/judge     → AttemptResponse
-//   POST   /attempts/:encounterId/overturn  OverturnRequest  → AttemptResponse
+//   POST   /attempts/:encounterId/overturn  OverturnRequest  → AttemptResponse | 409 { code: "NOT_JUDGED" }
 //   GET    /try?exclude=1,2                 TryResponse
 //   POST   /find                            FindRequest      → FindResponse | 502 { code: "FIND_FAILED" }
 //   POST   /pick                            PickRequest      → PickResponse | 502 { code: "PICK_FAILED" }
