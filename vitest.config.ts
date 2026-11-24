@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +12,9 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    // .claude/worktrees holds whole checkouts of this repo (agent worktrees);
+    // without this their test files run as part of ours.
+    exclude: [...configDefaults.exclude, ".claude/**"],
     // Tests must never touch data/app.db: db/index.ts falls back to the real
     // file when DATABASE_URL is unset, and auth.test.ts wipes the sessions
     // table in beforeEach — every `pnpm test` used to log the admin out of

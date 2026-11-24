@@ -50,6 +50,7 @@ Thumbs.db
 backups/
 .codex
 .claude/settings.local.json
+.claude/worktrees/
 tmp/batch-progress.json
 tmp/batch-failed.json
 
