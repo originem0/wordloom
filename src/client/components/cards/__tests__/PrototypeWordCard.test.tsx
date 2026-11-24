@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import { MemoryRouter } from "react-router-dom";
 import { PrototypeWordCard } from "../PrototypeWordCard";
 import type { Card } from "@/shared/types";
 
@@ -106,7 +107,7 @@ describe("a card without a deep layer", () => {
 
   it("waits for the admin to ask before generating", () => {
     isAdmin = true;
-    render(<PrototypeWordCard card={bare()} />);
+    render(<PrototypeWordCard card={bare()} />, { wrapper: MemoryRouter });
     expect(mutate).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "生成深度分析" }));
@@ -117,7 +118,7 @@ describe("a card without a deep layer", () => {
   it("shows progress in place of the offer while generating", () => {
     isAdmin = true;
     deep = { isPending: true, isError: false, data: null };
-    render(<PrototypeWordCard card={bare()} />);
+    render(<PrototypeWordCard card={bare()} />, { wrapper: MemoryRouter });
     expect(screen.getByText("正在生成深度分析…")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "生成深度分析" })).toBeNull();
   });
@@ -125,7 +126,7 @@ describe("a card without a deep layer", () => {
   it("says why an attempt failed and offers another", () => {
     isAdmin = true;
     deep = { isPending: false, isError: true, data: null, error: new Error("upstream timeout") };
-    render(<PrototypeWordCard card={bare()} />);
+    render(<PrototypeWordCard card={bare()} />, { wrapper: MemoryRouter });
     expect(screen.getByText("深度分析生成失败：upstream timeout")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
@@ -139,8 +140,23 @@ describe("a card without a deep layer", () => {
       isError: false,
       data: { schemaAnalysis: { coreSchema: "blockage", coreImageText: "Something in the way." } },
     };
-    render(<PrototypeWordCard card={bare()} />);
+    render(<PrototypeWordCard card={bare()} />, { wrapper: MemoryRouter });
     expect(screen.getByText("Something in the way.")).toBeInTheDocument();
     expect(screen.queryByText("这张词卡还没有深度分析。")).toBeNull();
+  });
+});
+
+// 收 saves nothing by itself: it leads to the capture box. The word travels in
+// the fragment, the one part of a URL that is never sent to a server.
+describe("收 on a card", () => {
+  it("is not offered to a visitor", () => {
+    render(<PrototypeWordCard card={makeCard({})} />);
+    expect(screen.queryByRole("link", { name: "收" })).toBeNull();
+  });
+
+  it("takes the admin to the capture box with the word as the focus", () => {
+    isAdmin = true;
+    render(<PrototypeWordCard card={makeCard({ word: "rock & roll" })} />, { wrapper: MemoryRouter });
+    expect(screen.getByRole("link", { name: "收" })).toHaveAttribute("href", "/#focus=rock%20%26%20roll");
   });
 });

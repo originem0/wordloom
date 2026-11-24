@@ -1,13 +1,15 @@
 import { Link, Outlet, NavLink } from "react-router-dom";
-import { Layers, Cpu, Settings, Sun, Moon, LogIn, LogOut, type LucideIcon } from "lucide-react";
+import { Layers, Cpu, Quote, Settings, Sun, Moon, LogIn, LogOut, type LucideIcon } from "lucide-react";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
 import { useIsAdmin, useLogout } from "@/client/hooks/useAuth";
 import { TaskPanel } from "./TaskPanel";
 
 // A visitor reads cards and nothing else, so the page that configures the
-// models is not on their menu (the route itself sits behind AuthGuard).
+// models is not on their menu (the route itself sits behind AuthGuard), and
+// neither is 表达, the admin's home: for a visitor `/` leads to the cards.
 const navItems: Array<{ to: string; icon: LucideIcon; label: string; adminOnly?: boolean }> = [
+  { to: "/", icon: Quote, label: "表达", adminOnly: true },
   { to: "/cards", icon: Layers, label: "Cards" },
   { to: "/providers", icon: Cpu, label: "AI", adminOnly: true },
   { to: "/settings", icon: Settings, label: "Settings" },
@@ -52,6 +54,7 @@ export function Shell() {
             <NavLink
               key={to}
               to={to}
+              end={to === "/"}
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
                   isActive
@@ -101,6 +104,7 @@ export function Shell() {
           <NavLink
             key={to}
             to={to}
+            end={to === "/"}
             className={({ isActive }) =>
               `flex flex-col items-center justify-center gap-1 min-h-11 min-w-11 px-2 text-[11px] transition-colors ${
                 isActive ? "text-foreground font-medium" : "text-muted-foreground"

@@ -8,6 +8,7 @@ import type { Card } from "@/shared/types";
 vi.mock("@/client/hooks/useCards", () => ({
   useGenerateDeep: () => ({ mutate: vi.fn(), isPending: false, isError: false, data: null }),
 }));
+vi.mock("@/client/hooks/useAuth", () => ({ useIsAdmin: () => false }));
 
 // Deep-layer fields are model output, and what the model reads (a word, or a
 // passage pasted in for extraction) can come from anywhere. Everything below

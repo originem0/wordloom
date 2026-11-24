@@ -8,16 +8,29 @@ import { useTaskStore } from "@/client/store/tasks";
 
 export const AUTH_QUERY_KEY = ["auth", "me"] as const;
 
+const authQuery = {
+  queryKey: AUTH_QUERY_KEY,
+  queryFn: () => apiFetch<{ authenticated: boolean }>("/api/auth/me"),
+};
+
 /**
  * Whether the current browser holds an admin session.
  * False while loading and on error: admin-only controls fail closed.
  */
 export function useIsAdmin(): boolean {
-  const { data } = useQuery({
-    queryKey: AUTH_QUERY_KEY,
-    queryFn: () => apiFetch<{ authenticated: boolean }>("/api/auth/me"),
-  });
+  const { data } = useQuery(authQuery);
   return data?.authenticated === true;
+}
+
+/**
+ * The same answer for a caller that must not act on a guess: undefined while
+ * it is unknown. That is the first load, and also a cached "no" that is being
+ * asked again: right after login the cache still holds the visitor's answer.
+ */
+export function useAdminOnceKnown(): boolean | undefined {
+  const { data, isPending, isFetching } = useQuery(authQuery);
+  const isAdmin = data?.authenticated === true;
+  return isPending || (!isAdmin && isFetching) ? undefined : isAdmin;
 }
 
 /**

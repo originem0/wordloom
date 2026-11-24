@@ -9,12 +9,15 @@
 export class ApiError extends Error {
   readonly status: number;
   readonly code?: string;
+  /** The parsed JSON body, for a refusal that carries more than a message. */
+  readonly body?: unknown;
 
-  constructor(message: string, status: number, code?: string) {
+  constructor(message: string, status: number, code?: string, body?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.body = body;
   }
 }
 
@@ -37,7 +40,7 @@ export async function apiFetch<T = unknown>(
       body = {};
     }
     const message = typeof body.error === "string" ? body.error : text || `Request failed: ${res.status}`;
-    throw new ApiError(message, res.status, typeof body.code === "string" ? body.code : undefined);
+    throw new ApiError(message, res.status, typeof body.code === "string" ? body.code : undefined, body);
   }
 
   const text = await res.text();

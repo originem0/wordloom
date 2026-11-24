@@ -25,6 +25,8 @@ const ROUTES = [
   { key: "cards", label: "Cards", subtitle: "短 JSON、稳定结构", testTarget: "cardsModel" },
   { key: "deep", label: "Deep Analysis", subtitle: "长 JSON、schemaAnalysis、SVG", testTarget: "deepModel" },
   { key: "utility", label: "Utility", subtitle: "抽词、轻量文本", testTarget: "utilityModel" },
+  // No probe of its own: it is tested as a cards call on this row's provider and model.
+  { key: "expressions", label: "Expressions", subtitle: "表达库的补注。留空的项沿用 Cards 路由", testTarget: "cardsModel", inherits: "cards" },
 ] as const;
 
 const GEMINI_DEFAULTS: Record<string, string> = {
@@ -34,7 +36,20 @@ const GEMINI_DEFAULTS: Record<string, string> = {
   deep_fallback_model: "",
   utility_model: "",
   utility_fallback_model: "",
+  expressions_model: "",
+  expressions_fallback_model: "",
 };
+
+/**
+ * What a route runs on, as the server resolves it: its own setting, then, for
+ * a route that inherits, the same setting of the route it follows.
+ */
+function resolveRoute(route: (typeof ROUTES)[number], get: (key: string) => string, generalModel?: string) {
+  const setting = (name: string) => get(`${route.key}_${name}`) || ("inherits" in route ? get(`${route.inherits}_${name}`) : "");
+  const provider = (setting("provider") || "gemini") as ProviderType;
+  const model = setting(provider === "openai" ? "openai_model" : "model") || (provider === "gemini" ? generalModel || "gemini-2.5-flash" : "");
+  return { provider, model };
+}
 
 /** Model list detected earlier in this browser session ([] if none or unreadable). */
 function readCachedModels(storageKey: string): string[] {
@@ -108,9 +123,10 @@ export function AIProvidersPage() {
       openai_api_key: "",
       openai_base_url: settings.openai_base_url ?? "",
     };
-    // Route providers
+    // Route providers. One that inherits stays empty until chosen: seeding it
+    // with "gemini" would pin it on the next save and stop it following.
     for (const r of ROUTES) {
-      d[`${r.key}_provider`] = settings[`${r.key}_provider`] ?? "gemini";
+      d[`${r.key}_provider`] = settings[`${r.key}_provider`] ?? ("inherits" in r ? "" : "gemini");
     }
     // Gemini model keys
     for (const [k, v] of Object.entries(GEMINI_DEFAULTS)) {
@@ -215,9 +231,7 @@ export function AIProvidersPage() {
     setTestingAll(true);
     try {
       await Promise.allSettled(ROUTES.map((route) => {
-        const provider = (draftValue(`${route.key}_provider`) || "gemini") as ProviderType;
-        const primaryKey = provider === "openai" ? `${route.key}_openai_model` : `${route.key}_model`;
-        const model = draftValue(primaryKey) || (provider === "gemini" ? (settings?.general_model || "gemini-2.5-flash") : "");
+        const { provider, model } = resolveRoute(route, draftValue, settings?.general_model);
         if (!model) return Promise.resolve();
         return testRoute(route.key, route.testTarget, model, provider);
       }));
@@ -358,14 +372,6 @@ export function AIProvidersPage() {
   const getRouteModelKey = (routeKey: string, provider: ProviderType, suffix: string) =>
     provider === "openai" ? `${routeKey}_openai_${suffix}` : `${routeKey}_${suffix}`;
 
-  const resolveRuntimeModel = (routeKey: string, provider: ProviderType) => {
-    const key = getRouteModelKey(routeKey, provider, "model");
-    const val = draftValue(key);
-    if (val) return val;
-    if (provider === "gemini") return settings?.general_model || "gemini-2.5-flash";
-    return "(not set)";
-  };
-
   return (
     <div className="mx-auto max-w-2xl px-4 pt-6 pb-24 md:px-6">
       <h1 className="text-xl font-semibold text-foreground">AI Providers</h1>
@@ -488,12 +494,13 @@ export function AIProvidersPage() {
       </div>
 
       {ROUTES.map((route) => {
-        const provider = (draftValue(`${route.key}_provider`) || "gemini") as ProviderType;
+        const follows = "inherits" in route;
+        const { provider, model } = resolveRoute(route, draftValue, settings?.general_model);
         const models = provider === "openai" ? openaiModels : geminiModels;
-        const candidates = roleCandidates(models, route.key);
+        const candidates = roleCandidates(models, follows ? route.inherits : route.key);
         const primaryKey = getRouteModelKey(route.key, provider, "model");
         const fallbackKey = getRouteModelKey(route.key, provider, "fallback_model");
-        const runtimeModel = resolveRuntimeModel(route.key, provider);
+        const runtimeModel = model || "(not set)";
         const health = routeHealth[route.key];
         const healthLabel = health
           ? health.ok
@@ -537,13 +544,14 @@ export function AIProvidersPage() {
                 <div className="text-[13px] font-medium text-foreground">Provider</div>
                 <select
                   className={SELECT_CLASS}
-                  value={provider}
+                  value={follows ? draftValue(`${route.key}_provider`) : provider}
                   onChange={(e) => setDraft(`${route.key}_provider`, e.target.value)}
                 >
+                  {follows && <option value="">沿用 Cards</option>}
                   {PROVIDERS.map((p) => (<option key={p} value={p}>{p === "gemini" ? "Gemini" : "OpenAI-compatible"}</option>))}
                 </select>
               </div>
-              {modelField(primaryKey, "Primary Model", provider === "gemini" ? "Leave empty to inherit" : "e.g. deepseek-chat", candidates, undefined, provider === "gemini")}
+              {modelField(primaryKey, "Primary Model", provider === "gemini" || follows ? "Leave empty to inherit" : "e.g. deepseek-chat", candidates, undefined, provider === "gemini" || follows)}
               {modelField(fallbackKey, "Fallback Model", "Optional", candidates, "Primary 失败后尝试。", true)}
             </div>
           </SettingRow>

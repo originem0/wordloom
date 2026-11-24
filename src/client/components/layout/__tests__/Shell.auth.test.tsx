@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { queryClient } from "@/client/lib/query-client";
 import { useTaskStore } from "@/client/store/tasks";
+import { ExpressionsPage } from "@/client/components/expressions/ExpressionsPage";
 import { Shell } from "../Shell";
 
 vi.mock("../TaskPanel", () => ({ TaskPanel: () => null }));
@@ -14,7 +15,7 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }));
 
-function renderShell(authenticated: boolean) {
+function renderShell(authenticated: boolean, at = "/") {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) =>
@@ -24,10 +25,10 @@ function renderShell(authenticated: boolean) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/"]}>
+      <MemoryRouter initialEntries={[at]}>
         <Routes>
           <Route element={<Shell />}>
-            <Route path="/" element={<p>home</p>} />
+            <Route path="*" element={<p>home</p>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -66,15 +67,17 @@ describe("Shell account control", () => {
 });
 
 // The page that configures the models is the admin's (its route sits behind
-// AuthGuard), so it is not on a visitor's menu. Each entry appears twice: once
-// in the sidebar, once in the bottom bar a phone shows instead.
+// AuthGuard), so it is not on a visitor's menu, and neither is 表达, the
+// admin's own library. Each entry appears twice: once in the sidebar, once in
+// the bottom bar a phone shows instead.
 describe("Shell navigation", () => {
-  it("shows a visitor the card library and the settings, not the AI page", async () => {
+  it("shows a visitor the card library and the settings, not the AI page or 表达", async () => {
     renderShell(false);
     await authSettled();
     expect(screen.getAllByRole("link", { name: "Cards" })).toHaveLength(2);
     expect(screen.getAllByRole("link", { name: "Settings" })).toHaveLength(2);
     expect(screen.queryAllByRole("link", { name: "AI" })).toHaveLength(0);
+    expect(screen.queryAllByRole("link", { name: "表达" })).toHaveLength(0);
   });
 
   it("adds the AI page for the admin", async () => {
@@ -83,17 +86,43 @@ describe("Shell navigation", () => {
     expect(screen.getAllByRole("link", { name: "AI" })).toHaveLength(2);
     expect(screen.getAllByRole("link", { name: "Cards" })).toHaveLength(2);
   });
+
+  it("puts 表达 first on the admin's menu, leading home", async () => {
+    renderShell(true);
+    await screen.findByRole("button", { name: "退出登录" });
+    const links = screen.getAllByRole("link", { name: "表达" });
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      expect(link).toHaveAttribute("href", "/");
+      expect(link.parentElement!.firstElementChild).toBe(link);
+      expect(link).toHaveAttribute("aria-current", "page");
+    }
+  });
+
+  // Every path starts with "/": matched as a prefix, 表达 would be lit on every page.
+  it("marks 表达 as the current page on the home page only", async () => {
+    renderShell(true, "/cards");
+    await screen.findByRole("button", { name: "退出登录" });
+    for (const link of screen.getAllByRole("link", { name: "表达" })) expect(link).not.toHaveAttribute("aria-current");
+    for (const link of screen.getAllByRole("link", { name: "Cards" })) expect(link).toHaveAttribute("aria-current", "page");
+  });
 });
 
 // Signing out has to take with it what this browser read and followed as the
 // admin, or the next person at the screen is shown it from memory.
 describe("Shell sign-out", () => {
-  function renderSignedIn(logoutStatus: number) {
+  const KEPT = {
+    id: 5, status: "seen", masked: false, text: "It dawned on me.", focus: null, intent: null, intentBy: null,
+    sourceType: null, sourceTitle: null, occurredAt: null, createdAt: 0, updatedAt: 0,
+  };
+
+  function renderSignedIn(logoutStatus: number, home = <p>home</p>) {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
         if (url === "/api/auth/me") return new Response(JSON.stringify({ authenticated: true }), { status: 200 });
         if (url === "/api/auth/logout") return new Response(JSON.stringify({ ok: logoutStatus === 200 }), { status: logoutStatus });
+        if (url === "/api/expressions") return new Response(JSON.stringify({ expressions: [KEPT] }), { status: 200 });
         throw new Error(`unexpected fetch ${url}`);
       }),
     );
@@ -104,7 +133,7 @@ describe("Shell sign-out", () => {
         <MemoryRouter initialEntries={["/"]}>
           <Routes>
             <Route element={<Shell />}>
-              <Route path="/" element={<p>home</p>} />
+              <Route path="/" element={home} />
             </Route>
             <Route path="/login" element={<p>login page</p>} />
           </Routes>
@@ -120,6 +149,23 @@ describe("Shell sign-out", () => {
     expect(await screen.findByText("login page")).toBeInTheDocument();
     expect(queryClient.getQueryData(["settings"])).toBeUndefined();
     expect(useTaskStore.getState().tasks).toEqual([]);
+  });
+
+  // The expression library is the most private thing here. Signed out from the
+  // page itself, with the list on screen and an entry that had been opened.
+  it("leaves no expression behind, and asks for none again", async () => {
+    const kept = () => queryClient.getQueryCache().findAll({ queryKey: ["expressions"] });
+    queryClient.setQueryData(["expressions", KEPT.id], { ...KEPT, note: "a private note" });
+    renderSignedIn(200, <ExpressionsPage />);
+    expect(await screen.findByText("It dawned on me.")).toBeInTheDocument();
+    expect(queryClient.getQueryData(["expressions"])).toEqual({ expressions: [KEPT] });
+    expect(queryClient.getQueryData(["expressions", KEPT.id])).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
+    expect(await screen.findByText("login page")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(kept()).toEqual([]);
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual(["/api/auth/me", "/api/expressions", "/api/auth/logout"]);
   });
 
   // The cookie is still valid on the server. Showing the login page would

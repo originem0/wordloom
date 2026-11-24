@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useGenerateDeep } from "@/client/hooks/useCards";
 import { AdminOnly } from "@/client/components/auth/AdminOnly";
 import type { BoundaryTest, BoundaryTestOption, Card } from "@/shared/types";
@@ -162,6 +163,13 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
               <span className="chip">WAP {deepCard.wap.toFixed(1)}</span>
             )}
           </div>
+          {/* Leads to the capture box with this word as the focus. Nothing is
+              saved until the admin presses 收下 there. */}
+          <AdminOnly>
+            <Link className="reveal-btn" title="收进表达库" to={`/#focus=${encodeURIComponent(deepCard.word)}`}>
+              收
+            </Link>
+          </AdminOnly>
         </header>
 
         {/* 2. Core image — custom SVG or fallback template */}
