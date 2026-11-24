@@ -1,4 +1,5 @@
 import { createMiddleware } from "hono/factory";
+import type { HttpBindings } from "@hono/node-server";
 import { authMiddleware } from "./auth.js";
 
 // Default-deny for the whole API.
@@ -31,12 +32,24 @@ export const requireAuth = createMiddleware(async (c, next) => {
   return authMiddleware(c, next);
 });
 
+// The one way past the refusal below, for trying the library out on one's own
+// machine: the switch, a server that is not a production one, and a request
+// that this machine sent. It does nothing once AUTH_TOKEN is set, and index.ts
+// starts no production server without AUTH_TOKEN, so a deployment cannot end up
+// here by leaving something out. A reverse proxy or a tunnel in front makes
+// every caller look local: the switch is not for a server that has one.
+const LOOPBACK = ["127.0.0.1", "::1", "::ffff:127.0.0.1"];
+const openLocally = (env: Partial<HttpBindings> | undefined) =>
+  process.env.EXPRESSIONS_OPEN_LOCALLY === "1" &&
+  process.env.NODE_ENV !== "production" &&
+  LOOPBACK.includes(env?.incoming?.socket?.remoteAddress ?? "");
+
 // Second gate for private data. The global guard lets everything through when
 // AUTH_TOKEN is unset (dev mode); private routes do the opposite and refuse to
 // serve. Mount it on a pattern ending in "/*": a bare "/api/x" would leave
 // every sub-path to the global guard alone.
 export const requirePrivate = createMiddleware(async (c, next) => {
-  if (!process.env.AUTH_TOKEN) {
+  if (!process.env.AUTH_TOKEN && !openLocally(c.env)) {
     return c.json({ error: "Set AUTH_TOKEN to use private routes", code: "AUTH_NOT_CONFIGURED" }, 503);
   }
   c.header("Cache-Control", "no-store");

@@ -58,7 +58,7 @@ function ExpressionsInner() {
       </section>
       {/* Without AUTH_TOKEN the app treats everyone as the admin, and the server refuses to serve private data. */}
       {list.error instanceof ApiError && list.error.code === "AUTH_NOT_CONFIGURED" ? (
-        <p className="rounded-md border p-4 text-sm">表达库是私人数据，服务器没有设置 AUTH_TOKEN 时不提供：请设置 AUTH_TOKEN、重启服务，然后登录。</p>
+        <p className="rounded-md border p-4 text-sm">表达库是私人数据，服务器没有设置 AUTH_TOKEN 时不提供：请设置 AUTH_TOKEN、重启服务，然后登录。只在这台机器上试用的话，也可以改设 EXPRESSIONS_OPEN_LOCALLY=1 再重启，不用登录。</p>
       ) : (
         <>
           <CaptureBox onSaved={watchGloss} />

@@ -155,7 +155,7 @@ Windows（PowerShell）没有 `gunzip` 时可用 7-Zip 解压后改名为 `data/
 - **默认拒绝**：`/api/*` 下除白名单外一律需要管理员会话，否则 401。白名单只有读词卡（`GET /api/cards`、`GET /api/cards/:id`）、登录 / 退出 / 查询登录状态、健康检查，清单在 `src/server/middleware/guard.ts`。新加的路由不进清单就是私有的
 - **访客只读**：搜索、翻页、看词卡不用登录；生成、抽词、深度分析、删除、任务队列、所有设置和整座表达库都是管理员的
 - **表达库是私人数据**，在默认拒绝之外再过一道守卫（`/api/expressions/*`）：
-  - 没设 `AUTH_TOKEN` 时拒绝服务（503），不按"开发模式人人是管理员"放行
+  - 没设 `AUTH_TOKEN` 时拒绝服务（503），不按"开发模式人人是管理员"放行。唯一的例外是留给本机试用的开关 `EXPRESSIONS_OPEN_LOCALLY=1`，见下面的"环境变量"
   - 响应一律带 `Cache-Control: no-store`，Service Worker 不缓存它们；退出登录时清掉浏览器里已经取到的表达数据
   - 原文、提问和作答只走请求体，不进查询串，不进服务端日志和报错信息，不进 `jobs` / `settings` 表，也不进 `seed/` 的快照。只有一处例外：问的是一个已经有词卡的单词时，回答里那条"词卡"链接走的是公开的词卡搜索（`/cards?prefill=…`，页面随后请求 `GET /api/cards?search=…`），这个词会进地址栏、访问日志和 Service Worker 的词卡缓存，和任何人搜一次这张公开词卡留下的痕迹一样
   - 它们是不可信文本：进 prompt 时放在数据区，模型没有工具、发起不了写入，模型写回来的内容一律按纯文本显示
@@ -394,8 +394,9 @@ Remove-Item Env:DATABASE_URL   # 不清掉的话，这个终端里接着 pnpm de
 
 | 变量 | 说明 | 必填 |
 |---|---|---|
-| `AUTH_TOKEN` | 管理员登录密码（在 `/login` 输入） | 生产环境必填；本地要用表达库也必须设 |
+| `AUTH_TOKEN` | 管理员登录密码（在 `/login` 输入） | 生产环境必填；本地要用表达库也要设，除非打开下面的本机试用开关 |
 | `AUTH_SECRET` | Cookie 签名密钥（随机字符串） | 生产环境必填 |
+| `EXPRESSIONS_OPEN_LOCALLY` | 设为 `1` 时，没设 `AUTH_TOKEN` 的非生产服务对本机发来的请求开放表达库，不用登录。只为在自己机器上试用 | 否（默认关） |
 | `ALLOWED_ORIGINS` | 允许跨域访问 API 的前端 Origin（逗号分隔）。不设置时只接受同站请求 | 否（前后端同域时不需要） |
 | `DATABASE_URL` | SQLite 连接字符串 | 否（默认 `file:data/app.db`） |
 | `PORT` | 服务端口 | 否（默认 3001） |
@@ -408,6 +409,15 @@ Remove-Item Env:DATABASE_URL   # 不清掉的话，这个终端里接着 pnpm de
 AUTH_TOKEN=本地用的密码 pnpm dev            # bash
 $env:AUTH_TOKEN = "本地用的密码"; pnpm dev   # PowerShell
 ```
+
+只是在自己机器上试用、不想登录的话，可以改用本机试用的开关：
+
+```bash
+EXPRESSIONS_OPEN_LOCALLY=1 pnpm dev            # bash
+$env:EXPRESSIONS_OPEN_LOCALLY = "1"; pnpm dev   # PowerShell
+```
+
+它只在三个条件同时成立时放行：没设 `AUTH_TOKEN`；不是生产模式（`NODE_ENV=production` 时无效，而生产模式没有 `AUTH_TOKEN` 根本不启动）；请求是这台机器自己发来的（局域网里别的设备连过来照旧是 503）。设了 `AUTH_TOKEN` 它就不起作用，照常要登录。不要在前面有反向代理或隧道的服务上打开：经它们转发的请求，在服务端看来全都来自本机。放行的响应照样带 `no-store`，其余关于私人数据的规则不变。
 
 权限模型：访客只能读词卡；`/api/*` 下其余的一切（生成、抽词、深度分析、删除、任务、设置、表达库）都需要管理员登录。公开白名单见 `src/server/middleware/guard.ts`。
 

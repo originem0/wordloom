@@ -150,6 +150,8 @@ describe("the 表达 page without AUTH_TOKEN", () => {
     server.configured = false;
     renderPage();
     expect(await screen.findByText(/请设置 AUTH_TOKEN、重启服务，然后登录/)).toBeInTheDocument();
+    // And the way to try it out on one's own machine without one.
+    expect(screen.getByText(/EXPRESSIONS_OPEN_LOCALLY=1/)).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "原文" })).toBeNull();
     expect(screen.queryByText(/读取失败/)).toBeNull();
     // The refusal is final: asking again would only repeat it.

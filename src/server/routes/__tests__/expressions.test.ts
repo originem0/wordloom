@@ -52,17 +52,18 @@ const GOOD = {
 /** A model that never answers. The default, so no test passes by waiting. */
 const never = () => new Promise<unknown>(() => {});
 
-/** Same-origin request, with the admin's session unless told otherwise. */
+/** Same-origin request, with the admin's session unless told otherwise. `env`
+ *  is what the Node server hands the app with each request: the socket. */
 function req(
   path: string,
-  init: { method?: string; body?: unknown; raw?: string; cookie?: boolean } = {},
+  init: { method?: string; body?: unknown; raw?: string; cookie?: boolean; env?: object } = {},
 ) {
   const headers = new Headers({ host: HOST, origin: `https://${HOST}`, "x-real-ip": "203.0.113.7" });
   if (init.cookie !== false) headers.set("cookie", `session=${SESSION}`);
   const body = init.raw ?? (init.body === undefined ? undefined : JSON.stringify(init.body));
   if (body !== undefined) headers.set("content-type", "application/json");
   const method = init.method ?? (body === undefined ? "GET" : "POST");
-  return app.request(path, { method, headers, body });
+  return app.request(path, { method, headers, body }, init.env);
 }
 
 async function capture(body: Record<string, unknown>) {
@@ -179,6 +180,57 @@ describe("the guard on the expression library", () => {
     expect((await req(path)).status).toBe(503);
     expect((await req(path, { body: { text: "kind of" } })).status).toBe(503);
     expect(await stored()).toHaveLength(0);
+  });
+
+  // The one way past that refusal, there for trying the library out: a switch
+  // that lets in the machine the server runs on, without a login. Everything
+  // the switch must not open is asked for here with the switch on.
+  describe("with EXPRESSIONS_OPEN_LOCALLY=1 and no AUTH_TOKEN", () => {
+    const from = (remoteAddress?: string) => ({ incoming: { socket: { remoteAddress } } });
+    const HERE = from("127.0.0.1");
+
+    beforeEach(() => {
+      delete process.env.AUTH_TOKEN;
+      process.env.EXPRESSIONS_OPEN_LOCALLY = "1";
+    });
+
+    it.each(["127.0.0.1", "::1", "::ffff:127.0.0.1"])("answers this machine (%s) without a session", async (address) => {
+      const saved = await req("/api/expressions", { cookie: false, env: from(address), body: { text: "kind of swamped" } });
+      const list = await req("/api/expressions", { cookie: false, env: from(address) });
+      expect([saved.status, list.status]).toEqual([201, 200]);
+      expect(((await list.json()) as ExpressionListResponse).expressions).toHaveLength(1);
+      // Private data all the same, whoever is let in.
+      for (const res of [saved, list]) expect(res.headers.get("cache-control")).toBe("no-store");
+    });
+
+    it("answers no other machine, nor a request whose sender it cannot tell", async () => {
+      for (const env of [from("192.168.1.20"), from("::ffff:192.168.1.20"), from(), undefined]) {
+        for (const [method, path] of routes()) {
+          const res = await req(path, { method, cookie: false, env, ...(method === "GET" ? {} : { body: {} }) });
+          expect(res.status, `${method} ${path} from ${env?.incoming.socket.remoteAddress}`).toBe(503);
+        }
+      }
+      expect(await stored()).toHaveLength(0);
+    });
+
+    it("does nothing on a production server", async () => {
+      process.env.NODE_ENV = "production";
+      expect((await req("/api/expressions", { env: HERE })).status).toBe(503);
+    });
+
+    it("does nothing once AUTH_TOKEN is set: the login is back", async () => {
+      process.env.AUTH_TOKEN = "secret-token";
+      expect((await req("/api/expressions", { cookie: false, env: HERE })).status).toBe(401);
+      expect((await req("/api/expressions", { env: HERE })).status).toBe(200);
+    });
+
+    it.each([undefined, "", "0", "true"])("is off while the switch is %j", async (value) => {
+      if (value === undefined) delete process.env.EXPRESSIONS_OPEN_LOCALLY;
+      else process.env.EXPRESSIONS_OPEN_LOCALLY = value;
+      expect((await req("/api/expressions", { env: HERE })).status).toBe(503);
+      expect((await req("/api/expressions", { env: HERE, body: { text: "kind of" } })).status).toBe(503);
+      expect(await stored()).toHaveLength(0);
+    });
   });
 
   it("marks every answer as not to be stored, the 409 that quotes an entry included", async () => {

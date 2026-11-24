@@ -25,3 +25,6 @@ process.on("unhandledRejection", (reason) => {
 
 serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3001) });
 console.log(`Server running on http://localhost:${process.env.PORT ?? 3001}`);
+if (!process.env.AUTH_TOKEN && process.env.EXPRESSIONS_OPEN_LOCALLY === "1") {
+  console.warn("EXPRESSIONS_OPEN_LOCALLY=1: the expression library answers this machine without a login. For trying it out only.");
+}
