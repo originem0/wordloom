@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { format } from "node:util";
 
 // Installed before the app is imported: hono's logger keeps the console.log it
@@ -195,6 +196,29 @@ describe("the guard on the expression library", () => {
     ];
     expect(answers.map((res) => res.status)).toEqual([201, 200, 200, 200, 201, 200, 409]);
     for (const res of answers) expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  // no-store does not bind a service worker: a runtimeCaching rule that matched
+  // these paths would keep their answers on the device for as long as the rule
+  // says, signed in or not. Read off the config, so a rule added later is
+  // checked without anyone remembering this file.
+  it("is matched by no cache rule of the service worker", () => {
+    // What every urlPattern is set to: a regex literal whole, anything else to the end of its line.
+    const value = /urlPattern:\s*(\/(?:\\.|\[(?:\\.|[^\]\\\r\n])*\]|[^/\\[\r\n])+\/[a-z]*|.*)/g;
+    const rules = [...readFileSync("vite.config.ts", "utf8").matchAll(value)].map((m) => m[1]);
+    // Guards the probe itself: the one rule there is, for the public cards.
+    expect(rules).toContain(String.raw`/\/api\/cards(\?.*)?$/`);
+    for (const rule of rules) {
+      // Only a regular expression can be tried here. A rule written as a
+      // function or a string fails this line until the test learns to read it.
+      const [, source, flags] = /^\/(.+)\/([a-z]*)$/.exec(rule) ?? [];
+      expect(source, `a rule this test cannot read: ${rule}`).toBeTruthy();
+      for (const [, path] of routes()) {
+        for (const url of [path, `${path}?page=2`, `${path}/`]) {
+          expect(new RegExp(source, flags).test(`https://${HOST}${url}`), `${rule} keeps ${url}`).toBe(false);
+        }
+      }
+    }
   });
 });
 
