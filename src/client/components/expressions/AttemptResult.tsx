@@ -70,7 +70,7 @@ export function AttemptResult({ result, onChange }: { result: AttemptResponse; o
       )}
       <Button
         size="sm"
-        variant="ghost"
+        variant="outline"
         disabled={busy}
         onClick={() =>
           overturn.mutate(

@@ -65,7 +65,7 @@ function ExpressionsInner() {
           {list.data && <TryPanel />}
           <section className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Input aria-label="筛选" className="max-w-xs flex-1" placeholder="筛选：原文、焦点、意思、出处" value={query} onChange={(e) => setQuery(e.target.value)} />
+              <Input aria-label="筛选" className="sm:max-w-xs sm:flex-1" placeholder="筛选：原文、焦点、意思、出处" value={query} onChange={(e) => setQuery(e.target.value)} />
               {LAYERS.map(([value, label]) => (
                 <Button key={value} size="sm" variant={layer === value ? "default" : "outline"} aria-pressed={layer === value} onClick={() => setLayer(value)}>{label}</Button>
               ))}
