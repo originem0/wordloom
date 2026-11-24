@@ -92,12 +92,13 @@ describe("where a route's JSON call goes", () => {
     expect(await generateJson("expressions", CALL)).toEqual({ ok: true });
     expect(gemini).toHaveBeenCalledTimes(1);
     const request = gemini.mock.calls[0][0];
-    expect(request).toMatchObject({
+    // The whole request, so that nothing rides along: the model is given no
+    // tools, and with them no way to act on what a saved text tells it to do.
+    expect(request).toEqual({
       model,
       contents: CALL.user,
-      config: { systemInstruction: CALL.system, responseMimeType: "application/json" },
+      config: { systemInstruction: CALL.system, responseMimeType: "application/json", abortSignal: expect.any(AbortSignal) },
     });
-    expect(request.config.abortSignal).toBeInstanceOf(AbortSignal);
     expect(gateway).not.toHaveBeenCalled();
   });
 

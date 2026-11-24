@@ -208,4 +208,16 @@ describe("foldTimeline", () => {
       dueAt: shown + DAY,
     });
   });
+
+  // No route writes a row of this kind yet. The table takes one, and the fold
+  // has to read it as what it is: the English in front of the user, no test.
+  it("t: having used it for real is the answer seen, and moves no level", () => {
+    const { rows, last } = climbed(1);
+    const usedAt = last + 3 * DAY - HOUR;
+    const used = row("used", usedAt);
+    expect(foldTimeline([...rows, used], T0)).toMatchObject({ level: 1, promotions: 1, answerSeenAt: usedAt, dueAt: usedAt + DAY });
+    // The pass that would have counted an hour later comes too soon after it.
+    expect(foldTimeline([...rows, used, attempt(last + 3 * DAY, "need", "pass")], T0)).toMatchObject({ level: 1, promotions: 1 });
+    expect(foldTimeline([...rows, used, attempt(usedAt + DAY, "need", "pass")], T0)).toMatchObject({ level: 2, promotions: 2 });
+  });
 });

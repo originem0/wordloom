@@ -70,11 +70,14 @@ function overCap(entries: Pick<Entry, "row" | "folded">[]): Set<number> {
   return new Set(climbing.slice(ACTIVE_CAP).map((e) => e.row.id));
 }
 
+/** What a read needs: the database, or a transaction on it. */
+type Reader = Pick<typeof db, "select">;
+
 /** The whole library, newest first, every timeline folded. It stays a few
  *  hundred entries for a long time, so no route reads less than all of it. */
-export async function loadLibrary(): Promise<Entry[]> {
-  const rows = await db.select().from(expressions).orderBy(desc(expressions.createdAt), desc(expressions.id)).all();
-  const all = await db.select().from(encounters).orderBy(asc(encounters.createdAt), asc(encounters.id)).all();
+export async function loadLibrary(from: Reader = db): Promise<Entry[]> {
+  const rows = await from.select().from(expressions).orderBy(desc(expressions.createdAt), desc(expressions.id)).all();
+  const all = await from.select().from(encounters).orderBy(asc(encounters.createdAt), asc(encounters.id)).all();
   const timelines = new Map<number, EncounterRow[]>();
   for (const r of all) {
     if (r.expressionId == null) continue; // a question that matched nothing
@@ -91,8 +94,8 @@ export async function loadLibrary(): Promise<Entry[]> {
   return entries;
 }
 
-export async function loadEntry(id: number): Promise<Entry | null> {
-  return (await loadLibrary()).find((e) => e.row.id === id) ?? null;
+export async function loadEntry(id: number, from: Reader = db): Promise<Entry | null> {
+  return (await loadLibrary(from)).find((e) => e.row.id === id) ?? null;
 }
 
 /**

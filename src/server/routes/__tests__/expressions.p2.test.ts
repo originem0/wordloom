@@ -30,6 +30,7 @@ import { app } from "../../app.js";
 import { db } from "../../db/index.js";
 import { cards, encounters, expressions, jobs, sessions, settings } from "../../db/schema.js";
 import { hashSessionId } from "../../middleware/auth.js";
+import * as view from "../../services/expressions-view.js";
 import type {
   AttemptFeedback, AttemptRequest, AttemptResponse, ExpressionDetail, ExpressionListResponse, FindRequest,
   FindResponse, PickResponse, SceneResponse, StatsResponse, TryResponse,
@@ -181,6 +182,24 @@ describe("揭晓", () => {
     }
     expect(await rowsOf(e.id)).toHaveLength(1);
     expect(printed()).not.toContain(MARKER);
+  });
+
+  // The other half of the same transaction: a row that says the answer was
+  // seen, when it never left, would cost the entry a day for nothing.
+  it("leaves no row when the text cannot be read after it", async () => {
+    const e = await active({ text: `kind of ${MARKER}`, focus: null });
+    const read = view.loadEntry;
+    const spy = vi.spyOn(view, "loadEntry").mockImplementationOnce(read).mockRejectedValueOnce(new Error("read failed"));
+    try {
+      const res = await post(`/${e.id}/reveal`, { cue: "masked" });
+      expect(res.status).toBe(500);
+      expect(await res.text()).not.toContain(MARKER);
+      expect(spy).toHaveBeenCalledTimes(2);
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await rowsOf(e.id)).map((r) => r.kind)).toEqual(["met"]);
+    expect(await tryIds()).toEqual([e.id]);
   });
 });
 
@@ -1151,5 +1170,8 @@ describe("what the routes of 找 and 试一条 print", () => {
       expect(log).toContain(line);
     }
     expect(log).not.toContain(MARKER);
+    // Nor was any of it kept where private text must not be: no job, no setting.
+    expect(await db.select().from(jobs).all()).toEqual([]);
+    expect(await db.select().from(settings).all()).toEqual([]);
   });
 });

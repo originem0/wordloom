@@ -194,10 +194,12 @@ expressionRoutes.post("/:id{[0-9]+}/reveal", async (c) => {
   const entry = await loadEntry(id);
   if (!entry) return notFound(c);
   if (!isMasked(entry)) return c.json(toDetail(entry));
-  // The row first, and the text is read only once it is stored: the answer
-  // never leaves without the timeline saying so.
-  await db.insert(encounters).values({ expressionId: id, kind: "reveal", text: "", cue: parsed.data.cue, createdAt: Date.now() });
-  const revealed = await loadEntry(id);
+  // The row and the read after it are one transaction: the answer never leaves
+  // without the timeline saying so, and no row says so when it did not leave.
+  const revealed = await db.transaction(async (tx) => {
+    await tx.insert(encounters).values({ expressionId: id, kind: "reveal", text: "", cue: parsed.data.cue, createdAt: Date.now() });
+    return loadEntry(id, tx);
+  });
   return revealed ? c.json(toDetail(revealed, true)) : notFound(c);
 });
 
