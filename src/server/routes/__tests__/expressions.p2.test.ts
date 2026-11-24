@@ -767,6 +767,50 @@ describe("找", () => {
     });
   });
 
+  it("lets no reason name a masked entry the answer does not show, even when the question came with English", async () => {
+    const wanted = await active({ text: `I'm kind of ${MARKER} right now.`, focus: `kind of ${MARKER}` });
+    const seen = await seed({ text: "Fair enough.", focus: null });
+    answer({
+      mine: [{ id: seen.id, why: `like "kind of ${MARKER}", but shorter` }],
+      fix: { text: "I'm very busy.", why: `or say Kind of ${MARKER}` },
+      fresh: [{ text: "I'm slammed.", why: `stronger than kind  of ${MARKER}` }, { text: "I'm tied up.", why: "neutral" }],
+    });
+    const text = await (await ask({ attempt: "I very busy" })).text();
+    expect(text).not.toContain(MARKER);
+    expect(JSON.parse(text)).toMatchObject({
+      mine: [{ expression: { id: seen.id, text: "Fair enough." }, why: null }],
+      fix: { text: "I'm very busy.", why: "" },
+      fresh: [{ text: "I'm slammed.", why: "" }, { text: "I'm tied up.", why: "neutral" }],
+    });
+    // It was not shown, so nothing says it was: no row, and still due.
+    expect((await lookups()).map((r) => r.expressionId)).toEqual([seen.id]);
+    expect(await tryIds()).toEqual([wanted.id]);
+
+    // Once the answer shows the entry itself, with a row to say so, a reason may name it.
+    answer({
+      mine: [{ id: wanted.id, why: "the softer way" }],
+      fix: { text: "I'm very busy.", why: `or say kind of ${MARKER}` },
+      fresh: [{ text: "I'm slammed.", why: `stronger than kind of ${MARKER}` }],
+    });
+    const open = await found({ attempt: "I very busy" });
+    expect(open.fix?.why).toBe(`or say kind of ${MARKER}`);
+    expect(open.fresh).toEqual([{ text: "I'm slammed.", why: `stronger than kind of ${MARKER}` }]);
+    expect((await lookups()).slice(1).map((r) => [r.expressionId, r.cue])).toEqual([[wanted.id, null]]);
+
+    // Without English the hit itself is held back, so no reason may name it
+    // either. An entry that is not masked may be named by any of them.
+    answer({
+      mine: [{ id: wanted.id, why: "the softer way" }],
+      fresh: [{ text: "I'm slammed.", why: `stronger than kind of ${MARKER}` }, { text: "I'm tied up.", why: "plainer than fair enough" }],
+    });
+    const closed = await (await ask()).text();
+    expect(closed).not.toContain(MARKER);
+    expect(JSON.parse(closed)).toMatchObject({
+      mine: [{ expression: { id: wanted.id, masked: true }, why: null }],
+      fresh: [{ text: "I'm slammed.", why: "" }, { text: "I'm tied up.", why: "plainer than fair enough" }],
+    });
+  });
+
   it("answers a single English word that has a card without asking the model", async () => {
     const now = Date.now();
     const [card] = await db.insert(cards).values({ word: "Swamped", createdAt: now, updatedAt: now }).returning();

@@ -99,14 +99,17 @@ export async function find(q: FindRequest): Promise<FindResponse | null> {
   }
 
   // A reason tends to quote what it is about, so a masked hit goes without
-  // one, and no other reason may name an entry that is being held back.
-  const hidden = open ? [] : library.filter(isMasked);
+  // one, and no reason may name an entry whose English this answer holds
+  // back: every masked entry, but for the hits of a question that brought
+  // English, which are shown and each get a row for it.
+  const hidden = library.filter((e) => isMasked(e) && !(open && hits.has(e)));
   const quiet = (why: string) => (hidden.some((e) => says(why, e)) ? "" : why);
   const mine: FindHit[] = [...hits].map(([e, why]) => {
     const expression = toSummary(e, open);
     return { expression, why: expression.masked ? null : quiet(why) || null };
   });
   fresh = fresh.map((s) => ({ ...s, why: quiet(s.why) }));
+  if (fix) fix = { ...fix, why: quiet(fix.why) };
 
   // Written before the answer leaves. One row a hit, all at the same moment;
   // a question that found nothing is still a question.
