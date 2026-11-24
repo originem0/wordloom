@@ -874,6 +874,8 @@ describe("the detail of an entry in 想用", () => {
   // Kept anywhere but in the open dialog, the answer would come back on the
   // next look with no row saying that it was seen.
   it("is masked again once the dialog was closed, and a second look is a second request", async () => {
+    // The prototype of the storage that is really there (Node's own under Node 26): a spy on `Storage.prototype` would see no write.
+    const stored = vi.spyOn(Object.getPrototypeOf(sessionStorage) as Storage, "setItem");
     await open();
     fireEvent.click(screen.getByRole("button", { name: "看答案" }));
     await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent("Let me sleep on it."));
@@ -881,6 +883,8 @@ describe("the detail of an entry in 想用", () => {
     await waitFor(() => expect(asked("GET", "/api/expressions/4")).toHaveLength(2));
     expect(screen.getByRole("dialog")).toHaveTextContent("Let me sleep on it.");
     expect(JSON.stringify(client.getQueryCache().getAll().map((q) => q.state.data))).not.toMatch(ENGLISH);
+    expect(stored).not.toHaveBeenCalled();
+    stored.mockRestore();
 
     closeDetail();
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

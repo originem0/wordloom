@@ -69,6 +69,10 @@ function show(turns: Turn[], busy = false) {
 
 const shown = () => document.body.textContent!;
 const click = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
+// The prototype of the storage that is really there. Under Node 26 that is
+// Node's own, not the `Storage` jsdom puts on the global: a spy on
+// `Storage.prototype` would see no write at all.
+const watchStorage = () => vi.spyOn(Object.getPrototypeOf(sessionStorage) as Storage, "setItem");
 
 describe("a turn", () => {
   it("shows what was asked, and the user's own English only when some was sent", () => {
@@ -200,12 +204,16 @@ describe("a masked hit", () => {
   });
 
   it("is looked at with cue masked, and only then shows its English, the gloss signed, and the new suggestions", async () => {
+    const stored = watchStorage();
     withMasked();
     answers.push({ status: 200, body: { ...MASKED, masked: false, text: ENGLISH, focus: "dawned on", gloss: "to become clear to someone" } });
     click("看答案");
 
     await waitFor(() => expect(shown()).toContain(ENGLISH));
     expect(sent).toEqual([{ method: "POST", url: "/api/expressions/9/reveal", body: { cue: "masked" } }]);
+    // Held by the hit and nowhere that outlives the thread.
+    expect(stored).not.toHaveBeenCalled();
+    stored.mockRestore();
     expect(document.querySelector("mark")).toHaveTextContent("dawned on");
     expect(screen.getByText(/补注 · AI 写的/)).toHaveTextContent("to become clear to someone");
     expect(screen.getByText(FRESH.text)).toBeInTheDocument();
@@ -265,6 +273,27 @@ describe("a masked hit", () => {
     expect(shown()).not.toContain("dawned");
     expect(screen.queryByRole("textbox", { name: "先试着写一句" })).toBeNull();
     expect(screen.getByRole("button", { name: "看答案" })).toBeEnabled();
+  });
+
+  // Looked at after such a judgement, and judged after all: the look and the
+  // judgement both brought the English, and it is on screen once.
+  it("shows the English once when the judgement arrives after a look", async () => {
+    withMasked();
+    fireEvent.change(screen.getByRole("textbox", { name: "先试着写一句" }), { target: { value: "It dawned on me." } });
+    answers.push({ status: 201, body: judged({ status: "failed", verdict: null, outcome: null, answer: null }) });
+    click("提交");
+    expect(await screen.findByText(/判定没有回来/)).toBeInTheDocument();
+
+    answers.push({ status: 200, body: { ...MASKED, masked: false, text: ENGLISH, focus: "dawned on", gloss: "to become clear to someone" } });
+    click("看答案");
+    await waitFor(() => expect(shown()).toContain(ENGLISH));
+
+    answers.push({ status: 200, body: judged() });
+    click("再判一次");
+    expect(await screen.findByText("用上了")).toBeInTheDocument();
+    expect(sent.map((s) => s.url)).toEqual(["/api/expressions/9/attempts", "/api/expressions/9/reveal", "/api/expressions/attempts/31/judge"]);
+    expect(document.querySelectorAll("mark")).toHaveLength(1);
+    expect(screen.getAllByText(/补注 · AI 写的/)).toHaveLength(1);
   });
 
   it("stays unresolved when the sentence was refused", async () => {
