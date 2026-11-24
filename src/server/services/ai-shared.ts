@@ -2,6 +2,7 @@ import { db } from "../db/index.js";
 import { settings } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { Semaphore } from "./semaphore.js";
+import { parseJsonLenient } from "./ai-normalize.js";
 import { DEFAULT_API_MAX_RETRIES, DEFAULT_API_TIMEOUT_MS } from "../../shared/defaults.js";
 
 // Re-export so providers can create their own instances
@@ -171,6 +172,50 @@ export async function runWithModelFallback<T>(opts: {
       throw new Error(`${opts.label} failed on primary (${pref.primary}): ${p}; fallback (${pref.fallback}): ${f}`);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// One attempt — for calls an HTTP request is waiting on
+// ---------------------------------------------------------------------------
+
+/** A call that returns whatever JSON the model wrote; the caller validates it. */
+export interface JsonCall {
+  /** Settings prefix. Keys left empty fall back to the cards route's. */
+  route: string;
+  system: string;
+  user: string;
+  label: string;
+}
+
+// The request waiting on this sits behind a reverse proxy, and nginx gives up
+// after 60 s by default. So this path ignores api_timeout_ms, api_max_retries
+// and the fallback models: one attempt, and past the cap it has failed.
+const JSON_CALL_TIMEOUT_MS = 45_000;
+
+export async function runJsonCall(opts: {
+  modelKeys: string[];
+  defaultModel: string;
+  label: string;
+  run: (model: string, signal: AbortSignal) => Promise<string>;
+}): Promise<unknown> {
+  const model = (await getFirstSetting(opts.modelKeys)) || opts.defaultModel;
+  if (!model) throw new Error(`No model configured for ${opts.label}. Set it in AI Providers.`);
+  const text = await withTimeout((signal) => opts.run(model, signal), JSON_CALL_TIMEOUT_MS);
+  try {
+    return parseJsonLenient(text);
+  } catch {
+    // parseJsonLenient quotes the output in its message, and the output of
+    // these calls can quote the private text they were given.
+    throw new Error(`${opts.label}: model output was not JSON`);
+  }
+}
+
+/** Why a call failed, from a fixed list. This is what to log for a call that
+ *  carried private text: an upstream error's own message can quote its input. */
+export function failureReason(err: unknown): string {
+  const msg = err instanceof Error ? err.message : "";
+  if (msg === AI_BUSY) return "busy";
+  return /timeout/i.test(msg) ? "timeout" : /configured/i.test(msg) ? "not configured" : "failed";
 }
 
 // ---------------------------------------------------------------------------

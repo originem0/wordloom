@@ -111,6 +111,12 @@ describe("what a visitor can reach", () => {
         "POST /api/cards/:id/deep",
         "GET /api/cards/missing-deep",
         "DELETE /api/cards/:id",
+        "GET /api/expressions",
+        "POST /api/expressions",
+        "GET /api/expressions/:id{[0-9]+}",
+        "PATCH /api/expressions/:id{[0-9]+}",
+        "POST /api/expressions/:id{[0-9]+}/encounters",
+        "POST /api/expressions/:id{[0-9]+}/annotate",
       ]),
     );
 

@@ -4,7 +4,9 @@ import {
   Semaphore,
   getSetting,
   runWithModelFallback,
+  runJsonCall,
   acquireSemaphore,
+  type JsonCall,
   type ParsedCard,
 } from "./ai-shared.js";
 import { parseJsonLenient, normalizeCardsPayload } from "./ai-normalize.js";
@@ -247,6 +249,32 @@ ${text}`,
 
         if (!Array.isArray(parsed)) return [];
         return parsed.filter((w): w is string => typeof w === "string");
+      },
+    });
+  } finally {
+    geminiSemaphore.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// geminiJson — one attempt; the task that asked validates the answer
+// ---------------------------------------------------------------------------
+
+export async function geminiJson(opts: JsonCall): Promise<unknown> {
+  await acquireSemaphore(geminiSemaphore);
+  try {
+    return await runJsonCall({
+      modelKeys: [`${opts.route}_model`, "cards_model", "general_model"],
+      defaultModel: "gemini-2.5-flash",
+      label: opts.label,
+      run: async (model, signal) => {
+        const ai = await getClient();
+        const response = await ai.models.generateContent({
+          model,
+          contents: opts.user,
+          config: { abortSignal: signal, responseMimeType: "application/json", systemInstruction: opts.system },
+        });
+        return response.text ?? "";
       },
     });
   } finally {

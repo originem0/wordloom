@@ -4,11 +4,12 @@ import { logger } from "hono/logger";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { HTTPException } from "hono/http-exception";
-import { requireAuth } from "./middleware/guard.js";
+import { requireAuth, requirePrivate } from "./middleware/guard.js";
 import { authRoutes } from "./routes/auth.js";
 import { cardRoutes } from "./routes/cards.js";
 import { settingRoutes } from "./routes/settings.js";
 import { jobRoutes } from "./routes/jobs.js";
+import { expressionRoutes } from "./routes/expressions.js";
 import { readFileSync, existsSync } from "fs";
 
 // App assembly lives here (not in index.ts) so tests can import the fully
@@ -92,6 +93,8 @@ app.use("/api/*", async (c, next) => {
 });
 
 app.use("/api/*", requireAuth);
+// The expression library is the admin's private data, not site content.
+app.use("/api/expressions/*", requirePrivate);
 
 // Health check (no auth)
 app.get("/api/health", (c) => c.json({ ok: true }));
@@ -106,7 +109,8 @@ app.route("/api/auth", authRoutes);
 export const apiRoutes = app
   .route("/api/cards", cardRoutes)
   .route("/api/settings", settingRoutes)
-  .route("/api/jobs", jobRoutes);
+  .route("/api/jobs", jobRoutes)
+  .route("/api/expressions", expressionRoutes);
 
 // An /api path no route answered. Without this a GET would fall through to
 // the SPA fallback below and come back as index.html with a 200.
@@ -161,7 +165,10 @@ app.onError((err, c) => {
   if (err instanceof SyntaxError) {
     return c.json({ error: "Malformed request body", code: "BAD_REQUEST" }, 400);
   }
-  console.error("Unhandled error:", err);
+  // Under a private route not even the journal gets the error itself: a
+  // failed query's message carries its bound values, there the user's text.
+  const isPrivate = c.req.path.startsWith("/api/expressions");
+  console.error("Unhandled error:", isPrivate ? `${err.constructor.name} in ${c.req.method} ${c.req.path}` : err);
   return c.json({ error: "Internal server error", code: "INTERNAL_ERROR" }, 500);
 });
 

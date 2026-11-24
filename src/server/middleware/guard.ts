@@ -30,3 +30,15 @@ export const requireAuth = createMiddleware(async (c, next) => {
   if (PUBLIC.some(([pm, re]) => pm === m && re.test(c.req.path))) return next();
   return authMiddleware(c, next);
 });
+
+// Second gate for private data. The global guard lets everything through when
+// AUTH_TOKEN is unset (dev mode); private routes do the opposite and refuse to
+// serve. Mount it on a pattern ending in "/*": a bare "/api/x" would leave
+// every sub-path to the global guard alone.
+export const requirePrivate = createMiddleware(async (c, next) => {
+  if (!process.env.AUTH_TOKEN) {
+    return c.json({ error: "Set AUTH_TOKEN to use private routes", code: "AUTH_NOT_CONFIGURED" }, 503);
+  }
+  c.header("Cache-Control", "no-store");
+  return authMiddleware(c, next);
+});

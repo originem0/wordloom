@@ -3,7 +3,9 @@ import {
   Semaphore,
   getSetting,
   runWithModelFallback,
+  runJsonCall,
   acquireSemaphore,
+  type JsonCall,
   type ParsedCard,
 } from "./ai-shared.js";
 import { parseJsonLenient, normalizeCardsPayload } from "./ai-normalize.js";
@@ -291,6 +293,35 @@ ${text}`,
         if (!Array.isArray(parsed)) return [];
         return parsed.filter((w): w is string => typeof w === "string");
       },
+    });
+  } finally {
+    openaiSemaphore.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// openaiJson — one attempt; the task that asked validates the answer
+// ---------------------------------------------------------------------------
+
+export async function openaiJson(opts: JsonCall): Promise<unknown> {
+  await acquireSemaphore(openaiSemaphore);
+  try {
+    return await runJsonCall({
+      modelKeys: [`${opts.route}_openai_model`, "cards_openai_model"],
+      defaultModel: "",
+      label: `${opts.label} (OpenAI)`,
+      run: (model, signal) =>
+        openaiChat({
+          signal,
+          model,
+          messages: [
+            {
+              role: "system",
+              content: `${opts.system}\n\nRespond in JSON only. No markdown fences, no explanation — just the JSON object.`,
+            },
+            { role: "user", content: opts.user },
+          ],
+        }),
     });
   } finally {
     openaiSemaphore.release();

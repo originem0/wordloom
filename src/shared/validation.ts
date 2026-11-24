@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EXPRESSION_LIMITS, SOURCE_TYPES } from "./expressions.js";
 
 // --- Request schemas ---
 
@@ -10,6 +11,41 @@ export const generateCardsRequestSchema = z.object({
 
 export const extractWordsRequestSchema = z.object({
   text: z.string().min(1).max(10000),
+});
+
+// --- Expressions ---
+
+// Kept verbatim, so it is checked for content rather than trimmed. An empty
+// text is the one thing capture refuses; the bounds only stop runaway input.
+const verbatimText = z.string().max(EXPRESSION_LIMITS.text).refine((s) => s.trim().length > 0);
+const label = (max: number) => z.string().trim().max(max);
+
+const encounterSource = {
+  textBefore: z.string().max(EXPRESSION_LIMITS.text).optional(),
+  sourceType: z.enum(SOURCE_TYPES).optional(),
+  sourceTitle: label(EXPRESSION_LIMITS.sourceTitle).optional(),
+  sourceLocator: label(EXPRESSION_LIMITS.sourceLocator).optional(),
+  occurredAt: z.number().int().positive().optional(),
+};
+
+export const captureRequestSchema = z.object({
+  text: verbatimText,
+  focus: label(EXPRESSION_LIMITS.focus).optional(),
+  force: z.boolean().optional(),
+  ...encounterSource,
+});
+
+export const encounterRequestSchema = z.object({ text: verbatimText, ...encounterSource });
+
+export const expressionPatchSchema = z.object({
+  note: z.string().max(EXPRESSION_LIMITS.note).nullable().optional(),
+  focus: label(EXPRESSION_LIMITS.focus).nullable().optional(),
+  intent: label(EXPRESSION_LIMITS.intent).nullable().optional(),
+  intentBy: z.enum(["self", "find", "paste", "ai"]).optional(),
+  // "active" is the 想用 layer, which does not exist yet: until it does an
+  // entry can only be shelved and brought back.
+  status: z.enum(["seen", "retired"]).optional(),
+  occurredAt: z.number().int().positive().optional(),
 });
 
 // --- AI output schemas ---

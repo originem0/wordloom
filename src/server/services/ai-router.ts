@@ -1,13 +1,15 @@
-import { getSetting, type ParsedCard } from "./ai-shared.js";
+import { getFirstSetting, type JsonCall, type ParsedCard } from "./ai-shared.js";
 import {
   geminiGenerateCards,
   geminiGenerateDeepLayer,
   geminiExtractWords,
+  geminiJson,
 } from "./gemini.js";
 import {
   openaiGenerateCards,
   openaiGenerateDeepLayer,
   openaiExtractWords,
+  openaiJson,
 } from "./openai-compat.js";
 
 // ---------------------------------------------------------------------------
@@ -16,8 +18,10 @@ import {
 
 type ProviderType = "gemini" | "openai";
 
-async function getProvider(route: string): Promise<ProviderType> {
-  const val = (await getSetting(`${route}_provider`)).trim().toLowerCase();
+/** `borrow` names a route whose provider is used while this one has none. */
+async function getProvider(route: string, borrow?: string): Promise<ProviderType> {
+  const keys = [`${route}_provider`, ...(borrow ? [`${borrow}_provider`] : [])];
+  const val = (await getFirstSetting(keys)).toLowerCase();
   return val === "openai" ? "openai" : "gemini";
 }
 
@@ -56,4 +60,13 @@ export async function extractWords(text: string): Promise<string[]> {
     return openaiExtractWords(text);
   }
   return geminiExtractWords(text);
+}
+
+/**
+ * One attempt for a task that brings its own prompt and validates the answer.
+ * A route with no settings of its own runs on the cards route's.
+ */
+export async function generateJson(route: string, opts: Omit<JsonCall, "route">): Promise<unknown> {
+  const provider = await getProvider(route, "cards");
+  return provider === "openai" ? openaiJson({ route, ...opts }) : geminiJson({ route, ...opts });
 }
