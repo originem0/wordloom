@@ -26,7 +26,9 @@ const ROUTES = [
   { key: "deep", label: "Deep Analysis", subtitle: "长 JSON、schemaAnalysis、SVG", testTarget: "deepModel" },
   { key: "utility", label: "Utility", subtitle: "抽词、轻量文本", testTarget: "utilityModel" },
   // No probe of its own: it is tested as a cards call on this row's provider and model.
-  { key: "expressions", label: "Expressions", subtitle: "表达库的补注。留空的项沿用 Cards 路由", testTarget: "cardsModel", inherits: "cards" },
+  // `once`: its calls are made a single time inside the request that waits for
+  // them (runJsonCall), so there is no fallback model to set.
+  { key: "expressions", label: "Expressions", subtitle: "表达库：补注、找、判定、帮我挑。留空的项沿用 Cards 路由", testTarget: "cardsModel", inherits: "cards", once: true },
 ] as const;
 
 const GEMINI_DEFAULTS: Record<string, string> = {
@@ -37,7 +39,6 @@ const GEMINI_DEFAULTS: Record<string, string> = {
   utility_model: "",
   utility_fallback_model: "",
   expressions_model: "",
-  expressions_fallback_model: "",
 };
 
 /**
@@ -135,7 +136,7 @@ export function AIProvidersPage() {
     // OpenAI model keys
     for (const r of ROUTES) {
       d[`${r.key}_openai_model`] = settings[`${r.key}_openai_model`] ?? "";
-      d[`${r.key}_openai_fallback_model`] = settings[`${r.key}_openai_fallback_model`] ?? "";
+      if (!("once" in r)) d[`${r.key}_openai_fallback_model`] = settings[`${r.key}_openai_fallback_model`] ?? "";
     }
     setDrafts(d);
     setInitialized(true);
@@ -254,9 +255,10 @@ export function AIProvidersPage() {
         pairs.push({ key: `${r.key}_provider`, value: draftValue(`${r.key}_provider`) });
         // Gemini model keys
         pairs.push({ key: `${r.key}_model`, value: draftValue(`${r.key}_model`) });
-        pairs.push({ key: `${r.key}_fallback_model`, value: draftValue(`${r.key}_fallback_model`) });
         // OpenAI model keys
         pairs.push({ key: `${r.key}_openai_model`, value: draftValue(`${r.key}_openai_model`) });
+        if ("once" in r) continue;
+        pairs.push({ key: `${r.key}_fallback_model`, value: draftValue(`${r.key}_fallback_model`) });
         pairs.push({ key: `${r.key}_openai_fallback_model`, value: draftValue(`${r.key}_openai_fallback_model`) });
       }
 
@@ -552,7 +554,11 @@ export function AIProvidersPage() {
                 </select>
               </div>
               {modelField(primaryKey, "Primary Model", provider === "gemini" || follows ? "Leave empty to inherit" : "e.g. deepseek-chat", candidates, undefined, provider === "gemini" || follows)}
-              {modelField(fallbackKey, "Fallback Model", "Optional", candidates, "Primary 失败后尝试。", true)}
+              {"once" in route ? (
+                <div className="text-[11px] text-muted-foreground/60">这条路由每次请求只试一次、最多等 45 秒，没有后备模型。</div>
+              ) : (
+                modelField(fallbackKey, "Fallback Model", "Optional", candidates, "Primary 失败后尝试。", true)
+              )}
             </div>
           </SettingRow>
         );

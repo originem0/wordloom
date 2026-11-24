@@ -74,12 +74,29 @@ describe("the Expressions route", () => {
     const written = await saveAll();
     expect(written).toMatchObject({
       cards_openai_model: "deepseek-reasoner",
+      cards_openai_fallback_model: "",
       expressions_provider: "",
       expressions_model: "",
-      expressions_fallback_model: "",
       expressions_openai_model: "",
-      expressions_openai_fallback_model: "",
     });
+  });
+
+  // Its calls are made once, inside the request that waits for them: there is
+  // no second model to fall back to, so the row must not offer to set one.
+  it("has no fallback model to set, and saves none", async () => {
+    renderPage(CARDS_ON_A_GATEWAY);
+    const details = (label: string) => within(screen.getByText(label).closest("details")!);
+    expect(details("Cards").getByText("Fallback Model")).toBeInTheDocument();
+    expect(details("Expressions").queryByText("Fallback Model")).toBeNull();
+    expect(details("Expressions").getByText(/只试一次/)).toBeInTheDocument();
+
+    fireEvent.change(row("Cards").primaryModel, { target: { value: "deepseek-reasoner" } });
+    const written = await saveAll();
+    expect(Object.keys(written).filter((key) => key.startsWith("expressions_")).sort()).toEqual([
+      "expressions_model",
+      "expressions_openai_model",
+      "expressions_provider",
+    ]);
   });
 
   it("keeps a provider and a model of its own once they are chosen", async () => {
