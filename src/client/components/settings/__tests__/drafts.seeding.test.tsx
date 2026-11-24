@@ -109,6 +109,14 @@ describe("SettingsPage for the admin", () => {
     expect(logout).toHaveBeenCalledTimes(1);
   });
 
+  // What the server applies while nothing is stored. A page showing other
+  // numbers would be describing a server that does not exist.
+  it("shows the server's defaults for what was never saved", () => {
+    current = { data: {}, isLoading: false, error: null };
+    renderSettings();
+    expect(screen.getByText("60000ms · 3 retries")).toBeInTheDocument();
+  });
+
   it("keeps the rest of the page when the settings cannot be read", () => {
     current = { data: undefined, isLoading: false, error: new Error("boom") };
     renderSettings();

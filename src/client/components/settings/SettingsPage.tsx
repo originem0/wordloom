@@ -24,13 +24,14 @@ import {
   INPUT_CLASS,
 } from "./SettingWidgets";
 import { Input } from "@/client/components/ui/input";
+import { DEFAULT_API_MAX_RETRIES, DEFAULT_API_TIMEOUT_MS } from "@/shared/defaults";
 
 type Theme = "light" | "dark" | "system";
 
 const DEFAULTS: Record<string, string> = {
   analysis_language: "zh-CN",
-  api_timeout_ms: "45000",
-  api_max_retries: "3",
+  api_timeout_ms: String(DEFAULT_API_TIMEOUT_MS),
+  api_max_retries: String(DEFAULT_API_MAX_RETRIES),
 };
 
 export function SettingsPage() {

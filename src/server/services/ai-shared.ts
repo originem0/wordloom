@@ -2,6 +2,7 @@ import { db } from "../db/index.js";
 import { settings } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { Semaphore } from "./semaphore.js";
+import { DEFAULT_API_MAX_RETRIES, DEFAULT_API_TIMEOUT_MS } from "../../shared/defaults.js";
 
 // Re-export so providers can create their own instances
 export { Semaphore };
@@ -34,6 +35,9 @@ export async function getFirstSetting(keys: string[]): Promise<string> {
 }
 
 export function parsePositiveInt(raw: string, fallback: number, min: number, max: number): number {
+  // An unset setting reads as "", and Number("") is 0, not NaN: taken for a
+  // number it would be clamped up to `min` instead of falling back.
+  if (!raw.trim()) return fallback;
   const n = Number(raw);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));
@@ -41,8 +45,8 @@ export function parsePositiveInt(raw: string, fallback: number, min: number, max
 
 export async function getRuntimeSettings(): Promise<{ timeoutMs: number; maxRetries: number }> {
   return {
-    timeoutMs: parsePositiveInt(await getSetting("api_timeout_ms"), 60_000, 5_000, 300_000),
-    maxRetries: parsePositiveInt(await getSetting("api_max_retries"), 3, 1, 6),
+    timeoutMs: parsePositiveInt(await getSetting("api_timeout_ms"), DEFAULT_API_TIMEOUT_MS, 5_000, 300_000),
+    maxRetries: parsePositiveInt(await getSetting("api_max_retries"), DEFAULT_API_MAX_RETRIES, 1, 6),
   };
 }
 
