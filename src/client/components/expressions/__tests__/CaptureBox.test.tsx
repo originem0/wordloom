@@ -5,7 +5,6 @@ import "@testing-library/jest-dom/vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { ExpressionSummary, FindRequest, FindResponse } from "@/shared/expressions";
 import { CaptureBox } from "../CaptureBox";
 import { useLastSource } from "../shared";
 
@@ -310,261 +309,6 @@ describe("a save that does not go through", () => {
   });
 });
 
-const NEED = "怎么说我突然意识到";
-
-const hit = (id: number): ExpressionSummary => ({
-  id, status: "seen", masked: false, text: `entry ${id}`, focus: null, intent: null, intentBy: null,
-  sourceType: null, sourceTitle: null, occurredAt: null, createdAt: 1, updatedAt: 1, produced: false, graduated: false, queued: false,
-});
-
-/** What POST /find answers. */
-const found = (over: Partial<FindResponse> = {}) => ({ status: 200, body: { card: null, mine: [], fix: null, fresh: [], searched: 3, total: 3, ...over } });
-const own = () => screen.getByRole<HTMLInputElement>("textbox", { name: /我自己的英文/ });
-const ask = (name = "问") => fireEvent.click(screen.getByRole("button", { name }));
-
-/**
- * Asks one question and waits for its answer. The box is emptied only once the
- * answer is in. (Looking for the need on the page any sooner would find it in
- * the box: React keeps a textarea's value as its text content too.)
- */
-async function askAndWait(box: HTMLTextAreaElement, need: string, answer = found(), name = "追问") {
-  answers.push(answer);
-  type(box, need);
-  ask(name);
-  await waitFor(() => expect(box).toHaveValue(""));
-  expect(screen.getByText(need)).toBeInTheDocument();
-}
-
-describe("问", () => {
-  it("sends the whole box, trimmed, in the body, and never in a URL or in storage", async () => {
-    const stored = watchStorage();
-    const { box, onSaved } = renderBox();
-    answers.push(found());
-    type(box, `  ${NEED}  `);
-    // A selection is for 收下: it plays no part in a question.
-    select(box, "突然");
-    ask();
-
-    await waitFor(() => expect(box).toHaveValue(""));
-    expect(screen.getByText(NEED)).toBeInTheDocument();
-    expect(writes).toEqual([{ method: "POST", url: "/api/expressions/find", body: { need: NEED, history: [], turn: 1, thread: expect.any(Number) } }]);
-    for (const { url } of writes) expect(decodeURIComponent(url)).not.toContain("突然");
-    expect(stored).not.toHaveBeenCalled();
-    expect(onSaved).not.toHaveBeenCalled();
-  });
-
-  it("sends the user's own English when there is some, and empties both once the answer is in", async () => {
-    const { box } = renderBox();
-    answers.push(found({ fix: { text: "It suddenly dawned on me.", why: "knew is too flat" } }));
-    type(box, NEED);
-    fireEvent.change(own(), { target: { value: "  I suddenly knew  " } });
-    ask();
-
-    expect(await screen.findByText("我写的：I suddenly knew")).toBeInTheDocument();
-    expect(writes[0].body).toMatchObject({ need: NEED, attempt: "I suddenly knew" });
-    expect(box).toHaveValue("");
-    type(box, "next");
-    expect(own()).toHaveValue("");
-  });
-
-  it("leaves a blank attempt out", async () => {
-    const { box } = renderBox();
-    answers.push(found());
-    type(box, NEED);
-    fireEvent.change(own(), { target: { value: "   " } });
-    ask();
-    await waitFor(() => expect(box).toHaveValue(""));
-    expect(writes[0].body).not.toHaveProperty("attempt");
-    expect(document.body.textContent).not.toContain("我写的");
-  });
-
-  it("offers the field for the user's own English only while the box can be asked", () => {
-    const { box } = renderBox();
-    expect(screen.queryByRole("textbox", { name: /我自己的英文/ })).toBeNull();
-    expect(screen.getByRole("button", { name: "问" })).toBeDisabled();
-
-    type(box, ` ${"x".repeat(1000)} `);
-    expect(own()).toHaveAttribute("maxlength", "2000");
-    expect(screen.getByRole("button", { name: "问" })).toBeEnabled();
-
-    type(box, "x".repeat(1001));
-    expect(screen.queryByRole("textbox", { name: /我自己的英文/ })).toBeNull();
-    expect(screen.getByRole("button", { name: "问" })).toBeDisabled();
-    expect(screen.getByText(/超过 1000 字/)).toBeInTheDocument();
-    // Too long to ask is not too long to keep.
-    expect(screen.getByRole("button", { name: "收下" })).toBeEnabled();
-  });
-
-  it("holds the box still while the question is on its way", async () => {
-    let release = () => {};
-    const { box } = renderBox();
-    answers.push({ ...found(), hold: new Promise<void>((r) => (release = r)) });
-    type(box, NEED);
-    ask();
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "问" })).toBeDisabled());
-    expect(box).toHaveAttribute("readonly");
-    expect(own()).toHaveAttribute("readonly");
-    expect(box).toHaveValue(NEED);
-    expect(screen.getByRole("button", { name: "收下" })).toBeDisabled();
-    release();
-    await waitFor(() => expect(box).toHaveValue(""));
-    expect(box).not.toHaveAttribute("readonly");
-  });
-
-  // Either answer to a held save empties the box, which the question on its way still needs.
-  it("holds a save that is waiting for an answer still as well", async () => {
-    let release = () => {};
-    answers.push({ status: 409, body: { error: "An entry with the same norm exists", code: "DUPLICATE", existing: [{ id: 7, masked: false, text: "Break the ice.", intent: null, createdAt: 1 }] } });
-    const { box } = renderBox();
-    type(box, "break the ice");
-    keep();
-    await screen.findByRole("button", { name: "另存" });
-    answers.push({ ...found(), hold: new Promise<void>((r) => (release = r)) });
-    ask();
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "另存" })).toBeDisabled());
-    expect(screen.getByRole("button", { name: "又一次遇到" })).toBeDisabled();
-    release();
-    await waitFor(() => expect(box).toHaveValue(""));
-  });
-
-  it("keeps the box and shows nothing when the question fails", async () => {
-    const { box } = renderBox();
-    answers.push({ status: 502, body: { error: "The model did not answer", code: "FIND_FAILED" } });
-    type(box, NEED);
-    fireEvent.change(own(), { target: { value: "I suddenly knew" } });
-    ask();
-
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有问成：The model did not answer"));
-    expect(box).toHaveValue(NEED);
-    expect(own()).toHaveValue("I suddenly knew");
-    expect(screen.queryByRole("button", { name: "新话题" })).toBeNull();
-    // Nothing was written, so the same question can be sent again as the opening turn.
-    answers.push(found());
-    ask();
-    await waitFor(() => expect(box).toHaveValue(""));
-    expect(writes[1].body).toMatchObject({ need: NEED, attempt: "I suddenly knew", history: [], turn: 1 });
-  });
-
-  it("says so when no answer came at all", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
-    const { box } = renderBox();
-    type(box, NEED);
-    ask();
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有问成：Failed to fetch"));
-    expect(box).toHaveValue(NEED);
-  });
-});
-
-describe("a thread", () => {
-  it("sends what the earlier turns were about, counts the turns, and keeps the time of the opening one", async () => {
-    let now = 1_800_000_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => (now += 1000));
-    const { box } = renderBox();
-    answers.push(found({ mine: [{ expression: hit(7), why: null }, { expression: hit(8), why: null }], fix: { text: "fix one", why: "" }, fresh: [{ text: "fresh one", why: "" }] }));
-    type(box, "first");
-    fireEvent.change(own(), { target: { value: "my try" } });
-    ask();
-    await waitFor(() => expect(box).toHaveValue(""));
-    expect(screen.getByText("first")).toBeInTheDocument();
-    // An open thread: the next question goes on with it.
-    expect(screen.queryByRole("button", { name: "问" })).toBeNull();
-
-    await askAndWait(box, "second");
-    await askAndWait(box, "third");
-    const [one, two, three] = writes.map((w) => w.body as FindRequest);
-    expect(one).toEqual({ need: "first", attempt: "my try", history: [], turn: 1, thread: expect.any(Number) });
-    expect(one.thread).toBeGreaterThan(1_800_000_000_000);
-    expect(two).toEqual({
-      need: "second",
-      history: [{ need: "first", attempt: "my try", mine: [7, 8], fix: "fix one", fresh: ["fresh one"] }],
-      turn: 2,
-      thread: one.thread,
-    });
-    expect(three.history).toEqual([...two.history, { need: "second", mine: [], fix: null, fresh: [] }]);
-    expect(three).toMatchObject({ turn: 3, thread: one.thread });
-  });
-
-  it("sends the opening turn and the latest five once there are more", async () => {
-    const { box } = renderBox();
-    await askAndWait(box, "q1", found(), "问");
-    for (let n = 2; n <= 8; n++) await askAndWait(box, `q${n}`);
-
-    const seventh = writes[6].body as FindRequest;
-    expect(seventh.history.map((t) => t.need)).toEqual(["q1", "q2", "q3", "q4", "q5", "q6"]);
-    const eighth = writes[7].body as FindRequest;
-    expect(eighth.history.map((t) => t.need)).toEqual(["q1", "q3", "q4", "q5", "q6", "q7"]);
-    expect(eighth.turn).toBe(8);
-    expect(eighth.thread).toBe((writes[0].body as FindRequest).thread);
-  });
-
-  // The server takes a suggestion back only up to the length of an attempt;
-  // one longer than that would make every later question of the thread a 400.
-  it("cuts an over-long suggestion down to what the server takes back", async () => {
-    const { box } = renderBox();
-    await askAndWait(box, "q1", found({ fix: { text: "f".repeat(2001), why: "" }, fresh: [{ text: "n".repeat(2500), why: "" }] }), "问");
-    await askAndWait(box, "q2");
-    const { history } = writes[1].body as FindRequest;
-    expect(history[0].fix).toHaveLength(2000);
-    expect(history[0].fresh[0]).toHaveLength(2000);
-  });
-
-  it("is dropped with 新话题: the next question opens a new one", async () => {
-    let now = 1_800_000_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => (now += 1000));
-    const { box } = renderBox();
-    await askAndWait(box, "q1", found(), "问");
-    fireEvent.click(screen.getByRole("button", { name: "新话题" }));
-    expect(screen.queryByText("q1")).toBeNull();
-
-    await askAndWait(box, "q2", found(), "问");
-    const [first, second] = writes.map((w) => w.body as FindRequest);
-    expect(second).toMatchObject({ need: "q2", history: [], turn: 1 });
-    expect(second.thread).not.toBe(first.thread);
-  });
-
-  // The answer on its way would bring the dropped thread back.
-  it("cannot be dropped while a question is on its way", async () => {
-    let release = () => {};
-    const { box } = renderBox();
-    await askAndWait(box, "q1", found(), "问");
-    answers.push({ ...found(), hold: new Promise<void>((r) => (release = r)) });
-    type(box, "q2");
-    ask("追问");
-    await waitFor(() => expect(screen.getByRole("button", { name: "新话题" })).toBeDisabled());
-    release();
-    await waitFor(() => expect(screen.getByRole("button", { name: "新话题" })).toBeEnabled());
-    expect(screen.getByText("q2")).toBeInTheDocument();
-  });
-
-  it("stays as it was when a later question fails", async () => {
-    const { box } = renderBox();
-    await askAndWait(box, "q1", found(), "问");
-    answers.push({ status: 502, body: { error: "The model did not answer", code: "FIND_FAILED" } });
-    type(box, "q2");
-    ask("追问");
-
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有问成：The model did not answer"));
-    expect(box).toHaveValue("q2");
-    expect(screen.getByText("q1")).toBeInTheDocument();
-    answers.push(found());
-    ask("追问");
-    await waitFor(() => expect(box).toHaveValue(""));
-    expect(writes[2].body).toMatchObject({ need: "q2", turn: 2, history: [{ need: "q1" }] });
-  });
-
-  it("tells the page about an entry kept from a suggestion, so that its gloss is watched for", async () => {
-    const { box, onSaved } = renderBox();
-    await askAndWait(box, NEED, found({ fresh: [{ text: "It suddenly struck me.", why: "more abrupt" }] }), "问");
-    answers.push({ status: 201, body: { id: 12 } });
-    fireEvent.click(screen.getByRole("button", { name: "收" }));
-
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(12));
-    expect(writes[1]).toEqual({ method: "POST", url: "/api/expressions", body: { text: "It suddenly struck me.", found: { need: NEED } } });
-  });
-});
-
 describe("帮我挑", () => {
   const PICKED = { status: 200, body: { picks: [{ text: "it dawned on me", before: "Me: how do I say 我突然意识到?", why: "the idea arrives by itself" }, { text: "it hit me", before: null, why: "shorter" }] } };
   const choose = () => fireEvent.click(screen.getByRole("button", { name: "帮我挑" }));
@@ -599,7 +343,6 @@ describe("帮我挑", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "帮我挑" })).toBeDisabled());
     expect(box).toHaveAttribute("readonly");
     expect(screen.getByRole("button", { name: "收下" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "问" })).toBeDisabled();
     release();
     await screen.findByRole("checkbox", { name: /it hit me/ });
     expect(box).not.toHaveAttribute("readonly");
@@ -691,13 +434,20 @@ describe("帮我挑", () => {
   });
 });
 
-// The plan's answer to "the index and a pasted conversation pass through the
-// relay" is to say so where it is done, not to stop it.
+// The plan's answer to "a pasted conversation passes through the relay" is to
+// say so where it is done, not to stop it.
 describe("what goes to the model", () => {
-  it("is said beside the two buttons, before anything is typed", () => {
+  it("is said beside the button, before anything is typed", () => {
     renderBox();
-    const told = screen.getByText(/发给你配置的模型/);
-    expect(told).toHaveTextContent("「问」会把这句话和整库的索引");
-    expect(told).toHaveTextContent("「帮我挑」发的是框里的整段对话");
+    expect(screen.getByText(/发给你配置的模型/)).toHaveTextContent("「帮我挑」会把框里的整段对话发给你配置的模型");
+  });
+
+  // Asking is what 对谈 is for: the box has no way left to ask, only a word on where to.
+  it("is nothing else: the box no longer asks", () => {
+    const { box } = renderBox();
+    type(box, "怎么说我突然意识到");
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["AI 对话", "书", "影视", "其他", "收下"]);
+    expect(screen.getAllByRole("textbox")).toEqual([box]);
+    expect(screen.getByText(/去「对谈」里说/)).toBeInTheDocument();
   });
 });

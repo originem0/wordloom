@@ -4,8 +4,10 @@ import {
   getSetting,
   runWithModelFallback,
   runJsonCall,
+  runTextCall,
   acquireSemaphore,
   type JsonCall,
+  type StreamCall,
   type ParsedCard,
 } from "./ai-shared.js";
 import { parseJsonLenient, normalizeCardsPayload } from "./ai-normalize.js";
@@ -14,6 +16,7 @@ import {
   DEEP_PROMPT,
   getExplanationLanguageInstruction,
 } from "./ai-prompts.js";
+import { readSSE } from "../../shared/sse.js";
 
 // ---------------------------------------------------------------------------
 // Semaphores — independent from Gemini, split by route to avoid starvation
@@ -68,7 +71,10 @@ async function openaiChat(opts: {
     let errMsg = `HTTP ${res.status}`;
     try {
       const body = JSON.parse(text);
-      if (body?.error?.message) errMsg = body.error.message;
+      const code = [body?.error?.code, body?.error?.type].filter((s) => typeof s === "string").join(" ");
+      if (/quota|billing|exceeded|insufficient/i.test(code)) errMsg = `Quota exhausted (HTTP ${res.status})`;
+      else if (/auth|invalid.api.key/i.test(code)) errMsg = `Unauthorized (HTTP ${res.status})`;
+      else if (body?.error?.message) errMsg = body.error.message;
     } catch {
       if (text.length < 300) errMsg += `: ${text}`;
     }
@@ -309,6 +315,8 @@ export async function openaiJson(opts: JsonCall): Promise<unknown> {
     modelKeys: [`${opts.route}_openai_model`, "cards_openai_model"],
     defaultModel: "",
     label: `${opts.label} (OpenAI)`,
+    signal: opts.signal,
+    retryFast: opts.retryFast,
     run: (model, signal) =>
       openaiChat({
         signal,
@@ -321,5 +329,69 @@ export async function openaiJson(opts: JsonCall): Promise<unknown> {
           { role: "user", content: opts.user },
         ],
       }),
+  });
+}
+
+/** Uses the same provider, model and slot as the JSON path, without buffering
+ *  a whole reply. Once a delta has arrived a retry would repeat visible words. */
+export async function openaiTextStream(opts: StreamCall): Promise<string> {
+  let received = false;
+  return runTextCall({
+    semaphore: openaiSemaphore,
+    modelKeys: [`${opts.route}_openai_model`, "cards_openai_model"],
+    defaultModel: "",
+    label: `${opts.label} (OpenAI)`,
+    signal: opts.signal,
+    retryFast: opts.retryFast,
+    canRetry: () => !received,
+    run: async (model, signal) => {
+      const { apiKey, chatUrl } = await getOpenaiConfig();
+      const res = await fetch(chatUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, stream: true, messages: [{ role: "system", content: opts.system }, { role: "user", content: opts.user }] }),
+        signal,
+      });
+      if (!res.ok) {
+        // Preserve only a fixed error class. A quota 429 is not transient,
+        // and an upstream message may quote the learner's private words.
+        const body = await res.json().catch(() => null) as { error?: { code?: unknown; type?: unknown } } | null;
+        const code = [body?.error?.code, body?.error?.type].filter((s) => typeof s === "string").join(" ");
+        if (/quota|billing|exceeded|insufficient/i.test(code)) throw new Error(`Quota exhausted (HTTP ${res.status})`);
+        if (/auth|invalid.api.key/i.test(code)) throw new Error(`Unauthorized (HTTP ${res.status})`);
+        throw new Error(`HTTP ${res.status}`);
+      }
+      if (!res.body) throw new Error("Missing response stream");
+      let text = "";
+      let finished = false;
+      // Some compatible gateways ignore stream:true and return the normal
+      // envelope. It is still the same call and model, just one complete delta.
+      if (res.headers.get("content-type")?.includes("application/json")) {
+        const body = await res.json() as { choices?: { message?: { content?: string } }[] };
+        const content = body.choices?.[0]?.message?.content;
+        if (typeof content !== "string" || !content.trim()) throw new Error("Missing reply");
+        if (content.length > 8000) throw new Error("Reply too long");
+        received = true;
+        await opts.onDelta(content);
+        return content;
+      }
+      for await (const frame of readSSE(res.body)) {
+        signal.throwIfAborted();
+        if (frame.data === "[DONE]") { finished = true; break; }
+        const packet = JSON.parse(frame.data) as { error?: unknown; choices?: { delta?: { content?: unknown }; finish_reason?: string | null }[] };
+        if (packet.error) throw new Error("Provider stream failed");
+        const choice = packet.choices?.[0];
+        if (choice?.finish_reason === "length" || choice?.finish_reason === "content_filter") throw new Error("Incomplete reply");
+        if (choice?.finish_reason) finished = true;
+        const delta = choice?.delta?.content;
+        if (typeof delta !== "string" || !delta) continue;
+        received = true;
+        text += delta;
+        if (text.length > 8000) throw new Error("Reply too long");
+        await opts.onDelta(delta);
+      }
+      if (!finished || !text.trim()) throw new Error("Reply stream ended early");
+      return text;
+    },
   });
 }

@@ -23,7 +23,11 @@ process.on("unhandledRejection", (reason) => {
   console.error("Unhandled rejection:", reason);
 });
 
-serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3001) });
+// Without AUTH_TOKEN whoever reaches the port is the admin (dev mode), and the
+// admin can point a provider's base URL anywhere: the next call sends the key
+// there. So such a server listens to this machine only.
+const hostname = process.env.AUTH_TOKEN ? undefined : "127.0.0.1";
+serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3001), hostname });
 console.log(`Server running on http://localhost:${process.env.PORT ?? 3001}`);
 if (!process.env.AUTH_TOKEN && process.env.EXPRESSIONS_OPEN_LOCALLY === "1") {
   console.warn("EXPRESSIONS_OPEN_LOCALLY=1: the expression library answers this machine without a login. For trying it out only.");

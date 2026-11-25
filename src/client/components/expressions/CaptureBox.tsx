@@ -5,28 +5,14 @@ import { toast } from "sonner";
 import { Button } from "@/client/components/ui/button";
 import { Input } from "@/client/components/ui/input";
 import { ApiError } from "@/client/lib/api";
-import { useCapture, useFind, useMetAgain, usePick } from "@/client/hooks/useExpressions";
-import {
-  EXPRESSION_LIMITS, FIND_HISTORY_TURNS, SOURCE_TYPES, type DuplicateResponse, type EncounterRequest, type FindTurn, type PickResponse, type SourceType,
-} from "@/shared/expressions";
+import { useCapture, useMetAgain, usePick } from "@/client/hooks/useExpressions";
+import { EXPRESSION_LIMITS, SOURCE_TYPES, type DuplicateResponse, type EncounterRequest, type PickResponse, type SourceType } from "@/shared/expressions";
 import { DuplicateQuestion } from "./DuplicateQuestion";
-import { FindThread, type Turn } from "./FindThread";
 import { PickList } from "./PickList";
 import { AREA_CLASS, SOURCE_LABELS, readBox, useLastSource } from "./shared";
 
 /** A save the server held back: what was sent, and the entries it collides with. */
 type Held = { met: EncounterRequest; focus?: string; existing: DuplicateResponse["existing"] };
-
-// An earlier turn as it is sent back with the next question: the server keeps
-// no session, so this is all the model is told of it. A suggestion is cut to
-// the length the server takes back, or one long one would refuse the thread.
-const recall = ({ need, attempt, answer }: Turn): FindTurn => ({
-  need,
-  attempt,
-  mine: answer.mine.map((h) => h.expression.id),
-  fix: answer.fix?.text.slice(0, EXPRESSION_LIMITS.attempt) ?? null,
-  fresh: answer.fresh.map((s) => s.text.slice(0, EXPRESSION_LIMITS.attempt)),
-});
 
 export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
   const location = useLocation();
@@ -44,18 +30,12 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
   const capture = useCapture();
   const metAgain = useMetAgain();
   const busy = capture.isPending || metAgain.isPending;
-  // The box is also where a question is asked. A thread is the turns asked so
-  // far and the time of the first, which is all that identifies it; like the
-  // picks, it is state of this page and gone with it.
-  const [own, setOwn] = useState("");
-  const [thread, setThread] = useState<{ at: number; turns: Turn[] } | null>(null);
+  // What the model picked out of the box: state of this page and gone with it.
   const [picks, setPicks] = useState<PickResponse["picks"] | null>(null);
-  const find = useFind();
   const picker = usePick();
-  // While a model reads the box it holds still, and so does every button that
-  // would empty it: an answer empties it, a failure has to find it as it was
-  // sent, and picks are of no use for a box that has moved on.
-  const waiting = find.isPending || picker.isPending;
+  // While the model reads the box it holds still, and so does the button that
+  // would empty it: picks are of no use for a box that has moved on.
+  const waiting = picker.isPending;
 
   // Consume the fragment once on mount. It only fills the box: nothing is
   // ever submitted on the strength of a link.
@@ -67,9 +47,6 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
   const draft = readBox(box, sel[0], sel[1]);
   const focus = [draft.focus, given].find((f) => f && f !== draft.text && f.length <= EXPRESSION_LIMITS.focus);
   const tooLong = draft.text.length > EXPRESSION_LIMITS.text;
-  // A question is the whole box: the selection is for 收下 only.
-  const need = box.trim();
-  const askable = need.length > 0 && need.length <= EXPRESSION_LIMITS.need;
   const from = { sourceType: source ?? undefined, sourceTitle: (source && title.trim()) || undefined };
 
   // The selection is kept as state so that what 收下 will make of it (the
@@ -80,7 +57,6 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
   };
   const clear = () => {
     setBox("");
-    setOwn("");
     setGiven("");
     setSel([0, 0]);
     setBefore(null);
@@ -122,25 +98,6 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
       onError: failed,
     });
 
-  const ask = () => {
-    // The clock is read at a click, not during render. The rule reports any
-    // function a rendered element holds, its handlers included.
-    // eslint-disable-next-line react-hooks/purity
-    const at = thread?.at ?? Date.now();
-    const turns = thread?.turns ?? [];
-    const attempt = own.trim() || undefined;
-    // The opening turn says what the thread is about and the latest ones where
-    // it stands; what lies between is left out.
-    const told = turns.length > FIND_HISTORY_TURNS ? [turns[0], ...turns.slice(1 - FIND_HISTORY_TURNS)] : turns;
-    find.mutate({ need, attempt, history: told.map(recall), turn: turns.length + 1, thread: at }, {
-      onSuccess: (answer) => {
-        clear();
-        setThread({ at, turns: [...turns, { need, attempt, answer }] });
-      },
-      // Nothing was written: the question stays in the box, to be sent again as it is.
-      onError: (e) => toast.error(`没有问成：${e.message}`),
-    });
-  };
   // Sent as it is, not trimmed: a pick has to be found in the box word for word.
   const choose = () => {
     setPicks(null);
@@ -163,12 +120,6 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
         }}
         onSelect={(e) => track(e.currentTarget)}
       />
-      {askable && (
-        <label className="block space-y-1 text-xs text-muted-foreground">
-          我自己的英文（只在「问」时用，可不填）
-          <Input className="h-8" maxLength={EXPRESSION_LIMITS.attempt} readOnly={waiting} value={own} onChange={(e) => setOwn(e.target.value)} />
-        </label>
-      )}
       {draft.before !== undefined && (
         <label className="block space-y-1 text-xs text-muted-foreground">
           上文（选中的那一段是原文，这是它前面的一段，可改）
@@ -176,7 +127,6 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
         </label>
       )}
       {tooLong && <p className="text-xs text-destructive">原文超过 {EXPRESSION_LIMITS.text} 字。选中要收的那一段再收下。</p>}
-      {need.length > EXPRESSION_LIMITS.need && <p className="text-xs text-muted-foreground">超过 {EXPRESSION_LIMITS.need} 字的不能拿来问。</p>}
       <div className="flex flex-wrap items-center gap-1.5">
         {SOURCE_TYPES.map((s) => (
           <Button key={s} size="sm" variant={source === s ? "default" : "outline"} aria-pressed={source === s} onClick={() => pick(s)}>
@@ -196,29 +146,24 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
           </Button>
         )}
         <div className="ml-auto flex gap-1.5">
-          {need.includes("\n") && (
+          {box.trim().includes("\n") && (
             <Button variant="ghost" disabled={box.length > EXPRESSION_LIMITS.paste || waiting} onClick={choose}>
               {picker.isPending && <Loader2 className="animate-spin" />}
               帮我挑
             </Button>
           )}
-          <Button variant="outline" disabled={!askable || waiting} onClick={ask}>
-            {find.isPending && <Loader2 className="animate-spin" />}
-            {thread ? "追问" : "问"}
-          </Button>
           <Button disabled={!draft.text || tooLong || busy || waiting} onClick={submit}>
             {busy && <Loader2 className="animate-spin" />}
             收下
           </Button>
         </div>
       </div>
-      {/* Told, not stopped: both leave through the provider the user set up themselves. */}
-      <p className="text-xs text-muted-foreground">「问」会把这句话和整库的索引（每条的焦点或原文开头、提示句）发给你配置的模型，「帮我挑」发的是框里的整段对话。</p>
+      {/* Told, not stopped: it leaves through the provider the user set up themselves. */}
+      <p className="text-xs text-muted-foreground">「帮我挑」会把框里的整段对话发给你配置的模型。想说却说不出来的，去「对谈」里说。</p>
       {held && (
         <DuplicateQuestion existing={held.existing} disabled={busy || waiting} onAgain={(id) => again(id, held.met)} onNew={() => save(held.met, held.focus, true)} />
       )}
       {picks && <PickList picks={picks} from={from} onSaved={onSaved} onClose={() => setPicks(null)} />}
-      {thread && <FindThread turns={thread.turns} busy={find.isPending} onSaved={onSaved} onReset={() => setThread(null)} />}
     </section>
   );
 }

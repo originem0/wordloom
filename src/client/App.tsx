@@ -25,6 +25,9 @@ const WordForgePage = lazy(() =>
 const ExpressionsPage = lazy(() =>
   import("./components/expressions/ExpressionsPage").then((m) => ({ default: m.ExpressionsPage })).catch(reloadOnMiss),
 );
+const TalkPage = lazy(() =>
+  import("./components/expressions/TalkPage").then((m) => ({ default: m.TalkPage })).catch(reloadOnMiss),
+);
 
 const pageFallback = (
   <div className="flex items-center justify-center p-12">
@@ -54,6 +57,7 @@ function AppContent() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<Shell />}>
           <Route index element={<HomeSplit><Suspense fallback={pageFallback}><ExpressionsPage /></Suspense></HomeSplit>} />
+          <Route path="talk" element={<AuthGuard><Suspense fallback={pageFallback}><TalkPage /></Suspense></AuthGuard>} />
           <Route path="cards" element={<Suspense fallback={pageFallback}><WordForgePage /></Suspense>} />
           <Route path="providers" element={<AuthGuard><AIProvidersPage /></AuthGuard>} />
           <Route path="settings" element={<SettingsPage />} />

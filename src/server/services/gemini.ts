@@ -5,8 +5,10 @@ import {
   getSetting,
   runWithModelFallback,
   runJsonCall,
+  runTextCall,
   acquireSemaphore,
   type JsonCall,
+  type StreamCall,
   type ParsedCard,
 } from "./ai-shared.js";
 import { parseJsonLenient, normalizeCardsPayload } from "./ai-normalize.js";
@@ -266,6 +268,8 @@ export async function geminiJson(opts: JsonCall): Promise<unknown> {
     modelKeys: [`${opts.route}_model`, "cards_model", "general_model"],
     defaultModel: "gemini-2.5-flash",
     label: opts.label,
+    signal: opts.signal,
+    retryFast: opts.retryFast,
     run: async (model, signal) => {
       const ai = await getClient();
       const response = await ai.models.generateContent({
@@ -274,6 +278,36 @@ export async function geminiJson(opts: JsonCall): Promise<unknown> {
         config: { abortSignal: signal, responseMimeType: "application/json", systemInstruction: opts.system },
       });
       return response.text ?? "";
+    },
+  });
+}
+
+export async function geminiTextStream(opts: StreamCall): Promise<string> {
+  let received = false;
+  return runTextCall({
+    semaphore: geminiSemaphore,
+    modelKeys: [`${opts.route}_model`, "cards_model", "general_model"],
+    defaultModel: "gemini-2.5-flash",
+    label: opts.label,
+    signal: opts.signal,
+    retryFast: opts.retryFast,
+    canRetry: () => !received,
+    run: async (model, signal) => {
+      const ai = await getClient();
+      const stream = await ai.models.generateContentStream({ model, contents: opts.user, config: { abortSignal: signal, systemInstruction: opts.system } });
+      let text = "";
+      for await (const part of stream) {
+        signal.throwIfAborted();
+        const reason = String(part.candidates?.[0]?.finishReason ?? "");
+        if (reason && reason !== "STOP" && reason !== "FINISH_REASON_UNSPECIFIED") throw new Error("Incomplete reply");
+        if (!part.text) continue;
+        received = true;
+        text += part.text;
+        if (text.length > 8000) throw new Error("Reply too long");
+        await opts.onDelta(part.text);
+      }
+      if (!text.trim()) throw new Error("Missing reply");
+      return text;
     },
   });
 }

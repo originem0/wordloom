@@ -1,20 +1,23 @@
 import { Hono, type Context } from "hono";
+import { streamSSE } from "hono/streaming";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { encounters, expressions } from "../db/schema.js";
 import { failureReason } from "../services/ai-shared.js";
 import { annotate, pick } from "../services/expressions-ai.js";
-import { find, normalize } from "../services/expressions-find.js";
+import { dropThread, hasThread, normalize, readThread, retryCoaching, talk, threads } from "../services/expressions-talk.js";
+import { expressionSpeechRoutes } from "./expressions-speech.js";
 import {
   attemptResponse, judgeAttempt, loadAttempt, overturn, recordAttempt, sceneOf, stats, tryItems,
 } from "../services/expressions-try.js";
 import { isMasked, loadEntry, loadLibrary, toDetail, toDuplicate, toSummary } from "../services/expressions-view.js";
 import {
-  attemptRequestSchema, captureRequestSchema, encounterRequestSchema, expressionPatchSchema, findRequestSchema,
-  overturnRequestSchema, pickRequestSchema, revealRequestSchema,
+  attemptRequestSchema, captureRequestSchema, encounterRequestSchema, expressionPatchSchema, overturnRequestSchema, pickRequestSchema,
+  revealRequestSchema, talkRequestSchema,
 } from "../../shared/validation.js";
 import type {
-  CaptureRequest, DuplicateResponse, EncounterSource, ExpressionListResponse, PickResponse, TryResponse,
+  CaptureRequest, DuplicateResponse, EncounterSource, ExpressionListResponse, PickResponse, TalkFailure, TalkListResponse,
+  TalkThreadResponse, TryResponse,
 } from "../../shared/expressions.js";
 
 // The admin's private text. Nothing here logs it or puts it in an error: a log
@@ -22,6 +25,7 @@ import type {
 // a handler is logged by the app without its message. No route takes private
 // text in a query string either, because the request logger prints the URL.
 export const expressionRoutes = new Hono();
+expressionRoutes.route("/", expressionSpeechRoutes);
 
 const invalid = (c: Context) => c.json({ error: "Invalid request", code: "VALIDATION_ERROR" }, 400);
 const notFound = (c: Context, what = "Expression") => c.json({ error: `${what} not found`, code: "NOT_FOUND" }, 404);
@@ -261,12 +265,63 @@ expressionRoutes.post("/attempts/:encounterId{[0-9]+}/overturn", async (c) => {
   return attemptOf(c, encounterId);
 });
 
-// POST /find — what the library has for a need, and what else would say it
-expressionRoutes.post("/find", async (c) => {
-  const parsed = findRequestSchema.safeParse(await c.req.json());
+// POST /talk — one turn of 对谈: the partner's reply, and what the library has for what was said
+expressionRoutes.post("/talk", async (c) => {
+  const parsed = talkRequestSchema.safeParse(await c.req.json());
   if (!parsed.success) return invalid(c);
-  const found = await find(parsed.data);
-  return found ? c.json(found) : c.json({ error: "Search failed", code: "FIND_FAILED" }, 502);
+  if (/text\/event-stream/i.test(c.req.header("accept") ?? "")) {
+    if (parsed.data.thread != null && !await hasThread(parsed.data.thread)) return notFound(c, "Conversation");
+    c.header("X-Accel-Buffering", "no");
+    const controller = new AbortController();
+    const response = streamSSE(c, async (stream) => {
+      stream.onAbort(() => controller.abort());
+      try {
+        const turn = await talk(parsed.data, {
+          signal: AbortSignal.any([controller.signal, c.req.raw.signal]),
+          onDelta: (text) => stream.writeSSE({ event: "delta", data: JSON.stringify({ text }) }),
+        });
+        if (controller.signal.aborted) return;
+        const failure = !turn ? { error: "Conversation not found", code: "NOT_FOUND" }
+          : "failed" in turn ? { error: "No answer", code: "TALK_FAILED", reason: turn.failed } : null;
+        await stream.writeSSE({ event: failure ? "error" : "done", data: JSON.stringify(failure ?? { turn }) });
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        const reason = failureReason(err);
+        console.warn(`[expressions] stream failed: ${reason}`);
+        await stream.writeSSE({ event: "error", data: JSON.stringify({ error: "Reply interrupted", code: "STREAM_FAILED", reason }) });
+      }
+    });
+    // Hono's SSE helper sets no-cache, overriding the private-route header.
+    c.header("Cache-Control", "no-store");
+    response.headers.set("Cache-Control", "no-store");
+    return response;
+  }
+  const turn = await talk(parsed.data);
+  if (!turn) return notFound(c, "Conversation");
+  if (!("failed" in turn)) return c.json(turn, 201);
+  // The reason is one of a fixed list: the page tells "no model set up" from "try again".
+  return c.json({ error: "No answer", code: "TALK_FAILED", reason: turn.failed } satisfies TalkFailure, 502);
+});
+
+// A retry changes only the notes of this saved reply and records each hit once.
+expressionRoutes.post("/talk/turn/:id{[0-9]+}/coach", async (c) => {
+  const turn = await retryCoaching(Number(c.req.param("id")), c.req.raw.signal);
+  return turn ? c.json(turn) : notFound(c, "Turn");
+});
+
+// GET /talk — every conversation, the latest first
+expressionRoutes.get("/talk", async (c) => c.json({ threads: await threads() } satisfies TalkListResponse));
+
+// GET /talk/:thread — its turns, as the library stands now
+expressionRoutes.get("/talk/:thread{[0-9]+}", async (c) => {
+  const turns = await readThread(Number(c.req.param("thread")));
+  return turns ? c.json({ turns } satisfies TalkThreadResponse) : notFound(c, "Conversation");
+});
+
+// DELETE /talk/:thread — forget a conversation; what it wrote on the timelines stays
+expressionRoutes.delete("/talk/:thread{[0-9]+}", async (c) => {
+  await dropThread(Number(c.req.param("thread")));
+  return c.body(null, 204);
 });
 
 // POST /pick — what in a pasted conversation is worth saving; stores nothing

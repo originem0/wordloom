@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { EXPRESSION_LIMITS, type ExpressionSummary, type SourceType, type Verdict } from "@/shared/expressions";
 
-export const SOURCE_LABELS: Record<SourceType | "find", string> = { chat: "AI 对话", book: "书", video: "影视", other: "其他", find: "找" };
+export const SOURCE_LABELS: Record<SourceType | "find", string> = { chat: "AI 对话", book: "书", video: "影视", other: "其他", find: "对谈" };
 
 // The three things a judgement can say. Getting the meaning across another
 // way is not called wrong: only the target expression was not used.
@@ -12,6 +12,11 @@ export const AREA_CLASS =
 
 export const day = (ms: number) => new Date(ms).toLocaleDateString("zh-CN");
 
+// Without AUTH_TOKEN the app treats everyone as the admin, and the server
+// refuses to serve private data. What 表达 and 对谈 say then.
+export const NO_AUTH_NOTE =
+  "表达库和对谈是私人数据，服务器没有设置 AUTH_TOKEN 时不提供：请设置 AUTH_TOKEN、重启服务，然后登录。只在这台机器上试用的话，也可以改设 EXPRESSIONS_OPEN_LOCALLY=1 再重启，不用登录。";
+
 /** What stands for an entry in a list: `text` is null while the server withholds the English. */
 export const titleOf = (e: Pick<ExpressionSummary, "text" | "intent">) => e.text ?? e.intent ?? "（未显示）";
 
@@ -19,6 +24,14 @@ export const titleOf = (e: Pick<ExpressionSummary, "text" | "intent">) => e.text
 // at Cards and back) and is gone with a refresh. Never written to storage, and
 // only the tag: a title typed for it is private text and stays with the page.
 export const useLastSource = create<{ source: SourceType | null }>(() => ({ source: null }));
+
+// Which conversation 对谈 has open, for this visit only: a look at another page
+// and back finds it again, a refresh starts from the latest one. Undefined
+// until one is chosen, null for a conversation not yet begun. `visit` counts
+// the times one was chosen: a conversation that gets its id by its first turn
+// is still the same visit, and keeps what is on screen.
+export const useOpenThread = create<{ thread: number | null | undefined; visit: number }>(() => ({ thread: undefined, visit: 0 }));
+export const openThread = (thread: number | null) => useOpenThread.setState((s) => ({ thread, visit: s.visit + 1 }));
 
 /**
  * Selection is focus. One line with part of it selected: the selection is the

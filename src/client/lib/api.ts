@@ -21,10 +21,10 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch<T = unknown>(
+export async function apiResponse(
   path: string,
   init?: RequestInit,
-): Promise<T> {
+): Promise<Response> {
   const res = await fetch(path, {
     ...init,
     credentials: "include",
@@ -43,6 +43,11 @@ export async function apiFetch<T = unknown>(
     throw new ApiError(message, res.status, typeof body.code === "string" ? body.code : undefined, body);
   }
 
+  return res;
+}
+
+export async function apiFetch<T = unknown>(path: string, init?: RequestInit): Promise<T> {
+  const res = await apiResponse(path, init);
   const text = await res.text();
   if (!text) return {} as T;
   try {

@@ -12,7 +12,7 @@ import { CaptureBox } from "./CaptureBox";
 import { ExpressionDetailDialog, Marked } from "./ExpressionDetail";
 import { StatsLine } from "./StatsLine";
 import { TryPanel } from "./TryPanel";
-import { SOURCE_LABELS, day, titleOf } from "./shared";
+import { NO_AUTH_NOTE, SOURCE_LABELS, day, titleOf } from "./shared";
 
 // 全部 leaves out only what was put away, and comes first: an entry just saved
 // or just moved to the other layer is then still on top of what is shown.
@@ -56,9 +56,8 @@ function ExpressionsInner() {
         {/* This and 试一条 ask the server on their own. They wait for the list, which only an admin is given. */}
         {list.data && <StatsLine />}
       </section>
-      {/* Without AUTH_TOKEN the app treats everyone as the admin, and the server refuses to serve private data. */}
       {list.error instanceof ApiError && list.error.code === "AUTH_NOT_CONFIGURED" ? (
-        <p className="rounded-md border p-4 text-sm">表达库是私人数据，服务器没有设置 AUTH_TOKEN 时不提供：请设置 AUTH_TOKEN、重启服务，然后登录。只在这台机器上试用的话，也可以改设 EXPRESSIONS_OPEN_LOCALLY=1 再重启，不用登录。</p>
+        <p className="rounded-md border p-4 text-sm">{NO_AUTH_NOTE}</p>
       ) : (
         <>
           <CaptureBox onSaved={watchGloss} />

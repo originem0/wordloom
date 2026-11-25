@@ -32,7 +32,7 @@ vi.mock("../../services/ai-router.js", () => ({
 import { eq, sql } from "drizzle-orm";
 import { app } from "../../app.js";
 import { db } from "../../db/index.js";
-import { encounters, expressions, jobs, sessions, settings } from "../../db/schema.js";
+import { encounters, expressions, jobs, sessions, settings, talkTurns } from "../../db/schema.js";
 import { hashSessionId } from "../../middleware/auth.js";
 import type {
   DuplicateResponse,
@@ -95,7 +95,7 @@ beforeEach(async () => {
   process.env.AUTH_TOKEN = "secret-token";
   process.env.AUTH_SECRET = "secret";
   delete process.env.ALLOWED_ORIGINS;
-  for (const t of [encounters, expressions, jobs, sessions, settings]) await db.delete(t);
+  for (const t of [talkTurns, encounters, expressions, jobs, sessions, settings]) await db.delete(t);
   const now = Date.now();
   await db.insert(sessions).values({
     sessionId: hashSessionId(SESSION), createdAt: now, expiresAt: now + 60_000, revokedAt: null,
@@ -122,13 +122,23 @@ describe("the guard on the expression library", () => {
   }
   const send = (method: string, path: string, cookie: boolean) =>
     req(path, { method, cookie, ...(method === "GET" ? {} : { body: {} }) });
+  /** A conversation where the probes ask for one to be deleted: every id in a path is 1. */
+  const conversation = () =>
+    db.insert(talkTurns).values({
+      thread: 1, said: "kind of", reply: "sort of", createdAt: 1,
+      notes: JSON.stringify({ fix: null, rewrites: [], fresh: [], mine: [], searched: 0, total: 0 }),
+    });
+  const conversations = () => db.select().from(talkTurns).all();
 
-  it("is probed on all fifteen routes", () => {
+  it("is probed on all twenty routes", () => {
     expect(routes().map(([method, path]) => `${method} ${path}`).sort()).toEqual([
+      "DELETE /api/expressions/talk/1",
       "GET /api/expressions",
       "GET /api/expressions/1",
       "GET /api/expressions/1/scene",
       "GET /api/expressions/stats",
+      "GET /api/expressions/talk",
+      "GET /api/expressions/talk/1",
       "GET /api/expressions/try",
       "PATCH /api/expressions/1",
       "POST /api/expressions",
@@ -138,23 +148,28 @@ describe("the guard on the expression library", () => {
       "POST /api/expressions/1/reveal",
       "POST /api/expressions/attempts/1/judge",
       "POST /api/expressions/attempts/1/overturn",
-      "POST /api/expressions/find",
       "POST /api/expressions/pick",
+      "POST /api/expressions/speech",
+      "POST /api/expressions/talk",
+      "POST /api/expressions/talk/turn/1/coach",
     ]);
   });
 
   it("turns a caller without a session away from every route", async () => {
+    await conversation();
     for (const [method, path] of routes()) {
       const res = await send(method, path, false);
       expect(res.status, `${method} ${path}`).toBe(401);
       expect(await res.json()).toMatchObject({ code: "AUTH_REQUIRED" });
     }
     expect(await stored()).toHaveLength(0);
+    expect(await conversations()).toHaveLength(1);
     expect(model).not.toHaveBeenCalled();
   });
 
   it("serves nothing while AUTH_TOKEN is unset, with or without a session", async () => {
     delete process.env.AUTH_TOKEN;
+    await conversation();
     for (const [method, path] of routes()) {
       for (const cookie of [true, false]) {
         const res = await send(method, path, cookie);
@@ -163,6 +178,7 @@ describe("the guard on the expression library", () => {
       }
     }
     expect(await stored()).toHaveLength(0);
+    expect(await conversations()).toHaveLength(1);
     // That mode opens the rest of the API to everyone; only this part shuts.
     expect((await req("/api/cards", { cookie: false })).status).toBe(200);
   });
@@ -209,6 +225,7 @@ describe("the guard on the expression library", () => {
     });
 
     it("answers no other machine, nor a request whose sender it cannot tell", async () => {
+      await conversation();
       for (const env of [from("192.168.1.20"), from("::ffff:192.168.1.20"), from(), undefined]) {
         for (const [method, path] of routes()) {
           const res = await req(path, { method, cookie: false, env, host: LOCAL, ...(method === "GET" ? {} : { body: {} }) });
@@ -216,6 +233,7 @@ describe("the guard on the expression library", () => {
         }
       }
       expect(await stored()).toHaveLength(0);
+      expect(await conversations()).toHaveLength(1);
     });
 
     it.each(["localhost", "LOCALHOST:5173", "127.0.0.1:3001", "[::1]:3001"])("answers under a name of this machine (%s)", async (host) => {
@@ -227,12 +245,14 @@ describe("the guard on the expression library", () => {
     it.each(["evil.example:3001", "localhost.evil.example", "192.168.1.5:5173", "desk.local:5173", "localhost.", "a b"])(
       "answers no request addressed to another name (%s)",
       async (host) => {
+        await conversation();
         for (const [method, path] of routes()) {
           const res = await req(path, { method, cookie: false, env: HERE, host, ...(method === "GET" ? {} : { body: {} }) });
           // A name no URL takes never gets past the origin check, the rest stop here.
           expect(res.status, `${method} ${path}`).toBe(host === "a b" && method !== "GET" ? 403 : 503);
         }
         expect(await stored()).toHaveLength(0);
+        expect(await conversations()).toHaveLength(1);
       },
     );
 
@@ -241,11 +261,13 @@ describe("the guard on the expression library", () => {
     it.each(["192.168.1.20", "127.0.0.1, 192.168.1.20", "192.168.1.20, ::1", "unknown"])(
       "answers no one else a proxy on this machine speaks for (%s)",
       async (forwardedFor) => {
+        await conversation();
         for (const [method, path] of routes()) {
           const res = await req(path, { method, cookie: false, env: HERE, host: LOCAL, forwardedFor, ...(method === "GET" ? {} : { body: {} }) });
           expect(res.status, `${method} ${path}`).toBe(503);
         }
         expect(await stored()).toHaveLength(0);
+        expect(await conversations()).toHaveLength(1);
       },
     );
 
@@ -356,7 +378,7 @@ describe("capture", () => {
     expect((await metRows(detail.id))[0]).toMatchObject(source);
   });
 
-  it("keeps an entry taken from 找 with that turn as its scene", async () => {
+  it("keeps an entry taken from 对谈 with that turn as its scene", async () => {
     const { res, detail } = await capture({
       text: "That said, I'd still go.", focus: "That said",
       found: { need: " 想说虽然如此，我还是会去 ", attempt: "But say that, I still go." },
@@ -593,6 +615,10 @@ describe("the list and the detail", () => {
     ["GET", "/api/expressions/12x"],
     ["GET", "/api/expressions/-1"],
     ["DELETE", "/api/expressions/1"],
+    ["DELETE", "/api/expressions/talk"],
+    ["GET", "/api/expressions/talk/abc"],
+    ["DELETE", "/api/expressions/talk/12x"],
+    ["PATCH", "/api/expressions/talk/1"],
   ])("%s %s is a 404: no route answers it", async (method, path) => {
     const res = await req(path, { method, ...(method === "GET" ? {} : { body: { text: "x" } }) });
     expect(res.status).toBe(404);

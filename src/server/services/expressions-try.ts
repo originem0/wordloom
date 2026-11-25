@@ -3,7 +3,7 @@ import { db } from "../db/index.js";
 import { encounters, expressions } from "../db/schema.js";
 import { failureReason } from "./ai-shared.js";
 import { judge } from "./expressions-ai.js";
-import { phrasePattern } from "./expressions-find.js";
+import { phrasePattern } from "./expressions-talk.js";
 import { attemptFeedback, loadLibrary, testableAt, type EncounterRow, type Entry } from "./expressions-view.js";
 import type {
   AttemptFeedback, AttemptRequest, AttemptResponse, Outcome, SceneResponse, StatsResponse, TryItem,
@@ -56,12 +56,23 @@ export async function loadAttempt(encounterId: number): Promise<Attempt | null> 
 }
 
 /** Stores the sentence, not yet judged, and returns its row. */
-export function recordAttempt(expressionId: number, { text, cue, prompt }: AttemptRequest): Promise<EncounterRow> {
+export function recordAttempt(expressionId: number, { text, cue, prompt }: AttemptRequest, talkTurnId?: number): Promise<EncounterRow> {
   return db.transaction(async (tx) => {
+    // One conversation turn answers at most one review. Keep its link in the
+    // source columns: judging and overturning deliberately replace feedback.
+    const sourceLocator = talkTurnId == null ? null : `talk:${talkTurnId}`;
+    if (sourceLocator) {
+      const existing = await tx.select().from(encounters).where(and(
+        eq(encounters.kind, "attempt"), eq(encounters.sourceType, "chat"), eq(encounters.sourceLocator, sourceLocator),
+      )).get();
+      if (existing) return existing;
+    }
     const feedback: AttemptFeedback = { prompt, status: "pending" };
     const [row] = await tx
       .insert(encounters)
-      .values({ expressionId, kind: "attempt", text, cue, feedback: JSON.stringify(feedback), createdAt: Date.now() })
+      .values({ expressionId, kind: "attempt", text, cue, feedback: JSON.stringify(feedback), createdAt: Date.now(),
+        ...(sourceLocator ? { sourceType: "chat", sourceLocator } : {}),
+      })
       .returning();
     // A stored scene is asked once, whatever else was on screen with it.
     await tx
@@ -75,7 +86,7 @@ export function recordAttempt(expressionId: number, { text, cue, prompt }: Attem
 /** Asks for the judgement of a row that has none and fills that row in. A
  *  model failure is noted on the row, not thrown: the sentence is saved, it
  *  counts for nothing, and the same call can be made again. */
-export async function judgeAttempt({ entry, row }: Attempt): Promise<void> {
+export async function judgeAttempt({ entry, row }: Attempt, signal?: AbortSignal): Promise<void> {
   const prompt = attemptFeedback(row)?.prompt ?? "";
   // Only while there is no outcome: of two judgements, the first to land stands.
   const fill = (outcome: Outcome | null, feedback: AttemptFeedback) =>
@@ -86,7 +97,7 @@ export async function judgeAttempt({ entry, row }: Attempt): Promise<void> {
       .returning({ id: encounters.id });
   let out;
   try {
-    out = await judge({ text: entry.row.text, focus: entry.row.focus, prompt, answer: row.text });
+    out = await judge({ text: entry.row.text, focus: entry.row.focus, prompt, answer: row.text }, { signal });
   } catch (err) {
     console.warn(`[expressions] judge #${row.id} failed: ${failureReason(err)}`);
     await fill(null, { prompt, status: "failed" });

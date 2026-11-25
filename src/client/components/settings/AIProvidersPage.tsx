@@ -26,9 +26,9 @@ const ROUTES = [
   { key: "deep", label: "Deep Analysis", subtitle: "长 JSON、schemaAnalysis、SVG", testTarget: "deepModel" },
   { key: "utility", label: "Utility", subtitle: "抽词、轻量文本", testTarget: "utilityModel" },
   // No probe of its own: it is tested as a cards call on this row's provider and model.
-  // `once`: its calls are made a single time inside the request that waits for
-  // them (runJsonCall), so there is no fallback model to set.
-  { key: "expressions", label: "Expressions", subtitle: "表达库：补注、找、判定、帮我挑。留空的项沿用 Cards 路由", testTarget: "cardsModel", inherits: "cards", once: true },
+  // `once` suppresses the fallback controls: expressions and conversation
+  // stay on the selected model, even when a conversation call is retried.
+  { key: "expressions", label: "Expressions", subtitle: "表达库与对谈。留空的项沿用 Cards 路由", testTarget: "cardsModel", inherits: "cards", once: true },
 ] as const;
 
 const GEMINI_DEFAULTS: Record<string, string> = {
@@ -40,6 +40,8 @@ const GEMINI_DEFAULTS: Record<string, string> = {
   utility_fallback_model: "",
   expressions_model: "",
 };
+
+const RIME_DEFAULTS: Record<string, string> = { rime_model: "coda", rime_speaker: "astra", rime_speed: "1" };
 
 /**
  * What a route runs on, as the server resolves it: its own setting, then, for
@@ -123,6 +125,8 @@ export function AIProvidersPage() {
       gemini_base_url: settings.gemini_base_url ?? "",
       openai_api_key: "",
       openai_base_url: settings.openai_base_url ?? "",
+      rime_api_key: "",
+      ...Object.fromEntries(Object.entries(RIME_DEFAULTS).map(([key, value]) => [key, settings[key] || value])),
     };
     // Route providers. One that inherits stays empty until chosen: seeding it
     // with "gemini" would pin it on the next save and stop it following.
@@ -149,6 +153,7 @@ export function AIProvidersPage() {
 
   const hasGeminiKey = settings?.gemini_api_key === "configured";
   const hasOpenaiKey = settings?.openai_api_key === "configured";
+  const hasRimeKey = settings?.rime_api_key === "configured";
 
   // --- Detect models ---
   const detectGeminiModels = useCallback(async () => {
@@ -250,6 +255,8 @@ export function AIProvidersPage() {
         { key: "gemini_base_url", value: draftValue("gemini_base_url") },
         { key: "openai_api_key", value: drafts.openai_api_key ?? "", skipEmpty: true },
         { key: "openai_base_url", value: draftValue("openai_base_url") },
+        { key: "rime_api_key", value: drafts.rime_api_key ?? "", skipEmpty: true },
+        ...Object.keys(RIME_DEFAULTS).map((key) => ({ key, value: draftValue(key) })),
       ];
       for (const r of ROUTES) {
         pairs.push({ key: `${r.key}_provider`, value: draftValue(`${r.key}_provider`) });
@@ -269,6 +276,7 @@ export function AIProvidersPage() {
         await updateSetting.mutateAsync({ key: pair.key, value: pair.value.trim() });
       }
       toast.success("AI provider settings saved");
+      setDrafts((prev) => ({ ...prev, rime_api_key: "" }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -354,9 +362,10 @@ export function AIProvidersPage() {
     // Check API key drafts
     if (drafts.gemini_api_key?.trim()) return true;
     if (drafts.openai_api_key?.trim()) return true;
+    if (drafts.rime_api_key?.trim()) return true;
     // Check all other keys
-    const keys = Object.keys(drafts).filter((k) => k !== "gemini_api_key" && k !== "openai_api_key");
-    return keys.some((k) => (drafts[k] ?? "") !== (settings[k] ?? GEMINI_DEFAULTS[k] ?? ""));
+    const keys = Object.keys(drafts).filter((k) => !k.endsWith("_api_key"));
+    return keys.some((k) => (drafts[k] ?? "") !== (k in RIME_DEFAULTS ? settings[k] || RIME_DEFAULTS[k] : settings[k] ?? GEMINI_DEFAULTS[k] ?? ""));
   }, [initialized, settings, drafts]);
 
   if (settingsQuery.isLoading && !initialized) {
@@ -555,7 +564,7 @@ export function AIProvidersPage() {
               </div>
               {modelField(primaryKey, "Primary Model", provider === "gemini" || follows ? "Leave empty to inherit" : "e.g. deepseek-chat", candidates, undefined, provider === "gemini" || follows)}
               {"once" in route ? (
-                <div className="text-[11px] text-muted-foreground/60">这条路由每次请求只试一次、最多等 45 秒，没有后备模型。</div>
+                <div className="text-[11px] text-muted-foreground/60">这条路由使用上面选定的模型，没有后备模型。</div>
               ) : (
                 modelField(fallbackKey, "Fallback Model", "Optional", candidates, "Primary 失败后尝试。", true)
               )}
@@ -563,6 +572,42 @@ export function AIProvidersPage() {
           </SettingRow>
         );
       })}
+
+      <SectionHeader>Rime Speech</SectionHeader>
+      <SettingRow
+        title="API Key" subtitle="只在对谈里点击听语音时播放。留空保留已保存的 key。"
+        right={<Badge variant={hasRimeKey ? "outline" : "destructive"} className="rounded-md text-[10px]">{hasRimeKey ? "saved" : "missing"}</Badge>}
+        defaultOpen={!hasRimeKey}
+      >
+        <Input
+          type="password" aria-label="Rime API Key" autoComplete="new-password"
+          placeholder={hasRimeKey ? "Saved — type to replace" : "Enter Rime API key"}
+          value={drafts.rime_api_key ?? ""} onChange={(e) => setDraft("rime_api_key", e.target.value)} className={INPUT_CLASS}
+        />
+        <a href="https://app.rime.ai/tokens/" target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-muted-foreground underline">Rime API Tokens</a>
+      </SettingRow>
+      <SettingRow title="Voice" value={`${draftValue("rime_speaker")} · ${draftValue("rime_speed")}×`}>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="space-y-1.5 text-[13px] font-medium text-foreground">
+            <span>Model</span>
+            <select aria-label="Rime Model" className={SELECT_CLASS} value={draftValue("rime_model")} onChange={(e) => setDraft("rime_model", e.target.value)}>
+              <option value="coda">Coda</option><option value="mist">Mist v3</option>
+            </select>
+          </label>
+          <label className="space-y-1.5 text-[13px] font-medium text-foreground">
+            <span>Voice</span>
+            <select aria-label="Rime Voice" className={SELECT_CLASS} value={draftValue("rime_speaker")} onChange={(e) => setDraft("rime_speaker", e.target.value)}>
+              <option value="astra">Astra</option><option value="luna">Luna</option>
+            </select>
+          </label>
+          <label className="space-y-1.5 text-[13px] font-medium text-foreground">
+            <span>Speed</span>
+            <select aria-label="Rime Speed" className={SELECT_CLASS} value={draftValue("rime_speed")} onChange={(e) => setDraft("rime_speed", e.target.value)}>
+              <option value="0.8">0.8×</option><option value="1">1×</option><option value="1.2">1.2×</option>
+            </select>
+          </label>
+        </div>
+      </SettingRow>
 
       {/* ── Sticky save bar ── */}
       {isDirty && (

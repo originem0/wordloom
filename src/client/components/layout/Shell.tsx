@@ -1,5 +1,5 @@
 import { Link, Outlet, NavLink } from "react-router-dom";
-import { Layers, Cpu, Quote, Settings, Sun, Moon, LogIn, LogOut, type LucideIcon } from "lucide-react";
+import { Layers, Cpu, MessagesSquare, Quote, Settings, Sun, Moon, LogIn, LogOut, type LucideIcon } from "lucide-react";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
 import { useIsAdmin, useLogout } from "@/client/hooks/useAuth";
@@ -7,9 +7,11 @@ import { TaskPanel } from "./TaskPanel";
 
 // A visitor reads cards and nothing else, so the page that configures the
 // models is not on their menu (the route itself sits behind AuthGuard), and
-// neither is 表达, the admin's home: for a visitor `/` leads to the cards.
+// neither are 表达, the admin's home (for a visitor `/` leads to the cards),
+// and 对谈, which talks about what is in it.
 const navItems: Array<{ to: string; icon: LucideIcon; label: string; adminOnly?: boolean }> = [
   { to: "/", icon: Quote, label: "表达", adminOnly: true },
+  { to: "/talk", icon: MessagesSquare, label: "对谈", adminOnly: true },
   { to: "/cards", icon: Layers, label: "Cards" },
   { to: "/providers", icon: Cpu, label: "AI", adminOnly: true },
   { to: "/settings", icon: Settings, label: "Settings" },

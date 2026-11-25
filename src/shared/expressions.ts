@@ -14,7 +14,10 @@
 //   POST   /attempts/:encounterId/judge     → AttemptResponse
 //   POST   /attempts/:encounterId/overturn  OverturnRequest  → AttemptResponse | 409 { code: "NOT_JUDGED" }
 //   GET    /try?exclude=1,2                 TryResponse
-//   POST   /find                            FindRequest      → FindResponse | 502 { code: "FIND_FAILED" }
+//   POST   /talk                            TalkRequest      → 201 TalkTurn | 502 { code: "TALK_FAILED", reason }
+//   GET    /talk                            TalkListResponse
+//   GET    /talk/:thread                    TalkThreadResponse
+//   DELETE /talk/:thread                    → 204
 //   POST   /pick                            PickRequest      → PickResponse | 502 { code: "PICK_FAILED" }
 //   GET    /stats                           StatsResponse
 
@@ -22,7 +25,7 @@ export const EXPRESSION_STATUSES = ["seen", "active", "retired"] as const;
 export type ExpressionStatus = (typeof EXPRESSION_STATUSES)[number];
 
 /** The four tags on the capture box. The server alone writes a fifth value,
- *  "find", for an entry kept from an AI suggestion. */
+ *  "find", for an entry kept from what the partner wrote in 对谈. */
 export const SOURCE_TYPES = ["chat", "book", "video", "other"] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 
@@ -40,15 +43,17 @@ export const EXPRESSION_LIMITS = {
   sourceTitle: 200,
   sourceLocator: 500,
   note: 4000,
-  // As long as a need: in 找 the need of the turn becomes the intent.
+  // A message in 对谈 can become an entry's intent: it is cut to this then.
   intent: 1000,
-  need: 1000,
+  // One message to the partner. Also the longest question an attempt answers:
+  // a masked hit is tried against the message that found it.
+  said: 4000,
   attempt: 2000,
   paste: 10000,
 } as const;
 
-/** A 找 thread sends its opening turn plus the latest five. */
-export const FIND_HISTORY_TURNS = 6;
+/** What the partner is told of a conversation: its opening turn plus the latest eleven. */
+export const TALK_HISTORY_TURNS = 12;
 /** Settings key ("1" = on): show 帮我起草 whatever the automatic rule says. */
 export const DRAFT_SETTING_KEY = "expressions_draft";
 
@@ -131,8 +136,8 @@ export interface ExpressionDetail extends ExpressionSummary {
   annotated: boolean;
   activeSince: number | null;
   /** Oldest first. The earliest `met` row is the scene the entry came from:
-   *  for an entry kept from 找, its `textBefore` is the need of that turn and
-   *  its `myAttempt` the English the user had tried. */
+   *  for an entry kept from 对谈, its `textBefore` is the message of that turn
+   *  and its `myAttempt` the words of it that were put right. */
   timeline: EncounterView[];
 }
 
@@ -157,8 +162,9 @@ export interface CaptureRequest extends EncounterSource {
   focus?: string;
   /** Save as a separate entry although one with the same norm exists. */
   force?: boolean;
-  /** Kept from an AI suggestion in 找: the need and the attempt of that turn
-   *  become the scene, and the server sets the source to "find". */
+  /** Kept from something the partner wrote in 对谈: the message of that turn
+   *  becomes the scene (and `attempt` the words of it that were put right),
+   *  and the server sets the source to "find". */
   found?: { need: string; attempt?: string };
 }
 
@@ -191,7 +197,7 @@ export interface DuplicateResponse {
 
 // --- 揭晓 ---
 
-/** "masked": revealed from 找, the list or the detail. Anything else is the
+/** "masked": revealed from 对谈, the list or the detail. Anything else is the
  *  hint level at which the user gave up inside 试一条. Revealing an entry that
  *  is not masked writes nothing. */
 export interface RevealRequest {
@@ -257,53 +263,88 @@ export interface OverturnRequest {
   outcome: Outcome;
 }
 
-// --- 找 ---
+// --- 对谈 ---
 
-/** One earlier turn of the thread, as the page remembers it. */
-export interface FindTurn {
-  need: string;
-  attempt?: string;
-  mine: number[];
-  fix: string | null;
-  fresh: string[];
-}
-
-export interface FindRequest {
-  need: string;
-  /** The user's own English for it, if any. */
-  attempt?: string;
-  /** Oldest first, at most FIND_HISTORY_TURNS. The server keeps no session. */
-  history: FindTurn[];
-  /** 1 for the opening turn. */
-  turn: number;
-  /** Timestamp of the opening turn; identifies the thread. */
-  thread: number;
+/** One message to the partner. Without `thread` it opens a new conversation. */
+export interface TalkRequest {
+  said: string;
+  /** The conversation it continues: the `thread` of its turns. */
+  thread?: number;
 }
 
 export interface Suggestion {
+  /** A fix: the whole message as it would be said. Something worth keeping:
+   *  the sentence of the turn it stands in. */
   text: string;
   why: string;
+  /** The expression itself, when it is only part of `text`. */
+  focus?: string;
 }
 
-export interface FindHit {
-  /** As this answer shows it: a hit in 想用 is masked only when the question
-   *  came without an attempt. */
+export interface TalkHit {
+  /** As this answer shows it: a hit in 想用 keeps its English back unless the
+   *  message it answers was written in English. */
   expression: ExpressionSummary;
   /** Withheld while the hit is masked: it tends to give the answer away. */
   why: string | null;
 }
 
-export interface FindResponse {
-  /** The need was a single English word that has a card: no model was asked. */
-  card: { id: number; word: string } | null;
-  mine: FindHit[];
-  /** Only when an attempt was sent: the smallest change that makes it work. */
+/**
+ * One turn of a conversation: the message, the partner's reply, and what came
+ * with it. Wherever a string says the target of an entry whose English this
+ * answer holds back, those words are "____": in the reply, in every note, and
+ * when a conversation is read again later in the user's own message too.
+ */
+export interface TalkTurn {
+  id: number;
+  /** When the conversation was opened; identifies it. */
+  thread: number;
+  createdAt: number;
+  said: string;
+  reply: string;
+  /** How an articulate speaker would have put `said`. Null when it needs no change. */
   fix: Suggestion | null;
-  /** At most two. The page holds them back while a masked hit is unresolved. */
+  /** At most three; every `from` stands in `said` word for word. */
+  rewrites: Rewrite[];
+  /** At most two expressions worth keeping, each inside a sentence the reply or the fix really has. */
   fresh: Suggestion[];
+  /** What the library has for what was said. */
+  mine: TalkHit[];
   /** How many entries fitted into the index this time, out of how many. */
   searched: number;
   total: number;
+  /** The reply is kept even when its separate coaching call did not finish. */
+  coachingFailure?: TalkFailure["reason"];
+  /** An occasional scene the server chose from expressions due for recall. */
+  review?: { id: number; scene: string };
+  /** The previous scene answered by this turn, using the usual attempt rules. */
+  reviewResult?: AttemptResponse;
+}
+
+export interface TalkThread {
+  thread: number;
+  /** The start of its opening message. */
+  title: string;
+  turns: number;
+  updatedAt: number;
+}
+
+export interface TalkListResponse {
+  /** Latest first. */
+  threads: TalkThread[];
+}
+
+export interface TalkThreadResponse {
+  /** Oldest first, each as the library stands now: a hit is masked or not by
+   *  what it is today. */
+  turns: TalkTurn[];
+}
+
+/** 502 from POST /talk: the model gave no usable answer and nothing was written. */
+export interface TalkFailure {
+  error: string;
+  code: "TALK_FAILED";
+  reason: "not configured" | "timeout" | "busy" | "failed";
 }
 
 // --- 帮我挑 ---

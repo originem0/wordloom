@@ -198,3 +198,18 @@ export const encounters = sqliteTable("encounters", {
   index("encounters_expression_idx").on(table.expressionId, table.createdAt),
   index("encounters_created_at_idx").on(table.createdAt),
 ]);
+
+// The 对谈 page: one row a turn, what the user wrote and what the partner
+// answered. Private like the two tables above. `notes` is kept as the model
+// wrote it once the checks had passed; whatever of it is masked by the time it
+// is read is blanked then, not here.
+export const talkTurns = sqliteTable("talk_turns", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  thread: integer("thread").notNull(), // created_at of the opening turn: the conversation's id
+  said: text("said").notNull(), // verbatim
+  reply: text("reply").notNull(),
+  notes: text("notes").notNull(), // JSON: TalkNotes in expressions-talk.ts
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  index("talk_turns_thread_idx").on(table.thread, table.id),
+]);

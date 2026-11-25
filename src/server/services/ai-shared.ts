@@ -96,20 +96,32 @@ export async function retryWithBackoff<T>(
 export async function withTimeout<T>(
   work: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
+  callerSignal?: AbortSignal,
 ): Promise<T> {
+  callerSignal?.throwIfAborted();
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancel: (() => void) | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       const err = new Error(`timeout after ${timeoutMs}ms`);
       controller.abort(err);
       reject(err);
     }, timeoutMs);
+    cancel = () => {
+      const err = callerSignal?.reason ?? new DOMException("Aborted", "AbortError");
+      controller.abort(err);
+      reject(err);
+    };
+    if (callerSignal?.aborted) cancel();
+    else callerSignal?.addEventListener("abort", cancel, { once: true });
   });
   try {
+    controller.signal.throwIfAborted();
     return await Promise.race([work(controller.signal), deadline]);
   } finally {
     clearTimeout(timer);
+    if (cancel) callerSignal?.removeEventListener("abort", cancel);
   }
 }
 
@@ -185,6 +197,13 @@ export interface JsonCall {
   system: string;
   user: string;
   label: string;
+  signal?: AbortSignal;
+  /** Opted into only by conversations, before any output has been shown. */
+  retryFast?: boolean;
+}
+
+export interface StreamCall extends JsonCall {
+  onDelta: (text: string) => Promise<void>;
 }
 
 // The request waiting on this sits behind a reverse proxy, and nginx gives up
@@ -192,27 +211,48 @@ export interface JsonCall {
 // and the fallback models: one attempt, and past the cap it has failed.
 const JSON_CALL_TIMEOUT_MS = 45_000;
 
-export async function runJsonCall(opts: {
+interface DirectCall {
   semaphore: Semaphore;
   modelKeys: string[];
   defaultModel: string;
   label: string;
   run: (model: string, signal: AbortSignal) => Promise<string>;
-}): Promise<unknown> {
+  signal?: AbortSignal;
+  retryFast?: boolean;
+  canRetry?: () => boolean;
+}
+
+/** A shared slot and deadline for JSON and streaming calls. */
+export async function runTextCall(opts: DirectCall): Promise<string> {
   const model = (await getFirstSetting(opts.modelKeys)) || opts.defaultModel;
   if (!model) throw new Error(`No model configured for ${opts.label}. Set it in AI Providers.`);
   // The wait for a slot runs on the same clock as the call. Taken before the
   // clock started, a call queued behind a batch of cards could hold its
   // request for the queue's 30 s and then for 45 more.
-  const text = await withTimeout(async (signal) => {
+  return withTimeout(async (signal) => {
     await acquireSemaphore(opts.semaphore);
     try {
       signal.throwIfAborted();
-      return await opts.run(model, signal);
+      const started = Date.now();
+      try {
+        return await opts.run(model, signal);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "";
+        // An immediate transport failure can be retried once on the same
+        // clock. Auth, quota, validation, and an already visible stream cannot.
+        const transient = /\b(?:429|502|503|504)\b|network|fetch|ECONNRESET|socket|eof/i.test(message);
+        const permanent = err instanceof SyntaxError || /quota|billing|exceeded|insufficient|unauthorized|forbidden|invalid.api.key/i.test(message);
+        if (!opts.retryFast || signal.aborted || Date.now() - started >= 5000 || !transient || permanent || opts.canRetry?.() === false) throw err;
+        return await opts.run(model, signal);
+      }
     } finally {
       opts.semaphore.release();
     }
-  }, JSON_CALL_TIMEOUT_MS);
+  }, JSON_CALL_TIMEOUT_MS, opts.signal);
+}
+
+export async function runJsonCall(opts: DirectCall): Promise<unknown> {
+  const text = await runTextCall(opts);
   try {
     return parseJsonLenient(text);
   } catch {

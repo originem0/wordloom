@@ -1,15 +1,17 @@
-import { getFirstSetting, type JsonCall, type ParsedCard } from "./ai-shared.js";
+import { getFirstSetting, type JsonCall, type StreamCall, type ParsedCard } from "./ai-shared.js";
 import {
   geminiGenerateCards,
   geminiGenerateDeepLayer,
   geminiExtractWords,
   geminiJson,
+  geminiTextStream,
 } from "./gemini.js";
 import {
   openaiGenerateCards,
   openaiGenerateDeepLayer,
   openaiExtractWords,
   openaiJson,
+  openaiTextStream,
 } from "./openai-compat.js";
 
 // ---------------------------------------------------------------------------
@@ -69,4 +71,9 @@ export async function extractWords(text: string): Promise<string[]> {
 export async function generateJson(route: string, opts: Omit<JsonCall, "route">): Promise<unknown> {
   const provider = await getProvider(route, "cards");
   return provider === "openai" ? openaiJson({ route, ...opts }) : geminiJson({ route, ...opts });
+}
+
+export async function generateTextStream(route: string, opts: Omit<StreamCall, "route">): Promise<string> {
+  const provider = await getProvider(route, "cards");
+  return provider === "openai" ? openaiTextStream({ route, ...opts }) : geminiTextStream({ route, ...opts });
 }

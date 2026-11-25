@@ -88,7 +88,7 @@ describe("the Expressions route", () => {
     const details = (label: string) => within(screen.getByText(label).closest("details")!);
     expect(details("Cards").getByText("Fallback Model")).toBeInTheDocument();
     expect(details("Expressions").queryByText("Fallback Model")).toBeNull();
-    expect(details("Expressions").getByText(/只试一次/)).toBeInTheDocument();
+    expect(details("Expressions").getByText(/没有后备模型/)).toBeInTheDocument();
 
     fireEvent.change(row("Cards").primaryModel, { target: { value: "deepseek-reasoner" } });
     const written = await saveAll();

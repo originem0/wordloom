@@ -29,7 +29,7 @@ vi.mock("@google/genai", () => {
 
 import { app } from "../../app.js";
 import { db } from "../../db/index.js";
-import { encounters, expressions, sessions, settings } from "../../db/schema.js";
+import { encounters, expressions, sessions, settings, talkTurns } from "../../db/schema.js";
 import { hashSessionId } from "../../middleware/auth.js";
 import { generateJson } from "../ai-router.js";
 import type { ExpressionDetail } from "../../../shared/expressions.js";
@@ -229,7 +229,7 @@ describe("the expression library on the real channel", () => {
   beforeEach(async () => {
     process.env.AUTH_TOKEN = "secret-token";
     process.env.AUTH_SECRET = "secret";
-    for (const t of [encounters, expressions, sessions]) await db.delete(t);
+    for (const t of [talkTurns, encounters, expressions, sessions]) await db.delete(t);
     const now = Date.now();
     await db.insert(sessions).values({
       sessionId: hashSessionId(SESSION), createdAt: now, expiresAt: now + 60_000, revokedAt: null,
@@ -303,5 +303,49 @@ describe("the expression library on the real channel", () => {
     expect(printed()).toContain("--> POST /api/expressions");
     expect(printed()).not.toContain(MARKER);
     expect(await stored(id)).toMatchObject({ gloss: null, aiIntent: null, nextScene: null });
+  });
+
+  // 对谈 tells the page why there is no reply, in a word it gets from this channel's own errors.
+  it("tells 对谈 that no model is set up, and writes nothing", async () => {
+    await configure({});
+    const res = await post("/api/expressions/talk", { said: `想说 ${MARKER}` });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "No answer", code: "TALK_FAILED", reason: "not configured" });
+    expect(gateway).not.toHaveBeenCalled();
+    expect(gemini).not.toHaveBeenCalled();
+    expect(await db.select().from(talkTurns).all()).toEqual([]);
+    expect(await db.select().from(encounters).all()).toEqual([]);
+    expect(printed()).toContain("[expressions] talk failed: not configured");
+    expect(printed()).not.toContain(MARKER);
+  });
+
+  it("talks through the gateway the cards route uses, and keeps a failed turn out of the log and the tables", async () => {
+    await configure(GATEWAY);
+    gateway.mockResolvedValue(chat(JSON.stringify({ reply: "That sounds like a long week." })));
+    const res = await post("/api/expressions/talk", { said: `想说 ${MARKER}` });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ said: `想说 ${MARKER}`, reply: "That sounds like a long week.", mine: [] });
+
+    // The message went out in the user message, and only there.
+    expect(gateway).toHaveBeenCalledTimes(1);
+    const { model, messages } = sent();
+    expect(model).toBe("cards-m");
+    expect(messages[0].content).not.toContain(MARKER);
+    expect(JSON.parse(messages[1].content)).toEqual({ said: `想说 ${MARKER}`, history: [], index: "" });
+
+    // A gateway that quotes the request it rejected, then a model that answers in prose about it.
+    gateway.mockImplementation(async (_url, init) =>
+      new Response(JSON.stringify({ error: { message: `Rejected: ${init.body}` } }), { status: 400 }),
+    );
+    for (const prose of [undefined, `You said "${MARKER}". Here is my reply.`]) {
+      if (prose) gateway.mockResolvedValue(chat(prose));
+      const failed = await post("/api/expressions/talk", { said: `再说 ${MARKER}` });
+      expect(failed.status).toBe(502);
+      expect(await failed.json()).toEqual({ error: "No answer", code: "TALK_FAILED", reason: "failed" });
+    }
+    expect(printed()).toContain("[expressions] talk failed: failed");
+    expect(printed()).not.toContain(MARKER);
+    expect(await db.select().from(talkTurns).all()).toHaveLength(1);
+    expect(await db.select().from(encounters).all()).toHaveLength(1);
   });
 });

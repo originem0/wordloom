@@ -1,22 +1,22 @@
 #!/usr/bin/env tsx
 // The two evaluations of the expression library, run by hand before its
-// numbers are trusted: whether 找 brings back what is in the library
+// numbers are trusted: whether 对谈 brings back what is in the library
 // ("recall"), and whether the judgement of 试一条 agrees with a careful reader
 // ("judge"). Both call the real model through the app's own code, so they
 // measure what the page gets: the prompts, the provider and model of the
-// Expressions route, the single attempt and its 45 seconds.
+// Expressions route, its 45 second limit and the conversation's quick retry.
 //
-// Run from the repository root, on a COPY of the database: 找 writes a row for
-// every question, and in the real library those rows would count as use. The
-// copy holds your API keys and the cases are your own sentences, so keep both
-// outside the repository.
+// Run from the repository root, on a COPY of the database: 对谈 keeps every
+// message as a turn and writes a row on the timelines for it, and in the real
+// library those rows would count as use. The copy holds your API keys and the
+// cases are your own sentences, so keep both outside the repository.
 //
 //   DATABASE_URL=file:../eval/app.db npx tsx tools/eval-expressions.ts recall ../eval/recall.json
 //   DATABASE_URL=file:../eval/app.db npx tsx tools/eval-expressions.ts judge ../eval/judge.json
 //
-// recall.json: [{ "need": "怎么说我突然意识到", "attempt": "I suddenly knew", "expect": ["dawned on", 31] }]
-//   need     what you would type into the box
-//   attempt  optional: your own English for it
+// recall.json: [{ "need": "怎么说我突然意识到", "expect": ["dawned on", 31] }]
+//   need     what you would say to the partner, in Chinese or in your own
+//            English; each case opens a conversation of its own
 //   expect   the entries that should come back, each by its words (its focus,
 //            or part of its sentence) or by its id; [] when none should
 // judge.json: [{ "text": "It dawned on me that I was wrong.", "focus": "dawned on",
@@ -76,7 +76,7 @@ const share = (part: number, whole: number) => (whole ? `${part} of ${whole} (${
 
 async function recall(): Promise<number> {
   const cases = load(recallCase);
-  const { find, normalize } = await import("../src/server/services/expressions-find.js");
+  const { talk, normalize } = await import("../src/server/services/expressions-talk.js");
   const { loadLibrary } = await import("../src/server/services/expressions-view.js");
   const library = await loadLibrary();
   const name = (id: number) => {
@@ -97,12 +97,16 @@ async function recall(): Promise<number> {
   }
   for (const [i, list] of wanted.entries())
     for (const x of list) if (x.ids.length > 1) console.log(`note: case ${i + 1}: ${JSON.stringify(x.want)} names ${x.ids.length} entries; any of them counts`);
+  // Cases written for 找 had the user's own English beside the need; a message to the partner is one text.
+  const twofold = cases.filter((c) => c.attempt != null).length;
+  if (twofold) console.log(`note: ${twofold} of the cases carry an "attempt": only "need" is sent`);
   const n = { failed: 0, whole: 0, part: 0, missed: 0, quiet: 0, noisy: 0, wanted: 0, found: 0, extra: 0 };
   for (const [i, c] of cases.entries()) {
-    const out = await timed(() => find({ need: c.need, attempt: c.attempt, history: [], turn: 1, thread: Date.now() }));
-    if (!out) {
+    // No thread: every case opens a conversation, so none is answered in the light of another.
+    const out = await timed(() => talk({ said: c.need }));
+    if (!out || "failed" in out) {
       n.failed++;
-      console.log(`${i + 1}. FAILED  ${c.need}  (no answer, ${last()})`);
+      console.log(`${i + 1}. FAILED  ${c.need}  (no answer${out ? `: ${out.failed}` : ""}, ${last()})`);
       continue;
     }
     const got = out.mine.map((h) => h.expression.id);
