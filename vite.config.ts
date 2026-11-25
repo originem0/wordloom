@@ -51,7 +51,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://localhost:3001",
+      // xfwd: the API is told whom a proxied request came from. The switch that
+      // opens the expression library to this machine alone goes by it.
+      "/api": { target: "http://localhost:3001", xfwd: true },
     },
   },
   test: {

@@ -38,18 +38,35 @@ export const requireAuth = createMiddleware(async (c, next) => {
 // starts no production server without AUTH_TOKEN, so a deployment cannot end up
 // here by leaving something out. A reverse proxy or a tunnel in front makes
 // every caller look local: the switch is not for a server that has one.
+//
+// The socket alone is not enough even without one. A page on any site can
+// point its own name at 127.0.0.1 once it has loaded, and its requests then
+// come from this machine's browser: so the request must be addressed to this
+// machine by name. And the dev server passes on whatever reaches it, from the
+// network too when it is started with --host: it is told to say whom it speaks
+// for (vite.config.ts), and it may speak for this machine only.
 const LOOPBACK = ["127.0.0.1", "::1", "::ffff:127.0.0.1"];
-const openLocally = (env: Partial<HttpBindings> | undefined) =>
+const LOCAL_NAMES = ["localhost", "127.0.0.1", "[::1]"];
+function nameOf(host: string | undefined) {
+  try {
+    return new URL(`http://${host}`).hostname;
+  } catch {
+    return "";
+  }
+}
+const openLocally = (env: Partial<HttpBindings> | undefined, host?: string, forwardedFor = "") =>
   process.env.EXPRESSIONS_OPEN_LOCALLY === "1" &&
   process.env.NODE_ENV !== "production" &&
-  LOOPBACK.includes(env?.incoming?.socket?.remoteAddress ?? "");
+  LOOPBACK.includes(env?.incoming?.socket?.remoteAddress ?? "") &&
+  LOCAL_NAMES.includes(nameOf(host)) &&
+  forwardedFor.split(",").every((from) => !from.trim() || LOOPBACK.includes(from.trim()));
 
 // Second gate for private data. The global guard lets everything through when
 // AUTH_TOKEN is unset (dev mode); private routes do the opposite and refuse to
 // serve. Mount it on a pattern ending in "/*": a bare "/api/x" would leave
 // every sub-path to the global guard alone.
 export const requirePrivate = createMiddleware(async (c, next) => {
-  if (!process.env.AUTH_TOKEN && !openLocally(c.env)) {
+  if (!process.env.AUTH_TOKEN && !openLocally(c.env, c.req.header("host"), c.req.header("x-forwarded-for"))) {
     return c.json({ error: "Set AUTH_TOKEN to use private routes", code: "AUTH_NOT_CONFIGURED" }, 503);
   }
   c.header("Cache-Control", "no-store");

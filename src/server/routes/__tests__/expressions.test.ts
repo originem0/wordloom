@@ -56,9 +56,11 @@ const never = () => new Promise<unknown>(() => {});
  *  is what the Node server hands the app with each request: the socket. */
 function req(
   path: string,
-  init: { method?: string; body?: unknown; raw?: string; cookie?: boolean; env?: object } = {},
+  init: { method?: string; body?: unknown; raw?: string; cookie?: boolean; env?: object; host?: string; forwardedFor?: string } = {},
 ) {
-  const headers = new Headers({ host: HOST, origin: `https://${HOST}`, "x-real-ip": "203.0.113.7" });
+  const host = init.host ?? HOST;
+  const headers = new Headers({ host, origin: `https://${host}`, "x-real-ip": "203.0.113.7" });
+  if (init.forwardedFor !== undefined) headers.set("x-forwarded-for", init.forwardedFor);
   if (init.cookie !== false) headers.set("cookie", `session=${SESSION}`);
   const body = init.raw ?? (init.body === undefined ? undefined : JSON.stringify(init.body));
   if (body !== undefined) headers.set("content-type", "application/json");
@@ -188,6 +190,9 @@ describe("the guard on the expression library", () => {
   describe("with EXPRESSIONS_OPEN_LOCALLY=1 and no AUTH_TOKEN", () => {
     const from = (remoteAddress?: string) => ({ incoming: { socket: { remoteAddress } } });
     const HERE = from("127.0.0.1");
+    // What a page opened on this machine sends: every refusal below is asked
+    // for with this name, so that it is refused for what the test says.
+    const LOCAL = "localhost:3001";
 
     beforeEach(() => {
       delete process.env.AUTH_TOKEN;
@@ -195,8 +200,8 @@ describe("the guard on the expression library", () => {
     });
 
     it.each(["127.0.0.1", "::1", "::ffff:127.0.0.1"])("answers this machine (%s) without a session", async (address) => {
-      const saved = await req("/api/expressions", { cookie: false, env: from(address), body: { text: "kind of swamped" } });
-      const list = await req("/api/expressions", { cookie: false, env: from(address) });
+      const saved = await req("/api/expressions", { cookie: false, env: from(address), host: LOCAL, body: { text: "kind of swamped" } });
+      const list = await req("/api/expressions", { cookie: false, env: from(address), host: LOCAL });
       expect([saved.status, list.status]).toEqual([201, 200]);
       expect(((await list.json()) as ExpressionListResponse).expressions).toHaveLength(1);
       // Private data all the same, whoever is let in.
@@ -206,29 +211,64 @@ describe("the guard on the expression library", () => {
     it("answers no other machine, nor a request whose sender it cannot tell", async () => {
       for (const env of [from("192.168.1.20"), from("::ffff:192.168.1.20"), from(), undefined]) {
         for (const [method, path] of routes()) {
-          const res = await req(path, { method, cookie: false, env, ...(method === "GET" ? {} : { body: {} }) });
+          const res = await req(path, { method, cookie: false, env, host: LOCAL, ...(method === "GET" ? {} : { body: {} }) });
           expect(res.status, `${method} ${path} from ${env?.incoming.socket.remoteAddress}`).toBe(503);
         }
       }
       expect(await stored()).toHaveLength(0);
     });
 
+    it.each(["localhost", "LOCALHOST:5173", "127.0.0.1:3001", "[::1]:3001"])("answers under a name of this machine (%s)", async (host) => {
+      expect((await req("/api/expressions", { cookie: false, env: HERE, host })).status).toBe(200);
+    });
+
+    // A page on any site can point its own name at 127.0.0.1 after it has
+    // loaded: its requests then come from this machine, under that name.
+    it.each(["evil.example:3001", "localhost.evil.example", "192.168.1.5:5173", "desk.local:5173", "localhost.", "a b"])(
+      "answers no request addressed to another name (%s)",
+      async (host) => {
+        for (const [method, path] of routes()) {
+          const res = await req(path, { method, cookie: false, env: HERE, host, ...(method === "GET" ? {} : { body: {} }) });
+          // A name no URL takes never gets past the origin check, the rest stop here.
+          expect(res.status, `${method} ${path}`).toBe(host === "a b" && method !== "GET" ? 403 : 503);
+        }
+        expect(await stored()).toHaveLength(0);
+      },
+    );
+
+    // The dev server passes on what reaches it, from the network too when it
+    // is started with --host, and says whom it speaks for.
+    it.each(["192.168.1.20", "127.0.0.1, 192.168.1.20", "192.168.1.20, ::1", "unknown"])(
+      "answers no one else a proxy on this machine speaks for (%s)",
+      async (forwardedFor) => {
+        for (const [method, path] of routes()) {
+          const res = await req(path, { method, cookie: false, env: HERE, host: LOCAL, forwardedFor, ...(method === "GET" ? {} : { body: {} }) });
+          expect(res.status, `${method} ${path}`).toBe(503);
+        }
+        expect(await stored()).toHaveLength(0);
+      },
+    );
+
+    it.each(["127.0.0.1", "::1", "::ffff:127.0.0.1, ::1", ""])("answers when that proxy speaks for this machine (%j)", async (forwardedFor) => {
+      expect((await req("/api/expressions", { cookie: false, env: HERE, host: LOCAL, forwardedFor })).status).toBe(200);
+    });
+
     it("does nothing on a production server", async () => {
       process.env.NODE_ENV = "production";
-      expect((await req("/api/expressions", { env: HERE })).status).toBe(503);
+      expect((await req("/api/expressions", { env: HERE, host: LOCAL })).status).toBe(503);
     });
 
     it("does nothing once AUTH_TOKEN is set: the login is back", async () => {
       process.env.AUTH_TOKEN = "secret-token";
-      expect((await req("/api/expressions", { cookie: false, env: HERE })).status).toBe(401);
-      expect((await req("/api/expressions", { env: HERE })).status).toBe(200);
+      expect((await req("/api/expressions", { cookie: false, env: HERE, host: LOCAL })).status).toBe(401);
+      expect((await req("/api/expressions", { env: HERE, host: LOCAL })).status).toBe(200);
     });
 
     it.each([undefined, "", "0", "true"])("is off while the switch is %j", async (value) => {
       if (value === undefined) delete process.env.EXPRESSIONS_OPEN_LOCALLY;
       else process.env.EXPRESSIONS_OPEN_LOCALLY = value;
-      expect((await req("/api/expressions", { env: HERE })).status).toBe(503);
-      expect((await req("/api/expressions", { env: HERE, body: { text: "kind of" } })).status).toBe(503);
+      expect((await req("/api/expressions", { env: HERE, host: LOCAL })).status).toBe(503);
+      expect((await req("/api/expressions", { env: HERE, host: LOCAL, body: { text: "kind of" } })).status).toBe(503);
       expect(await stored()).toHaveLength(0);
     });
   });
