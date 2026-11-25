@@ -1,13 +1,17 @@
+import { useI18n } from "@/client/lib/i18n";
+
 /**
  * SchemaBlockageSvgProto — Animated SVG for the "blockage" cognitive schema.
  * Pixel-level port of prototype-obscure.html <template id="schema-blockage">.
  */
 export function SchemaBlockageSvgProto() {
+  const { t } = useI18n();
   return (
     <svg
+      role="img"
       className="schema-svg"
       viewBox="0 0 600 180"
-      aria-label="Blocking schema — observer, obstacle, hidden target"
+      aria-label={t("阻挡图式，观察者、障碍与隐藏目标", "Blocking schema — observer, obstacle, hidden target")}
     >
       {/* Observer (eye) */}
       <g transform="translate(70, 90)">
@@ -15,7 +19,7 @@ export function SchemaBlockageSvgProto() {
         <circle className="eye-white" cx="0" cy="0" r="6" />
         <circle className="eye-pupil" cx="0" cy="0" r="3" />
         <text className="label" x="-16" y="32" textAnchor="middle">
-          observer
+          {t("观察者", "observer")}
         </text>
       </g>
 
@@ -32,7 +36,7 @@ export function SchemaBlockageSvgProto() {
         <ellipse className="cloud" cx="15" cy="5" rx="60" ry="32" />
         <ellipse className="cloud" cx="-10" cy="20" rx="50" ry="25" />
         <text className="label" x="0" y="60" textAnchor="middle">
-          cloud / fog / obstacle
+          {t("云 / 雾 / 障碍", "cloud / fog / obstacle")}
         </text>
       </g>
 
@@ -46,7 +50,7 @@ export function SchemaBlockageSvgProto() {
           ?
         </text>
         <text className="label" x="0" y="55" textAnchor="middle">
-          hidden target
+          {t("隐藏目标", "hidden target")}
         </text>
       </g>
     </svg>

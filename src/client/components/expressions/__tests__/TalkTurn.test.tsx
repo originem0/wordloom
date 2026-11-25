@@ -89,7 +89,7 @@ describe("a turn", () => {
     expect(screen.getByText(SAID)).toBeInTheDocument();
     expect(screen.getByText(REPLY)).toBeInTheDocument();
     // It is a conversation: no word about a library that had nothing to say.
-    expect(shown()).toBe(SAID + REPLY + "听语音");
+    expect(shown()).toBe(SAID + "听语音" + REPLY);
     expect(screen.getByRole("button", { name: "听语音" })).toBeInTheDocument();
     expect(screen.queryAllByRole("button")).toHaveLength(1);
     expect(fetch).not.toHaveBeenCalled();
@@ -206,7 +206,7 @@ describe("hits that are not masked", () => {
     show(turn({ mine: [{ expression: entry(), why: null }] }));
     answers.push({ status: 500, body: { error: "boom" } });
     click("放进想用");
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有放进去：boom"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有放进去：服务暂时不可用（HTTP 500）。"));
     expect(screen.getByRole("button", { name: "放进想用" })).toBeEnabled();
     expect(shown()).not.toContain("已放进想用");
   });
@@ -257,7 +257,7 @@ describe("a masked hit", () => {
     withMasked();
     answers.push({ status: 500, body: { error: "boom" } });
     click("看答案");
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有看成：boom"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有看成：服务暂时不可用（HTTP 500）。"));
     expect(shown()).not.toContain("dawned");
     expect(screen.getByRole("button", { name: "看答案" })).toBeEnabled();
   });
@@ -373,7 +373,7 @@ describe("a suggestion", () => {
     show(turn({ fresh: [FRESH] }));
     answers.push({ status: 500, body: { error: "boom" } });
     click("收");
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有存上：boom"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有存上：服务暂时不可用（HTTP 500）。"));
     expect(screen.getByRole("button", { name: "收" })).toBeEnabled();
   });
 });

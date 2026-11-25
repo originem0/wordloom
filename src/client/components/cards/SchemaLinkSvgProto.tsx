@@ -1,10 +1,13 @@
+import { useI18n } from "@/client/lib/i18n";
+
 /**
  * SchemaLinkSvgProto — Animated SVG for the "link" cognitive schema.
  * Visual: two nodes connected by a pulsing link.
  */
 export function SchemaLinkSvgProto() {
+  const { t } = useI18n();
   return (
-    <svg className="schema-svg" viewBox="0 0 600 180" aria-label="Link schema — connection between nodes">
+    <svg role="img" className="schema-svg" viewBox="0 0 600 180" aria-label={t("连接图式，节点间的联系", "Link schema — connection between nodes")}>
       <g>
         <circle className="proto-node" cx="150" cy="90" r="18" />
         <circle className="proto-node" cx="450" cy="90" r="18" />
@@ -19,7 +22,7 @@ export function SchemaLinkSvgProto() {
           B
         </text>
         <text className="label" x="300" y="155" textAnchor="middle">
-          link / association
+          {t("连接 / 联系", "link / association")}
         </text>
       </g>
     </svg>

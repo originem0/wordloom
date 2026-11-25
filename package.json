@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"pnpm dev:client\" \"pnpm dev:server\"",
     "dev:client": "vite",
-    "dev:server": "pnpm db:migrate && tsx watch src/server/index.ts",
+    "dev:server": "pnpm db:migrate && node --watch --import tsx src/server/index.ts",
     "build": "vite build && tsup src/server/index.ts --outDir dist/server --external @libsql/client --format esm",
     "start": "node dist/server/index.js",
     "db:generate": "drizzle-kit generate",

@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { queryClient } from "../lib/query-client";
 import type { CardGenerateResult } from "../../shared/types";
+import { errorMessage, translate } from "../lib/i18n";
+import { ApiError } from "../lib/api";
 
 export type TaskStatus = "running" | "done" | "failed" | "cancelled";
 
@@ -19,9 +21,12 @@ export interface Task {
   label: string;
   status: TaskStatus;
   error?: string;
+  errorText?: readonly [string, string];
+  errorCause?: Error;
   result?: CardGenerateResult;
   createdAt: number;
   jobId?: string;
+  wordCount?: number;
 }
 
 const submitControllers = new Map<string, AbortController>();
@@ -33,13 +38,18 @@ const pollFailures = new Map<string, number>();
 const POLL_RETRY_MS = 2500;
 const MAX_POLL_FAILURES = 120;
 
-function failTask(taskId: string, error: string) {
+function failTask(taskId: string, error: string | Error | readonly [string, string]) {
   clearPoll(taskId);
   // A task dropped while its poll was in flight (removed, or everything reset
   // at sign-out) has nobody left to report to.
   if (!useTaskStore.getState().tasks.some((t) => t.id === taskId)) return;
-  updateTask(taskId, { status: "failed", error });
-  toast.error(`单词卡生成失败: ${error}`);
+  // Keep labels or the original cause so a visible failure can be translated
+  // again after a language switch. The string stays for existing task readers.
+  const errorText = typeof error === "string" || error instanceof Error ? undefined : error;
+  const errorCause = error instanceof Error ? error : undefined;
+  const message = errorText ? translate(...errorText) : errorMessage(errorCause ?? new Error(error as string));
+  updateTask(taskId, { status: "failed", error: message, errorText, errorCause });
+  toast.error(translate(`词卡生成失败：${message}`, `Card generation failed: ${message}`));
 }
 let seq = 0;
 
@@ -67,15 +77,28 @@ function cardsDoneLabel(result: CardGenerateResult): string {
   const newCount = ok - existingCount;
 
   if (existingCount > 0 && newCount === 0) {
-    return `${existingCount} 个词已存在`;
+    return translate(`${existingCount} 个词已存在`, `${existingCount} words already exist`);
   }
   if (existingCount > 0) {
-    return `${newCount} 张新卡已创建, ${existingCount} 个词已存在`;
+    return translate(`已创建 ${newCount} 张新卡，${existingCount} 个词已存在`, `${newCount} new cards created, ${existingCount} words already exist`);
   }
   if (fail > 0) {
-    return `${ok} 张已创建, ${fail} 张失败`;
+    return translate(`已创建 ${ok} 张，${fail} 张失败`, `${ok} cards created, ${fail} failed`);
   }
-  return `${ok} 张单词卡已创建`;
+  return translate(`已创建 ${ok} 张词卡`, `${ok} cards created`);
+}
+
+/** Stored task data stays language-neutral; labels are recomputed when the
+ * panel rerenders so switching languages also updates work already in flight. */
+export function taskLabel(task: Task): string {
+  if (task.result) return cardsDoneLabel(task.result);
+  if (task.wordCount != null) return translate(`生成 ${task.wordCount} 张词卡`, `Generate ${task.wordCount} cards`);
+  return task.label;
+}
+
+export function taskError(task: Task): string {
+  if (task.errorText) return translate(...task.errorText);
+  return errorMessage(task.errorCause ?? new Error(task.error ?? ""));
 }
 
 async function pollJob(taskId: string) {
@@ -89,13 +112,13 @@ async function pollJob(taskId: string) {
     const res = await fetch(`/api/jobs/${task.jobId}`, { credentials: "include" });
     // 404 is definitive — the server has no such job and never will.
     if (res.status === 404) {
-      failTask(taskId, "任务不存在或已过期");
+      failTask(taskId, ["任务不存在或已过期", "The task does not exist or has expired"]);
       return;
     }
     // So is 401: jobs are the admin's, and asking again without a session
     // cannot start working. The job itself carries on regardless.
     if (res.status === 401) {
-      failTask(taskId, "登录已失效，重新登录后可在词库中查看结果");
+      failTask(taskId, ["登录已失效，重新登录后可在词库中查看结果", "Your session has expired. Sign in again to view the results"]);
       return;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -117,7 +140,7 @@ async function pollJob(taskId: string) {
     }
 
     if (job.status === "failed") {
-      failTask(taskId, job.error || "未知错误");
+      failTask(taskId, job.error || ["未知错误", "Unknown error"]);
       return;
     }
 
@@ -139,7 +162,7 @@ async function pollJob(taskId: string) {
   } catch {
     const failures = (pollFailures.get(taskId) ?? 0) + 1;
     if (failures >= MAX_POLL_FAILURES) {
-      failTask(taskId, "长时间无法连接服务器，请稍后在列表中查看结果");
+      failTask(taskId, ["长时间无法连接服务器，请稍后在列表中查看结果", "The server has been unreachable. Check the card list later"]);
       return;
     }
     pollFailures.set(taskId, failures);
@@ -176,7 +199,8 @@ export const useTaskStore = create<{
       tasks: [
         {
           id,
-          label: `生成 ${unique.length} 张单词卡`,
+          label: translate(`生成 ${unique.length} 张词卡`, `Generate ${unique.length} cards`),
+          wordCount: unique.length,
           status: "running" as const,
           createdAt: Date.now(),
         },
@@ -194,7 +218,11 @@ export const useTaskStore = create<{
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || `HTTP ${res.status}`);
+          throw new ApiError(
+            typeof body.error === "string" ? body.error : `HTTP ${res.status}`,
+            res.status,
+            typeof body.code === "string" ? body.code : undefined,
+          );
         }
 
         const body = (await res.json()) as { jobId?: string; status?: string } | CardGenerateResult;
@@ -213,8 +241,7 @@ export const useTaskStore = create<{
         if (err.name === "AbortError") {
           updateTask(id, { status: "cancelled" });
         } else {
-          updateTask(id, { status: "failed", error: err.message });
-          toast.error(`单词卡生成失败: ${err.message}`);
+          failTask(id, err instanceof Error ? err : new Error(errorMessage(err)));
         }
       })
       .finally(() => submitControllers.delete(id));

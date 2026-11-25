@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { MemoryRouter } from "react-router-dom";
+import { useAppStore } from "@/client/store";
 
 type Settings = Record<string, string>;
 let current: { data?: Settings; isLoading: boolean; error: Error | null };
@@ -28,6 +29,7 @@ import { AIProvidersPage } from "../AIProvidersPage";
 const renderSettings = () => render(<SettingsPage />, { wrapper: MemoryRouter });
 
 beforeEach(() => {
+  useAppStore.setState({ uiLanguage: "en" });
   sessionStorage.clear();
   useSettingsMock.mockClear();
   logout.mockClear();
@@ -41,21 +43,21 @@ beforeEach(() => {
 describe("SettingsPage drafts", () => {
   it("shows the saved values once settings arrive", () => {
     const view = renderSettings();
-    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "AI Explanation Language" })).toBeNull();
 
     current = { data: { analysis_language: "en" }, isLoading: false, error: null };
     view.rerender(<SettingsPage />);
-    expect(screen.getByRole("combobox")).toHaveValue("en");
+    expect(screen.getByRole("combobox", { name: "AI Explanation Language" })).toHaveValue("en");
   });
 
   it("keeps unsaved edits when the settings query refetches", () => {
     current = { data: { analysis_language: "en" }, isLoading: false, error: null };
     const view = renderSettings();
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "bilingual" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "AI Explanation Language" }), { target: { value: "bilingual" } });
 
     current = { data: { analysis_language: "zh-CN" }, isLoading: false, error: null };
     view.rerender(<SettingsPage />);
-    expect(screen.getByRole("combobox")).toHaveValue("bilingual");
+    expect(screen.getByRole("combobox", { name: "AI Explanation Language" })).toHaveValue("bilingual");
   });
 });
 
@@ -73,7 +75,7 @@ describe("SettingsPage for a visitor", () => {
     expect(screen.getByText("Theme")).toBeInTheDocument();
     expect(screen.getByText("App Refresh & Cache")).toBeInTheDocument();
     expect(screen.getByText("About")).toBeInTheDocument();
-    expect(screen.queryByText("Explanation Language")).toBeNull();
+    expect(screen.queryByText("AI Explanation Language")).toBeNull();
     expect(screen.queryByText("Network Tolerance")).toBeNull();
 
     // Leaving the option out would mean "enabled", so every call must say no.
@@ -85,14 +87,14 @@ describe("SettingsPage for a visitor", () => {
   it("keeps the server's settings off the page even when they are cached", () => {
     current = { data: { analysis_language: "en" }, isLoading: false, error: null };
     renderSettings();
-    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "AI Explanation Language" })).toBeNull();
     expect(screen.queryByText("Network Tolerance")).toBeNull();
   });
 
   it("offers the way in, and the way back to this page", () => {
     renderSettings();
-    expect(screen.getByRole("link", { name: "管理员登录" })).toHaveAttribute("href", "/login?redirect=/settings");
-    expect(screen.queryByRole("button", { name: "退出登录" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Admin Login" })).toHaveAttribute("href", "/login?redirect=/settings");
+    expect(screen.queryByRole("button", { name: "Sign Out" })).toBeNull();
   });
 });
 
@@ -104,8 +106,8 @@ describe("SettingsPage for the admin", () => {
 
   it("offers the way out", () => {
     renderSettings();
-    expect(screen.queryByRole("link", { name: "管理员登录" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
+    expect(screen.queryByRole("link", { name: "Admin Login" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Sign Out" }));
     expect(logout).toHaveBeenCalledTimes(1);
   });
 
@@ -122,7 +124,7 @@ describe("SettingsPage for the admin", () => {
     renderSettings();
     expect(screen.getByText("Failed to load settings: boom")).toBeInTheDocument();
     expect(screen.getByText("Theme")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "退出登录" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign Out" })).toBeInTheDocument();
     expect(screen.queryByText("Network Tolerance")).toBeNull();
   });
 });

@@ -1,10 +1,13 @@
+import { useI18n } from "@/client/lib/i18n";
+
 /**
  * SchemaBalanceSvgProto — Animated SVG for the "balance" cognitive schema.
  * Visual: a scale tilting left/right.
  */
 export function SchemaBalanceSvgProto() {
+  const { t } = useI18n();
   return (
-    <svg className="schema-svg" viewBox="0 0 600 180" aria-label="Balance schema — equilibrium / trade-off">
+    <svg role="img" className="schema-svg" viewBox="0 0 600 180" aria-label={t("平衡图式，均衡与权衡", "Balance schema — equilibrium / trade-off")}>
       {/* Base */}
       <rect className="proto-base" x="280" y="135" width="40" height="10" rx="3" />
       <rect className="proto-stand" x="297" y="65" width="6" height="70" rx="3" />
@@ -30,7 +33,7 @@ export function SchemaBalanceSvgProto() {
       </g>
 
       <text className="label" x="300" y="165" textAnchor="middle">
-        balance / equilibrium
+        {t("平衡 / 均衡", "balance / equilibrium")}
       </text>
     </svg>
   );

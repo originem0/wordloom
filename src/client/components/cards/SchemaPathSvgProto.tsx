@@ -1,10 +1,13 @@
+import { useI18n } from "@/client/lib/i18n";
+
 /**
  * SchemaPathSvgProto — Animated SVG for the "path" cognitive schema.
  * Visual: a path with a moving dot (progress) and waypoints.
  */
 export function SchemaPathSvgProto() {
+  const { t } = useI18n();
   return (
-    <svg className="schema-svg" viewBox="0 0 600 180" aria-label="Path schema — progress along a route">
+    <svg role="img" className="schema-svg" viewBox="0 0 600 180" aria-label={t("路径图式，沿路线前进", "Path schema — progress along a route")}>
       <path
         className="proto-path"
         d="M 80 120 C 150 40, 250 160, 320 90 S 470 60, 520 110"
@@ -23,7 +26,7 @@ export function SchemaPathSvgProto() {
       </circle>
 
       <text className="label" x="300" y="160" textAnchor="middle">
-        path / progress
+        {t("路径 / 进程", "path / progress")}
       </text>
     </svg>
   );

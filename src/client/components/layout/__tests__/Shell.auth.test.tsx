@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { queryClient } from "@/client/lib/query-client";
 import { useTaskStore } from "@/client/store/tasks";
+import { useAppStore } from "@/client/store";
 import { ExpressionsPage } from "@/client/components/expressions/ExpressionsPage";
 import { Shell } from "../Shell";
 
@@ -39,8 +40,10 @@ function renderShell(authenticated: boolean, at = "/") {
 /** Lets the auth check answer: until it has, everyone is shown the visitor's shell. */
 async function authSettled() {
   await waitFor(() => expect(fetch).toHaveBeenCalled());
-  await new Promise((r) => setTimeout(r, 20));
+  await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 }
+
+beforeEach(() => useAppStore.setState({ uiLanguage: "zh-CN" }));
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -74,17 +77,17 @@ describe("Shell navigation", () => {
   it("shows a visitor the card library and the settings, not the AI page or 表达", async () => {
     renderShell(false);
     await authSettled();
-    expect(screen.getAllByRole("link", { name: "Cards" })).toHaveLength(2);
-    expect(screen.getAllByRole("link", { name: "Settings" })).toHaveLength(2);
-    expect(screen.queryAllByRole("link", { name: "AI" })).toHaveLength(0);
+    expect(screen.getAllByRole("link", { name: "词卡" })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "设置" })).toHaveLength(2);
+    expect(screen.queryAllByRole("link", { name: "AI 配置" })).toHaveLength(0);
     expect(screen.queryAllByRole("link", { name: "表达" })).toHaveLength(0);
   });
 
   it("adds the AI page for the admin", async () => {
     renderShell(true);
     await screen.findByRole("button", { name: "退出登录" });
-    expect(screen.getAllByRole("link", { name: "AI" })).toHaveLength(2);
-    expect(screen.getAllByRole("link", { name: "Cards" })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "AI 配置" })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "词卡" })).toHaveLength(2);
   });
 
   it("puts 表达 first on the admin's menu, leading home", async () => {
@@ -104,7 +107,25 @@ describe("Shell navigation", () => {
     renderShell(true, "/cards");
     await screen.findByRole("button", { name: "退出登录" });
     for (const link of screen.getAllByRole("link", { name: "表达" })) expect(link).not.toHaveAttribute("aria-current");
+    for (const link of screen.getAllByRole("link", { name: "词卡" })) expect(link).toHaveAttribute("aria-current", "page");
+  });
+
+  it("switches desktop and mobile navigation while keeping the current page", async () => {
+    renderShell(true, "/cards");
+    await screen.findByRole("button", { name: "退出登录" });
+    const before = vi.mocked(fetch).mock.calls.length;
+
+    act(() => useAppStore.getState().setUiLanguage("en"));
+    expect(screen.getAllByRole("link", { name: "Expressions" })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "Conversation" })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "Settings" })).toHaveLength(2);
     for (const link of screen.getAllByRole("link", { name: "Cards" })) expect(link).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(before);
+
+    act(() => useAppStore.getState().setUiLanguage("zh-CN"));
+    expect(screen.getAllByRole("link", { name: "词卡" })).toHaveLength(2);
+    expect(screen.queryAllByRole("link", { name: "Cards" })).toHaveLength(0);
   });
 });
 

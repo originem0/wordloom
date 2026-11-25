@@ -9,12 +9,14 @@ import { useCapture, useMetAgain, usePick } from "@/client/hooks/useExpressions"
 import { EXPRESSION_LIMITS, SOURCE_TYPES, type DuplicateResponse, type EncounterRequest, type PickResponse, type SourceType } from "@/shared/expressions";
 import { DuplicateQuestion } from "./DuplicateQuestion";
 import { PickList } from "./PickList";
-import { AREA_CLASS, SOURCE_LABELS, readBox, useLastSource } from "./shared";
+import { AREA_CLASS, sourceLabel, readBox, useLastSource } from "./shared";
+import { errorMessage, useI18n } from "@/client/lib/i18n";
 
 /** A save the server held back: what was sent, and the entries it collides with. */
 type Held = { met: EncounterRequest; focus?: string; existing: DuplicateResponse["existing"] };
 
 export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
+  const { t } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
   // Prefill comes in the fragment (/#text=…&focus=…), never the query string:
@@ -63,7 +65,7 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
     setHeld(null);
     setPicks(null);
   };
-  const failed = (e: Error) => toast.error(`没有存上：${e.message}`);
+  const failed = (e: Error) => toast.error(t(`没有存上：${errorMessage(e)}`, `Could not save: ${errorMessage(e)}`));
   // One click chooses a tag, a second one clears it. Its title goes with it.
   const pick = (s: SourceType) => {
     useLastSource.setState({ source: source === s ? null : s });
@@ -93,7 +95,7 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
     metAgain.mutate({ id, ...met }, {
       onSuccess: () => {
         clear();
-        toast.success("记下了：又一次遇到");
+        toast.success(t("记下了：又一次遇到", "Saved: met it again"));
       },
       onError: failed,
     });
@@ -101,15 +103,19 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
   // Sent as it is, not trimmed: a pick has to be found in the box word for word.
   const choose = () => {
     setPicks(null);
-    picker.mutate(box, { onSuccess: (r) => setPicks(r.picks), onError: (e) => toast.error(`没有挑成：${e.message}`) });
+    picker.mutate(box, { onSuccess: (r) => setPicks(r.picks), onError: (e) => toast.error(t(`没有挑成：${errorMessage(e)}`, `Could not pick expressions: ${errorMessage(e)}`)) });
   };
 
   return (
     <section className="space-y-2">
+      <details className="reading-help">
+        <summary>{t("怎样留下原文与焦点", "How to save text and focus")}</summary>
+        <p>{t("一句话里选中的是焦点，整句仍会保存。一段对话里选中的是要留下的原文，上文可以再改。", "Selecting part of one sentence marks its focus while keeping the whole sentence. Selecting from a conversation keeps that passage; you can edit its context.")}</p>
+      </details>
       <textarea
-        aria-label="原文"
+        aria-label={t("原文", "Original text")}
         className={`${AREA_CLASS} min-h-[120px]`}
-        placeholder="贴一句话，或一段对话。先选中一部分再收下：一句话里选中的是焦点，一段对话里选中的是原文。"
+        placeholder={t("贴一句话，或一段对话。可以选中想记住的部分。", "Paste a sentence or a conversation. Select the part you want to remember.")}
         value={box}
         readOnly={waiting}
         onChange={(e) => {
@@ -122,26 +128,26 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
       />
       {draft.before !== undefined && (
         <label className="block space-y-1 text-xs text-muted-foreground">
-          上文（选中的那一段是原文，这是它前面的一段，可改）
+          {t("上文（选中的那一段是原文，这是它前面的一段，可改）", "Context before the selected passage (you can edit it)")}
           <textarea className={AREA_CLASS} rows={2} maxLength={EXPRESSION_LIMITS.text} value={before ?? draft.before} onChange={(e) => setBefore(e.target.value)} />
         </label>
       )}
-      {tooLong && <p className="text-xs text-destructive">原文超过 {EXPRESSION_LIMITS.text} 字。选中要收的那一段再收下。</p>}
+      {tooLong && <p className="text-xs text-destructive">{t(`原文超过 ${EXPRESSION_LIMITS.text} 字。选中要收的那一段再收下。`, `The text exceeds ${EXPRESSION_LIMITS.text} characters. Select the passage you want to save.`)}</p>}
       <div className="flex flex-wrap items-center gap-1.5">
         {SOURCE_TYPES.map((s) => (
           <Button key={s} size="sm" variant={source === s ? "default" : "outline"} aria-pressed={source === s} onClick={() => pick(s)}>
-            {SOURCE_LABELS[s]}
+            {sourceLabel(s)}
             {source === s && <X />}
           </Button>
         ))}
         {source ? (
-          <Input aria-label="出处" className="h-8 w-40" placeholder="书名、片名…（可不填）" maxLength={EXPRESSION_LIMITS.sourceTitle} value={title} onChange={(e) => setTitle(e.target.value)} />
+          <Input aria-label={t("出处", "Source")} className="h-8 w-40" placeholder={t("书名、片名…（可不填）", "Book, film, etc. (optional)")} maxLength={EXPRESSION_LIMITS.sourceTitle} value={title} onChange={(e) => setTitle(e.target.value)} />
         ) : (
-          <span className="text-xs text-muted-foreground">未记录</span>
+          <span className="text-xs text-muted-foreground">{sourceLabel(null)}</span>
         )}
         {focus && (
-          <Button size="sm" variant="secondary" className="max-w-full" title="清掉焦点" onClick={() => { setGiven(""); setSel([0, 0]); }}>
-            <span className="truncate">焦点：{focus}</span>
+          <Button size="sm" variant="secondary" className="max-w-full" title={t("清掉焦点", "Clear focus")} onClick={() => { setGiven(""); setSel([0, 0]); }}>
+            <span className="truncate">{t("焦点：", "Focus: ")}{focus}</span>
             <X />
           </Button>
         )}
@@ -149,17 +155,17 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
           {box.trim().includes("\n") && (
             <Button variant="ghost" disabled={box.length > EXPRESSION_LIMITS.paste || waiting} onClick={choose}>
               {picker.isPending && <Loader2 className="animate-spin" />}
-              帮我挑
+              {t("帮我挑", "Pick for me")}
             </Button>
           )}
           <Button disabled={!draft.text || tooLong || busy || waiting} onClick={submit}>
             {busy && <Loader2 className="animate-spin" />}
-            收下
+            {t("收下", "Save")}
           </Button>
         </div>
       </div>
       {/* Told, not stopped: it leaves through the provider the user set up themselves. */}
-      <p className="text-xs text-muted-foreground">「帮我挑」会把框里的整段对话发给你配置的模型。想说却说不出来的，去「对谈」里说。</p>
+      <p className="text-xs text-muted-foreground">{t("「帮我挑」会把框里的整段对话发给你配置的模型。想说却说不出来的，去「对谈」里说。", "Pick for me sends the whole conversation in this box to your configured model. Use Conversation when you need help expressing an idea.")}</p>
       {held && (
         <DuplicateQuestion existing={held.existing} disabled={busy || waiting} onAgain={(id) => again(id, held.met)} onNew={() => save(held.met, held.focus, true)} />
       )}

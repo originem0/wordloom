@@ -9,26 +9,27 @@ import { useDropThread, useTalk, useTalkThread, useTalkThreads } from "@/client/
 import { ApiError } from "@/client/lib/api";
 import { EXPRESSION_LIMITS, type TalkFailure, type TalkTurn } from "@/shared/expressions";
 import { TurnView } from "./TalkTurn";
-import { AREA_CLASS, NO_AUTH_NOTE, day, openThread, useOpenThread } from "./shared";
+import { AREA_CLASS, noAuthNote, day, openThread, useOpenThread } from "./shared";
+import { errorMessage, useI18n } from "@/client/lib/i18n";
 
 const MUTED = "text-xs text-muted-foreground";
 
 // Why a message got no answer, in the server's own four words for it.
-const WHY: Record<TalkFailure["reason"], string> = {
-  "not configured": "还没有配模型。",
-  timeout: "对方 45 秒内没有答完。",
-  busy: "模型那边正忙，过一会儿再发。",
-  failed: "没有答成。",
+const WHY: Record<TalkFailure["reason"], readonly [string, string]> = {
+  "not configured": ["还没有配模型。", "No model is configured yet."],
+  timeout: ["对方 45 秒内没有答完。", "The reply did not finish within 45 seconds."],
+  busy: ["模型那边正忙，过一会儿再发。", "The model service is busy. Send again later."],
+  failed: ["没有答成。", "The reply could not be completed."],
 };
 
 // `unsure`: no answer of the server's own came back, so the turn may have been written all the same.
-type Failure = { why: string; setup?: boolean; unsure?: boolean };
+type Failure = { why: readonly [string, string]; error?: Error; setup?: boolean; unsure?: boolean };
 
 function failureOf(e: Error): Failure {
-  if (!(e instanceof ApiError) || e.status === 0 || (e.status >= 500 && e.code !== "TALK_FAILED")) return { why: "没有收到回答：网络断了，或者服务器没应。", unsure: true };
-  if (e.status === 404) return { why: "这场对话已经在别处删掉了，再发一次会开一场新的。" };
-  if (e.code !== "TALK_FAILED") return { why: `没有发出去：${e.message}。` };
-  const { reason } = e.body as TalkFailure;
+  if (!(e instanceof ApiError) || e.status === 0 || (e.status >= 500 && e.code !== "TALK_FAILED")) return { why: ["没有收到回答：网络断了，或者服务器没应。", "No reply arrived. The network or server may be unavailable."], unsure: true };
+  if (e.status === 404) return { why: ["这场对话已经在别处删掉了，再发一次会开一场新的。", "This conversation was deleted elsewhere. Sending again will start a new one."] };
+  if (e.code !== "TALK_FAILED") return { why: ["没有发出去：", "Could not send: "], error: e };
+  const reason = (e.body as Partial<TalkFailure> | undefined)?.reason ?? "failed";
   return { why: WHY[reason] ?? WHY.failed, setup: reason === "not configured" };
 }
 
@@ -41,6 +42,7 @@ const coarse = () => typeof window.matchMedia === "function" && window.matchMedi
  * list stops offering it.
  */
 function Conversation({ thread, onGone }: { thread: number | null; onGone: () => void }) {
+  const { t } = useI18n();
   // A new conversation gets its id with its first answer.
   const [id, setId] = useState(thread);
   // What is on screen, held here and nowhere else: the answer to a message
@@ -55,6 +57,7 @@ function Conversation({ thread, onGone }: { thread: number | null; onGone: () =>
   const talk = useTalk((text) => setDraft((previous) => previous + text));
   const list = useRef<HTMLOListElement>(null);
   const end = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
   // How many answers have come in on this visit.
   const [answered, setAnswered] = useState(0);
 
@@ -64,7 +67,7 @@ function Conversation({ thread, onGone }: { thread: number | null; onGone: () =>
       onSuccess: (r) => setTurns(r.turns),
       onError: (e) => {
         if (!(e instanceof ApiError && e.status === 404)) return;
-        toast.info("这场对话已经删掉了");
+        toast.info(t("这场对话已经删掉了", "This conversation has been deleted"));
         onGone();
         openThread(null);
       },
@@ -137,13 +140,17 @@ function Conversation({ thread, onGone }: { thread: number | null; onGone: () =>
         {!loaded && !reading.error && <li><Loader2 className="mx-auto my-8 size-5 animate-spin text-muted-foreground" /></li>}
         {!loaded && reading.error && (
           <li className="flex items-center gap-2 text-sm text-destructive">
-            读取失败：{reading.error.message}
-            <Button size="sm" variant="outline" onClick={read}>重试</Button>
+            {t("读取失败：", "Could not load: ")}{errorMessage(reading.error)}
+            <Button size="sm" variant="outline" onClick={read}>{t("重试", "Retry")}</Button>
           </li>
         )}
         {loaded && turns.length === 0 && sent === null && (
-          <li className="py-8 text-center text-sm text-muted-foreground">
-            想到什么说什么：英文、中文、混着说都行，对方只说英文。每句话下面会有可以改的地方、更自然的整句说法、你库里已有的说法，看中的点「收」。
+          <li className="space-y-4 py-8 text-center text-sm text-muted-foreground">
+            <p>{t("想到什么说什么：英文、中文、混着说都行，对方只说英文。每句话下面会有可以改的地方、更自然的整句说法、你库里已有的说法，看中的点「收」。", "Talk about whatever is on your mind, in English, Chinese, or both. Your partner replies in English. Corrections, natural alternatives, and expressions from your library appear below each reply; save any you want to keep.")}</p>
+            <Button variant="outline" className="min-h-11" onClick={() => {
+              setBox(t("我今天临时改变了计划，想聊聊这件事。", "I changed my plans at the last minute today. Can we talk about that?"));
+              requestAnimationFrame(() => input.current?.focus());
+            }}>{t("填入一个开场例子", "Start with an example")}</Button>
           </li>
         )}
         {turns?.map((turn) => <TurnView key={turn.id} turn={turn} />)}
@@ -153,7 +160,7 @@ function Conversation({ thread, onGone }: { thread: number | null; onGone: () =>
             {draft && <p className="break-words whitespace-pre-line leading-relaxed">{draft}</p>}
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
-              {draft ? "正在回复并整理批注…" : "对方在写…"}
+              {draft ? t("正在回复并整理批注…", "Replying and preparing coaching…") : t("对方在写…", "Your partner is writing…")}
             </p>
           </li>
         )}
@@ -162,27 +169,28 @@ function Conversation({ thread, onGone }: { thread: number | null; onGone: () =>
       <div className="sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] space-y-2 bg-background pb-4 pt-2 md:bottom-0">
         {failure && (
           <p role="alert" className="text-sm text-destructive">
-            {failure.why}
-            {failure.setup && <Link className="underline" to="/providers">去配一个</Link>}
+            {t(...failure.why)}{failure.error && errorMessage(failure.error)}
+            {failure.setup && <Link className="underline" to="/providers">{t("去配一个", "Configure a model")}</Link>}
             {/* Only the server's own refusal says that nothing was written. */}
-            {failure.unsure ? " 这句话还在下面的框里；它也可能已经记下了，离开这一页再回来就能看到。" : " 这句话没有记下，还在下面的框里。"}
+            {failure.unsure ? t(" 这句话还在下面的框里；它也可能已经记下了，离开这一页再回来就能看到。", " Your message is back in the box. It may already be saved; reopen this page to check.") : t(" 这句话没有记下，还在下面的框里。", " Your message was not saved and is back in the box.")}
           </p>
         )}
         <div className="flex items-end gap-2">
           <textarea
-            aria-label="说点什么"
+            ref={input}
+            aria-label={t("说点什么", "Say something")}
             className={`${AREA_CLASS} field-sizing-content max-h-60 min-h-[4.5rem] resize-none`}
-            placeholder={touch ? "英文、中文、混着说都行。" : "英文、中文、混着说都行。Enter 发送，Shift+Enter 换行。"}
+            placeholder={touch ? t("英文、中文、混着说都行。", "English, Chinese, or both.") : t("英文、中文、混着说都行。Enter 发送，Shift+Enter 换行。", "English, Chinese, or both. Enter to send; Shift+Enter for a new line.")}
             maxLength={EXPRESSION_LIMITS.said}
             value={box}
             readOnly={talk.isPending}
             onChange={(e) => setBox(e.target.value)}
             onKeyDown={onKey}
           />
-          <Button disabled={!box.trim() || talk.isPending || !loaded} onClick={send}>发送</Button>
+          <Button disabled={!box.trim() || talk.isPending || !loaded} onClick={send}>{t("发送", "Send")}</Button>
         </div>
         {/* Told, not stopped: it leaves through the provider the user set up themselves. */}
-        <p className={MUTED}>每句话会连同表达库的索引（每条的英文和提示句；「想用」里的不带英文）发给你配置的模型。对话存在服务器上，可以整场删掉。</p>
+        <p className={MUTED}>{t("每句话会连同表达库的索引（每条的英文和提示句；「想用」里的不带英文）发给你配置的模型。对话存在服务器上，可以整场删掉。", "Each message and your expression index go to your configured model. The index includes expressions and cues; English targets in To use stay hidden. Conversations are stored on the server and can be deleted.")}</p>
       </div>
       <div ref={end} />
     </>
@@ -191,20 +199,22 @@ function Conversation({ thread, onGone }: { thread: number | null; onGone: () =>
 
 /** Forgetting a conversation takes two clicks: there is no getting it back. */
 function Drop({ thread }: { thread: number }) {
+  const { t } = useI18n();
   const drop = useDropThread();
   const [asking, setAsking] = useState(false);
-  if (!asking) return <Button size="sm" variant="ghost" onClick={() => setAsking(true)}>删除</Button>;
-  const forget = () => drop.mutate(thread, { onSuccess: () => openThread(null), onError: (e) => toast.error(`没有删掉：${e.message}`) });
+  if (!asking) return <Button size="sm" variant="ghost" onClick={() => setAsking(true)}>{t("删除", "Delete")}</Button>;
+  const forget = () => drop.mutate(thread, { onSuccess: () => openThread(null), onError: (e) => toast.error(t(`没有删掉：${errorMessage(e)}`, `Could not delete: ${errorMessage(e)}`)) });
   return (
     <span className={`flex flex-wrap items-center gap-1.5 ${MUTED}`}>
-      删掉这场对话？收下的表达和练习记录都留着。
-      <Button size="sm" variant="destructive" disabled={drop.isPending} onClick={forget}>删掉</Button>
-      <Button size="sm" variant="ghost" onClick={() => setAsking(false)}>取消</Button>
+      {t("删掉这场对话？收下的表达和练习记录都留着。", "Delete this conversation? Saved expressions and practice records stay.")}
+      <Button size="sm" variant="destructive" disabled={drop.isPending} onClick={forget}>{t("删掉", "Delete conversation")}</Button>
+      <Button size="sm" variant="ghost" onClick={() => setAsking(false)}>{t("取消", "Cancel")}</Button>
     </span>
   );
 }
 
 function TalkInner() {
+  const { t } = useI18n();
   // The route only brings an admin here; asking again keeps the rule in the
   // page itself: no admin, no request for private data.
   const isAdmin = useIsAdmin();
@@ -223,27 +233,27 @@ function TalkInner() {
   return (
     <div className="mx-auto flex min-h-[calc(100dvh_-_4rem_-_env(safe-area-inset-bottom))] max-w-3xl flex-col gap-4 px-4 pt-4 md:min-h-dvh md:px-6 md:pt-6">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-2xl font-semibold">对谈</h2>
+        <h2 className="text-2xl font-semibold">{t("对谈", "Conversation")}</h2>
         {threads && threads.length > 0 && (
           <select
-            aria-label="对话"
+            aria-label={t("对话", "Conversation")}
             className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm"
             value={current ?? ""}
             onChange={(e) => openThread(e.target.value ? Number(e.target.value) : null)}
           >
-            <option value="">新对话</option>
+            <option value="">{t("新对话", "New conversation")}</option>
             {/* One that has just begun is not on the list until the list has loaded again. */}
-            {current != null && !threads.some((t) => t.thread === current) && <option value={current}>这场对话</option>}
-            {threads.map((t) => (
-              <option key={t.thread} value={t.thread}>{day(t.updatedAt)} · {t.title}（{t.turns}）</option>
+            {current != null && !threads.some((entry) => entry.thread === current) && <option value={current}>{t("这场对话", "This conversation")}</option>}
+            {threads.map((entry) => (
+              <option key={entry.thread} value={entry.thread}>{day(entry.updatedAt)} · {entry.title}{t(`（${entry.turns}）`, ` (${entry.turns})`)}</option>
             ))}
           </select>
         )}
-        {current != null && <Button size="sm" variant="outline" onClick={() => openThread(null)}>新对话</Button>}
+        {current != null && <Button size="sm" variant="outline" onClick={() => openThread(null)}>{t("新对话", "New conversation")}</Button>}
         {current != null && <Drop key={current} thread={current} />}
       </div>
-      {refused && <p className="rounded-md border p-4 text-sm">{NO_AUTH_NOTE}</p>}
-      {list.error && !refused && <p className="text-sm text-destructive">读取失败：{list.error.message}</p>}
+      {refused && <p className="rounded-md border p-4 text-sm">{noAuthNote()}</p>}
+      {list.error && !refused && <p className="text-sm text-destructive">{t("读取失败：", "Could not load: ")}{errorMessage(list.error)}</p>}
       {isAdmin && !refused && current !== undefined && <Conversation key={visit} thread={current} onGone={() => void list.refetch()} />}
     </div>
   );

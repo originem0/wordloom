@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { toast } from "sonner";
+import { useAppStore } from "@/client/store";
 
 let saved: Record<string, string>;
 const save = vi.fn(async (pair: { key: string; value: string }) => void pair);
@@ -16,6 +17,7 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 import { AIProvidersPage } from "../AIProvidersPage";
 
 beforeEach(() => {
+  useAppStore.setState({ uiLanguage: "en" });
   sessionStorage.clear();
   save.mockClear();
   vi.mocked(toast.success).mockClear();
@@ -55,7 +57,7 @@ describe("the Expressions route", () => {
   it("runs on what the Cards route runs on while it has nothing of its own, and says so", () => {
     renderPage(CARDS_ON_A_GATEWAY);
     const expressions = row("Expressions");
-    expect(expressions.runsOn.getByText(/留空的项沿用 Cards 路由/)).toBeInTheDocument();
+    expect(expressions.runsOn.getByText(/Empty fields inherit the Cards route/)).toBeInTheDocument();
     expect(expressions.provider).toHaveValue("");
     expect(expressions.runsOn.getByText("openai")).toBeInTheDocument();
     expect(expressions.runsOn.getByText("deepseek-chat")).toBeInTheDocument();
@@ -88,7 +90,7 @@ describe("the Expressions route", () => {
     const details = (label: string) => within(screen.getByText(label).closest("details")!);
     expect(details("Cards").getByText("Fallback Model")).toBeInTheDocument();
     expect(details("Expressions").queryByText("Fallback Model")).toBeNull();
-    expect(details("Expressions").getByText(/没有后备模型/)).toBeInTheDocument();
+    expect(details("Expressions").getByText(/without a fallback/)).toBeInTheDocument();
 
     fireEvent.change(row("Cards").primaryModel, { target: { value: "deepseek-reasoner" } });
     const written = await saveAll();
@@ -117,7 +119,7 @@ describe("the Expressions route", () => {
   it("is tested as a cards call on the provider and model it resolves to", async () => {
     renderPage(CARDS_ON_A_GATEWAY);
     fireEvent.click(row("Expressions").test);
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("expressions: deepseek-chat OK 12ms"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Expressions: deepseek-chat OK 12ms"));
 
     const [url, init] = vi.mocked(fetch).mock.calls[0];
     expect(url).toBe("/api/settings/test");

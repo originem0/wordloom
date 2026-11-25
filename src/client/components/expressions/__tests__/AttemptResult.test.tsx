@@ -115,7 +115,7 @@ describe("overturning a judgement", () => {
     const onChange = show(judged());
     next = { status: 409, body: { error: "Not judged yet", code: "NOT_JUDGED" } };
     fireEvent.click(screen.getByRole("button", { name: "其实没用上" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有改成：Not judged yet"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有改成：这句话还没有完成判定。"));
     expect(onChange).not.toHaveBeenCalled();
   });
 });

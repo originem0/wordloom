@@ -7,14 +7,18 @@ import {
 } from "lucide-react"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { useAppStore } from "@/client/store"
+import { useI18n } from "@/client/lib/i18n"
 
 const Toaster = ({ ...props }: ToasterProps) => {
+  const { t } = useI18n()
   const theme = useAppStore((s) => s.theme)
 
   return (
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
+      containerAriaLabel={t("通知", "Notifications")}
+      toastOptions={{ closeButtonAriaLabel: t("关闭通知", "Close notification") }}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,

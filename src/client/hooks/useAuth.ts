@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { apiFetch, apiPost } from "@/client/lib/api";
 import { queryClient } from "@/client/lib/query-client";
 import { useTaskStore } from "@/client/store/tasks";
+import { translate } from "@/client/lib/i18n";
+import { useReadingStore } from "@/client/store/reading";
 
 export const AUTH_QUERY_KEY = ["auth", "me"] as const;
 
@@ -47,10 +49,11 @@ export function useLogout() {
     } catch {
       // The session is still live on the server; leaving for the login page
       // would claim otherwise.
-      toast.error("退出登录失败，请重试");
+      toast.error(translate("退出登录失败，请重试。", "Sign-out failed. Please try again."));
       return;
     }
     useTaskStore.getState().reset();
+    useReadingStore.getState().reset();
     queryClient.clear();
     navigate("/login", { replace: true });
   }, [navigate]);

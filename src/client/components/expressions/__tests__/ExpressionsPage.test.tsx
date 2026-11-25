@@ -8,6 +8,14 @@ import { toast } from "sonner";
 import type { Cue, EncounterView, ExpressionDetail, StatsResponse } from "@/shared/expressions";
 import { ExpressionsPage } from "../ExpressionsPage";
 import { useLastSource } from "../shared";
+import { useAppStore } from "@/client/store";
+import { useReadingStore } from "@/client/store/reading";
+
+// Node 26 has no localStorage without --localstorage-file. Persistence is not
+// under test here; keep only the language preference in this test process.
+useAppStore.persist.setOptions({ storage: {
+  getItem: () => null, setItem: () => {}, removeItem: () => {},
+} });
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 
@@ -91,6 +99,8 @@ function answer(method: string, url: string, body: Record<string, unknown> | nul
 const asked = (method: string, url: string) => requests.filter((r) => r.method === method && r.url === url);
 
 beforeEach(() => {
+  useReadingStore.getState().reset();
+  useAppStore.setState({ uiLanguage: "zh-CN" });
   server = {
     authenticated: true, configured: true, entries: [], glossOnAnnotate: "to begin to be understood", draftOnAnnotate: null, settings: {}, stats: NO_STATS,
   };
@@ -109,6 +119,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  useAppStore.setState({ uiLanguage: "zh-CN" });
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -134,8 +145,92 @@ const rows = () => Array.from(document.querySelectorAll("ul > li > button")).map
 async function openRow(part: string) {
   await waitFor(() => expect(rows().some((text) => text?.includes(part))).toBe(true));
   fireEvent.click(Array.from(document.querySelectorAll("ul > li > button")).find((b) => b.textContent?.includes(part))!);
+  const dialog = await screen.findByRole("dialog");
+  await waitFor(() => expect(dialog.querySelector(".reading-details, .text-destructive")).not.toBeNull());
+  // These cases exercise editing and the timeline, which the reading view now
+  // keeps behind disclosures. The startup case below checks the folded view.
+  for (const details of dialog.querySelectorAll<HTMLDetailsElement>(".reading-details")) {
+    if (!details.open) fireEvent.click(details.querySelector("summary")!);
+  }
 }
-const closeDetail = () => fireEvent.click(screen.getByRole("button", { name: "Close" }));
+const closeDetail = () => fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+
+describe("expression library paging and the first learning step", () => {
+  const many = (count: number) => Array.from({ length: count }, (_, i) => entry({ id: i + 1, text: `Saved expression ${String(i + 1).padStart(2, "0")}` }));
+
+  it("renders twenty rows per page and resets the page when the filter changes", async () => {
+    server.entries = many(45);
+    renderPage();
+    await waitFor(() => expect(rows()).toHaveLength(20));
+    expect(rows()[0]).toContain("Saved expression 01");
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(rows()[0]).toContain("Saved expression 21");
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(rows()).toHaveLength(5);
+    expect(rows()[0]).toContain("Saved expression 41");
+
+    fireEvent.change(screen.getByRole("textbox", { name: "筛选" }), { target: { value: "Saved expression 04" } });
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toContain("Saved expression 04");
+    expect(screen.getByText(/第 1 \/ 1 页/)).toBeInTheDocument();
+    expect(requests.some((r) => r.url.includes("Saved"))).toBe(false);
+  });
+
+  it("moves to a populated page when the last row on the last page is archived", async () => {
+    server.entries = many(41);
+    renderPage();
+    await waitFor(() => expect(rows()).toHaveLength(20));
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    await openRow("Saved expression 41");
+    fireEvent.click(await screen.findByRole("button", { name: "收起" }));
+    await waitFor(() => expect(rows()).toHaveLength(20));
+    closeDetail();
+    expect(await screen.findByText(/第 2 \/ 2 页/)).toBeInTheDocument();
+    expect(rows()[0]).toContain("Saved expression 21");
+    server.entries.unshift(entry({ id: 99, text: "Another saved expression" }));
+    await act(() => client.invalidateQueries());
+    expect(await screen.findByText(/第 2 \/ 3 页/)).toBeInTheDocument();
+  });
+
+  it("starts with the user's cue and keeps notes folded without drafting or submitting a practice", async () => {
+    server.entries = [entry({ id: 88, text: "Let's call it a day.", note: "A private note" })];
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "从见过选一条" }));
+    const cue = await screen.findByRole("textbox", { name: /提示句/ });
+    expect(document.activeElement).toBe(cue);
+    expect(screen.getByRole("textbox", { name: "备注" })).not.toBeVisible();
+    expect(screen.getByRole("button", { name: "放进想用" })).toBeDisabled();
+    fireEvent.change(cue, { target: { value: "我想说今天就到这里" } });
+    fireEvent.click(screen.getByRole("button", { name: "放进想用" }));
+    await waitFor(() => expect(server.entries[0].status).toBe("active"));
+    expect(asked("PATCH", "/api/expressions/88")[0].body).toMatchObject({ intent: "我想说今天就到这里", intentBy: "self", status: "active" });
+    expect(requests.some((r) => r.url.endsWith("/annotate") || r.url.endsWith("/attempt"))).toBe(false);
+    await screen.findByRole("button", { name: "看答案" });
+    expect(screen.getByRole("dialog")).not.toHaveTextContent("Let's call it a day.");
+  });
+});
+
+it("updates library labels and dates while keeping a detail dialog and its unsaved fields open", async () => {
+  server.entries = [entry({ id: 71, text: "A private expression.", intent: "我想说自己的意思", sourceType: "book", sourceTitle: "私人书名" })];
+  renderPage();
+  await openRow("A private expression.");
+  const dialog = screen.getByRole("dialog");
+  const note = await screen.findByRole("textbox", { name: "备注" });
+  fireEvent.change(note, { target: { value: "没写完的私密备注" } });
+  const filter = screen.getByRole("textbox", { name: "筛选", hidden: true });
+  const requestCount = requests.length;
+  act(() => useAppStore.getState().setUiLanguage("en"));
+  expect(screen.getByRole("dialog", { name: "Expression details" })).toBe(dialog);
+  expect(screen.getByRole("textbox", { name: "Note" })).toBe(note);
+  expect(note).toHaveValue("没写完的私密备注");
+  expect(screen.getByRole("textbox", { name: "Filter", hidden: true })).toBe(filter);
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  expect(screen.getByRole("textbox", { name: /Cue:/ })).toHaveValue("我想说自己的意思");
+  expect(dialog).toHaveTextContent("私人书名");
+  expect(dialog).toHaveTextContent(new Date(MET_AT).toLocaleDateString("en-US"));
+  expect(requests).toHaveLength(requestCount);
+});
 /** A click on the page behind the dialog. Radix starts listening a tick after the dialog opens, and acts on the click that follows the press. */
 async function clickBeside() {
   await new Promise((r) => setTimeout(r, 10));
@@ -279,7 +374,8 @@ describe("the numbers", () => {
     server.stats = { produced: 3, testableDays: 9, attemptDays: 4, since: MET_AT, judgeAt: MET_AT + 28 * DAY_MS };
     renderPage();
     const line = (await screen.findByText(/用出过 3 条/)).closest("p")!;
-    expect(line.textContent).toBe("用出过 3 条（隔了一天以上、作答前没看答案、在新句子里打出来过） · 可测 9 天，其中作答 4 天 · 判定日 2026/12/18");
+    expect(line.textContent).toBe("用出过 3 条 · 可测 9 天，其中作答 4 天 · 判定日 2026/12/18");
+    expect(screen.getByText("隔了一天以上、作答前没看答案、在新句子里打出来过。")).not.toBeVisible();
     expect(document.querySelector('[role="progressbar"], progress, meter')).toBeNull();
   });
 
@@ -755,7 +851,7 @@ describe("帮我起草", () => {
     server.glossOnAnnotate = null;
     await waitFor(() => expect(screen.getByRole("button", { name: "帮我起草" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "帮我起草" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有起草成：The model did not answer"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有起草成：服务暂时不可用（HTTP 502）。"));
     expect(intent).toHaveValue("");
     expect(patches(99)).toEqual([]);
   });
@@ -949,7 +1045,7 @@ describe("the detail of an entry in 想用", () => {
     await open();
     server.entries = [];
     fireEvent.click(screen.getByRole("button", { name: "看答案" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有看成：Not found"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有看成：这条记录已不存在。"));
     expect(document.body.textContent).not.toMatch(ENGLISH);
   });
 

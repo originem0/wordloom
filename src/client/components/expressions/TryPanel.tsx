@@ -7,6 +7,7 @@ import { ApiError } from "@/client/lib/api";
 import { EXPRESSION_LIMITS, type AttemptResponse, type ExpressionDetail, type TryItem } from "@/shared/expressions";
 import { Answer, AttemptResult } from "./AttemptResult";
 import { AREA_CLASS } from "./shared";
+import { errorMessage, useI18n } from "@/client/lib/i18n";
 
 const HOUR = 3_600_000;
 
@@ -19,6 +20,7 @@ const HOUR = 3_600_000;
  * none neither is the intent.
  */
 function TryCard({ item, onGone }: { item: TryItem; onGone: () => void }) {
+  const { t } = useI18n();
   const attempt = useAttempt();
   const reveal = useReveal();
   const [text, setText] = useState("");
@@ -44,7 +46,7 @@ function TryCard({ item, onGone }: { item: TryItem; onGone: () => void }) {
     </div>
   ) : (
     // Answered, and nothing to show: refused. Not `isError`, which is off again whenever the scene is read anew.
-    wantScene && (scene.isFetched ? <p className="text-muted-foreground">这一条没有原场景</p> : <Loader2 className="size-4 animate-spin text-muted-foreground" />)
+    wantScene && (scene.isFetched ? <p className="text-muted-foreground">{t("这一条没有原场景", "No original context is available for this expression")}</p> : <Loader2 className="size-4 animate-spin text-muted-foreground" />)
   );
 
   // A miss that had only the fresh scene comes back without the answer: the
@@ -67,35 +69,35 @@ function TryCard({ item, onGone }: { item: TryItem; onGone: () => void }) {
       },
       onError: (e) => {
         const left = e instanceof ApiError && e.code === "NOT_ACTIVE";
-        toast.error(left ? "这一条已经不在想用里了" : `没有交上：${e.message}`);
+        toast.error(left ? t("这一条已经不在想用里了", "This expression is no longer in To use") : t(`没有交上：${errorMessage(e)}`, `Could not submit: ${errorMessage(e)}`));
         // A 400 is a question gone stale (its scene was used up): asking it again cannot work either.
         if (left || (e instanceof ApiError && e.status === 400)) onGone();
       },
     });
   // Giving up is recorded at the level it happened at.
   const giveUp = () =>
-    reveal.mutate({ id: item.id, cue: level }, { onSuccess: (entry) => setAnswer(entry), onError: (e) => toast.error(`没有揭开：${e.message}`) });
+    reveal.mutate({ id: item.id, cue: level }, { onSuccess: (entry) => setAnswer(entry), onError: (e) => toast.error(t(`没有揭开：${errorMessage(e)}`, `Could not reveal the answer: ${errorMessage(e)}`)) });
 
   return (
     <li className="space-y-2 rounded-lg border bg-card p-4 text-sm shadow-sm">
       <p className="whitespace-pre-line">{item.prompt}</p>
-      {hinted && <p className="whitespace-pre-line text-muted-foreground">提示：{item.intent}</p>}
+      {hinted && <p className="whitespace-pre-line text-muted-foreground">{t("提示：", "Cue: ")}{item.intent}</p>}
       {sceneHint}
       {/* Once the box is gone, the sentence the judgement is about stays readable. */}
-      {!open && <p className="whitespace-pre-line text-muted-foreground">你写的：{said}</p>}
+      {!open && <p className="whitespace-pre-line text-muted-foreground">{t("你写的：", "You wrote: ")}{said}</p>}
       {result && <AttemptResult result={result} onChange={setResult} />}
       {answer && !result?.answer && <Answer text={answer.text ?? ""} focus={answer.focus} gloss={answer.gloss} />}
       {open && (
         <>
-          {answer && <p className="text-xs text-muted-foreground">看过答案再写一句，不计档位</p>}
-          <textarea aria-label="你的句子" className={AREA_CLASS} rows={2} placeholder="用一句英文说出来" maxLength={EXPRESSION_LIMITS.attempt} value={text} onChange={(e) => setText(e.target.value)} />
+          {answer && <p className="text-xs text-muted-foreground">{t("看过答案再写一句，不计档位", "Write another sentence after seeing the answer; it will not change your level")}</p>}
+          <textarea aria-label={t("你的句子", "Your sentence")} className={AREA_CLASS} rows={2} placeholder={t("用一句英文说出来", "Express it in one English sentence")} maxLength={EXPRESSION_LIMITS.attempt} value={text} onChange={(e) => setText(e.target.value)} />
           <div className="flex flex-wrap items-center gap-1.5">
             <Button size="sm" disabled={!text.trim() || busy} onClick={submit}>
               {attempt.isPending && <Loader2 className="animate-spin" />}
-              提交
+              {t("提交", "Submit")}
             </Button>
-            {!answer && hint && <Button size="sm" variant="outline" disabled={busy} onClick={hint}>给点提示</Button>}
-            {!answer && <Button size="sm" variant="ghost" disabled={busy} onClick={giveUp}>看答案</Button>}
+            {!answer && hint && <Button size="sm" variant="outline" disabled={busy} onClick={hint}>{t("给点提示", "Give me a hint")}</Button>}
+            {!answer && <Button size="sm" variant="ghost" disabled={busy} onClick={giveUp}>{t("看答案", "Show answer")}</Button>}
           </div>
         </>
       )}
@@ -108,7 +110,8 @@ function TryCard({ item, onGone }: { item: TryItem; onGone: () => void }) {
  * with a fresh scene or with its intent. Sits under the capture box. It shows
  * no count of what is due, no streak and no reminder: more comes when asked for.
  */
-export function TryPanel() {
+export function TryPanel({ onChooseSaved }: { onChooseSaved?: () => void } = {}) {
+  const { t } = useI18n();
   const more = useTry();
   // Everything put on this screen, in order; null until the first answer.
   const [items, setItems] = useState<TryItem[] | null>(null);
@@ -145,18 +148,18 @@ export function TryPanel() {
   }, [more.submittedAt]);
   const another = (shown: TryItem[]) =>
     more.mutate(shown.map((i) => i.id), {
-      onSuccess: ({ items: [next] }) => (next ? setItems([...shown, next]) : toast.info("没有到时间的了")),
-      onError: (e) => toast.error(`没有取到：${e.message}`),
+      onSuccess: ({ items: [next] }) => (next ? setItems([...shown, next]) : toast.info(t("没有到时间的了", "Nothing else is due yet."))),
+      onError: (e) => toast.error(t(`没有取到：${errorMessage(e)}`, `Could not load an expression: ${errorMessage(e)}`)),
     });
 
   return (
     <section ref={panel} className="space-y-2">
-      <h3 className="font-medium">试一条</h3>
+      <h3 className="font-medium">{t("试一条", "Try one")}</h3>
       {!items ? (
         more.isError ? (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            没有取到要试的条目。
-            <Button size="sm" variant="outline" onClick={load}>再试一次</Button>
+            {t("没有取到要试的条目。", "Could not load expressions to practise.")}
+            <Button size="sm" variant="outline" onClick={load}>{t("再试一次", "Try again")}</Button>
           </p>
         ) : (
           <Loader2 className="size-4 animate-spin text-muted-foreground" />
@@ -170,12 +173,18 @@ export function TryPanel() {
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-muted-foreground">现在没有到时间的。放进「想用」的条目，隔一天会出现在这里。</p>
+            <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+              <p className="text-sm text-muted-foreground">{t("现在没有到时间的。放进「想用」的条目，隔一天会出现在这里。", "Nothing is due yet. Expressions in To use appear here after a day.")}</p>
+              {onChooseSaved && <>
+                <p className="text-sm">{t("先选一条见过的表达，写一句自己的提示句，再放进想用。", "Choose an expression you have seen, write a cue in your own words, then move it to To use.")}</p>
+                <Button variant="outline" onClick={onChooseSaved}>{t("从见过选一条", "Choose an expression from Seen")}</Button>
+              </>}
+            </div>
           )}
           {/* Always offered: what is not due now will be later, with the page still open. */}
           <Button size="sm" variant="outline" disabled={more.isPending} onClick={() => (items.length ? another(items) : load())}>
             {more.isPending && <Loader2 className="animate-spin" />}
-            {items.length ? "再来一条" : "再看一次"}
+            {items.length ? t("再来一条", "Try another") : t("再看一次", "Check again")}
           </Button>
         </>
       )}

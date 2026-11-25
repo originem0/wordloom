@@ -3,23 +3,62 @@
    Scoped under .proto-page to avoid leaking styles into the rest of the app.
    ========================================================================== */
 
-.proto-page {
-  /* Variables (ported from :root) */
-  --bg: #f4f1eb;
-  --card: #fdf6e3;
-  --fg: #586e75;
-  --heading: #073642;
-  --accent: #2aa198;
-  --accent2: #b58900;
-  --border: #d3cbbf;
-  --muted: #93a1a1;
-  --surface: #eee8d5;
-  --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  --radius: 14px;
+.word-dialog {
+  /* One scrolling document. A stretched grid would squeeze the card's
+     collapsible sections into the phone's fixed viewport height. */
+  display: block;
+  width: min(960px, calc(100vw - 64px));
+  max-width: none;
+  max-height: 90dvh;
+  overflow-y: auto;
+  padding: 0;
+  gap: 0;
+  border: 0;
+  background: var(--background);
+  overscroll-behavior: contain;
+}
 
-  font: 16px/1.7 "Open Sans", "Noto Sans SC", sans-serif;
-  background: var(--bg);
-  color: var(--fg);
+.word-dialog .proto-page { display: block; min-height: 0; padding: 0; overflow: visible; }
+.word-dialog .proto-page .card {
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+
+@media (max-width: 768px) {
+  .word-dialog {
+    top: 0;
+    left: 0;
+    translate: 0 0;
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+}
+
+.proto-page {
+  /* Surfaces use the app theme. Scoped accents do not overwrite the global
+     --card/--muted tokens used by controls inside the word card. */
+  --word-background: var(--background);
+  --word-card: var(--card);
+  --word-text: var(--card-foreground);
+  --word-heading: var(--card-foreground);
+  --word-accent: #0f766e;
+  --word-accent-secondary: #946b00;
+  --word-border: var(--border);
+  --word-muted: var(--muted-foreground);
+  --word-surface: var(--muted);
+  --word-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  --word-radius: var(--radius);
+
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.65;
+  background: var(--word-background);
+  color: var(--word-text);
   display: flex;
   justify-content: center;
   padding: 24px 16px;
@@ -28,16 +67,9 @@
 }
 
 :is(.dark) .proto-page {
-  --bg: #1a1a1a;
-  --card: #1e1e1e;
-  --fg: #c4bfb7;
-  --heading: #e6e0d9;
-  --accent: #5ec4bb;
-  --accent2: #d7a35d;
-  --border: #333;
-  --muted: #8a8480;
-  --surface: #252525;
-  --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  --word-accent: #5ec4bb;
+  --word-accent-secondary: #d7a35d;
+  --word-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 
 .proto-page * {
@@ -46,16 +78,16 @@
 }
 
 .proto-page .card {
-  background: var(--card);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  border: 1px solid var(--border);
+  background: var(--word-card);
+  border-radius: var(--word-radius);
+  box-shadow: var(--word-shadow);
+  border: 1px solid var(--word-border);
   max-width: 820px;
   width: 100%;
   padding: 28px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   overflow-x: hidden;
   overflow-wrap: break-word;
   word-break: break-word;
@@ -68,29 +100,29 @@
   top: 0;
   align-self: flex-end;
   z-index: 10;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--card);
-  color: var(--muted);
+  border: 1px solid var(--word-border);
+  background: var(--word-card);
+  color: var(--word-muted);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s, transform 0.15s;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   margin-top: -4px;
   margin-bottom: -12px;
 }
 .proto-page .close-btn:hover {
-  color: var(--heading);
-  border-color: var(--heading);
+  color: var(--word-heading);
+  border-color: var(--word-heading);
 }
 .proto-page .close-btn:active {
-  transform: scale(0.92);
+  transform: scale(0.97);
 }
 
 /* --- Header --- */
@@ -102,12 +134,12 @@
 }
 .proto-page .word-header h1 {
   font: 700 2.4em/1 "Lora", serif;
-  color: var(--heading);
+  color: var(--word-heading);
   margin: 0;
 }
 .proto-page .ipa {
   font: 400 1em/1 "Open Sans", sans-serif;
-  color: var(--muted);
+  color: var(--word-muted);
 }
 .proto-page .chips {
   display: flex;
@@ -119,44 +151,51 @@
   font-size: 12px;
   padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid var(--border);
-  color: var(--muted);
+  border: 1px solid var(--word-border);
+  color: var(--word-muted);
   white-space: nowrap;
 }
 .proto-page .chip.accent {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: var(--word-accent);
+  border-color: var(--word-accent);
 }
 
 /* --- Section headings --- */
 .proto-page h2 {
-  font: 700 1.2em/1.3 "Lora", serif;
-  color: var(--heading);
+  font-family: inherit;
+  font-size: 18px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--word-heading);
   padding-bottom: 4px;
-  border-bottom: 2px solid var(--accent);
+  border-bottom: 2px solid var(--word-accent);
   margin-bottom: 8px;
 }
 .proto-page h3 {
-  font: 600 0.95em/1.4 "Open Sans", "Noto Sans SC", sans-serif;
-  color: var(--heading);
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--word-heading);
   margin-bottom: 4px;
 }
 
 /* --- Core image animation --- */
 .proto-page .core-image {
-  background: linear-gradient(135deg, var(--surface) 0%, #fdf6e3 100%);
+  background: var(--word-surface);
+  border: 1px solid var(--word-border);
   border-radius: 10px;
   padding: 14px;
   overflow: visible;
 }
 :is(.dark) .proto-page .core-image {
-  background: linear-gradient(135deg, var(--surface) 0%, var(--card) 100%);
+  background: var(--word-surface);
 }
 
 .proto-page .core-image p {
   margin-top: 10px;
   font-style: italic;
-  color: var(--fg);
+  color: var(--word-text);
   line-height: 1.6;
   font-size: 15px;
 }
@@ -185,18 +224,18 @@
 
 /* Observer eye */
 .proto-page .eye {
-  fill: var(--heading);
+  fill: var(--word-heading);
 }
 .proto-page .eye-white {
-  fill: var(--card);
+  fill: var(--word-card);
 }
 .proto-page .eye-pupil {
-  fill: var(--heading);
+  fill: var(--word-heading);
 }
 
 /* Cloud / fog obstacle */
 .proto-page .cloud {
-  fill: var(--muted);
+  fill: var(--word-muted);
   opacity: 0.15;
   animation: drift 6s ease-in-out infinite alternate;
 }
@@ -226,7 +265,7 @@
 /* Target object pulsing behind fog */
 .proto-page .target {
   fill: none;
-  stroke: var(--accent2);
+  stroke: var(--word-accent-secondary);
   stroke-width: 2;
   stroke-dasharray: 4 4;
   animation: pulse-target 4s ease-in-out infinite;
@@ -245,7 +284,7 @@
 
 /* Light rays blocked */
 .proto-page .ray {
-  stroke: var(--accent2);
+  stroke: var(--word-accent-secondary);
   stroke-width: 1.5;
   opacity: 0;
   animation: ray-fade 6s ease-in-out infinite;
@@ -275,12 +314,12 @@
 /* Question mark on target */
 .proto-page .question {
   font: bold 28px "Lora", serif;
-  fill: var(--accent2);
+  fill: var(--word-accent-secondary);
   animation: pulse-target 4s ease-in-out infinite;
 }
 
 .proto-page .blocked-arrow {
-  stroke: var(--muted);
+  stroke: var(--word-muted);
   stroke-width: 1.5;
   stroke-dasharray: 6 4;
   opacity: 0.4;
@@ -289,7 +328,7 @@
 /* Observer label */
 .proto-page .label {
   font: 12px "Open Sans", sans-serif;
-  fill: var(--muted);
+  fill: var(--word-muted);
 }
 
 /* --- Etymology --- */
@@ -300,7 +339,7 @@
 .proto-page .etymology .root {
   font-family: "Lora", serif;
   font-style: italic;
-  color: var(--accent);
+  color: var(--word-accent);
 }
 .proto-page .evolution-chain {
   display: flex;
@@ -311,14 +350,14 @@
   font-size: 14px;
 }
 .proto-page .evolution-chain .stage {
-  background: var(--surface);
+  background: var(--word-surface);
   padding: 4px 10px;
   border-radius: 8px;
   font-style: italic;
-  color: var(--heading);
+  color: var(--word-heading);
 }
 .proto-page .evolution-chain .arrow {
-  color: var(--accent);
+  color: var(--word-accent);
   font-weight: bold;
 }
 
@@ -335,14 +374,14 @@
 .proto-page .family-table th {
   text-align: left;
   padding: 8px 10px;
-  background: var(--surface);
-  color: var(--heading);
+  background: var(--word-surface);
+  color: var(--word-heading);
   font-weight: 600;
-  border-bottom: 2px solid var(--accent);
+  border-bottom: 2px solid var(--word-accent);
 }
 .proto-page .family-table td {
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--word-border);
   vertical-align: top;
 }
 .proto-page .family-table tr:last-child td {
@@ -350,7 +389,7 @@
 }
 .proto-page .family-table .word-col {
   font-weight: 700;
-  color: var(--heading);
+  color: var(--word-heading);
   white-space: nowrap;
 }
 .proto-page .family-table tr.highlight {
@@ -361,7 +400,7 @@
   margin-top: 10px;
   padding: 10px 14px;
   background: rgba(42, 161, 152, 0.06);
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--word-accent);
   border-radius: 0 8px 8px 0;
   font-size: 13px;
   line-height: 1.6;
@@ -370,7 +409,7 @@
 /* --- Scene activation --- */
 .proto-page .scene {
   padding: 10px 14px;
-  background: var(--surface);
+  background: var(--word-surface);
   border-radius: 8px;
   margin-bottom: 8px;
 }
@@ -378,7 +417,7 @@
   margin-bottom: 0;
 }
 .proto-page .scene h3 {
-  color: var(--accent);
+  color: var(--word-accent);
   font-size: 0.9em;
   letter-spacing: 0.04em;
   margin-bottom: 8px;
@@ -389,9 +428,9 @@
 }
 .proto-page .scene-example {
   font-style: italic;
-  color: var(--heading);
+  color: var(--word-heading);
   padding-left: 12px;
-  border-left: 2px solid var(--accent2);
+  border-left: 2px solid var(--word-accent-secondary);
   margin: 6px 0 8px;
 }
 .proto-page .associated-words {
@@ -404,12 +443,12 @@
   padding: 2px 8px;
   border-radius: 999px;
   background: rgba(42, 161, 152, 0.12);
-  color: var(--accent);
+  color: var(--word-accent);
 }
 
 /* --- Boundary tests --- */
 .proto-page .tests-toggle {
-  border: 1px solid var(--border);
+  border: 1px solid var(--word-border);
   border-radius: 10px;
   overflow: hidden;
 }
@@ -425,25 +464,28 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font: 700 1.2em/1.3 "Lora", serif;
-  color: var(--heading);
+  font-family: inherit;
+  font-size: 18px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--word-heading);
   padding: 14px 16px;
-  background: var(--surface);
+  background: var(--word-surface);
   transition: background 0.15s;
 }
 .proto-page .tests-summary:active {
-  background: var(--border);
+  background: var(--word-border);
 }
 .proto-page .tests-toggle > summary .chevron {
   transition: transform 0.2s;
   font-size: 0.7em;
-  color: var(--muted);
+  color: var(--word-muted);
 }
 .proto-page .tests-toggle[open] > summary .chevron {
   transform: rotate(90deg);
 }
 .proto-page .tests-toggle[open] > summary.tests-summary {
-  border-bottom: 2px solid var(--accent);
+  border-bottom: 2px solid var(--word-accent);
 }
 .proto-page .tests-body {
   padding: 12px 16px;
@@ -454,13 +496,13 @@
 
 .proto-page .test-blank {
   font-weight: 600;
-  color: var(--heading);
+  color: var(--word-heading);
   line-height: 1.6;
   margin-bottom: 8px;
 }
 .proto-page .test-blank .blank {
   display: inline-block;
-  border-bottom: 2px solid var(--accent);
+  border-bottom: 2px solid var(--word-accent);
   min-width: 100px;
   text-align: center;
   margin: 0 2px;
@@ -470,15 +512,15 @@
   font-size: 13px;
   padding: 4px 12px;
   border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--card);
-  color: var(--muted);
+  border: 1px solid var(--word-border);
+  background: var(--word-card);
+  color: var(--word-muted);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s, transform 0.15s;
 }
 .proto-page .reveal-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--word-accent);
+  color: var(--word-accent);
 }
 .proto-page .test-options {
   display: none;
@@ -502,20 +544,20 @@
   flex-shrink: 0;
 }
 .proto-page .opt .verdict.yes {
-  color: var(--accent);
+  color: var(--word-accent);
 }
 .proto-page .opt .verdict.no {
   color: #dc322f;
 }
 .proto-page .opt .verdict.maybe {
-  color: var(--accent2);
+  color: var(--word-accent-secondary);
 }
 .proto-page .opt .word-choice {
   font-weight: 600;
-  color: var(--heading);
+  color: var(--word-heading);
 }
 .proto-page .opt .reason {
-  color: var(--fg);
+  color: var(--word-text);
 }
 
 /* --- Deep missing / loading / error states --- */
@@ -526,9 +568,9 @@
   flex-wrap: wrap;
   gap: 10px;
   padding: 16px;
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--word-border);
   border-radius: 10px;
-  color: var(--muted);
+  color: var(--word-muted);
   font-size: 14px;
 }
 
@@ -538,17 +580,17 @@
   justify-content: center;
   gap: 10px;
   padding: 24px 16px;
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--word-border);
   border-radius: 10px;
-  color: var(--muted);
+  color: var(--word-muted);
   font-size: 14px;
 }
 
 .proto-page .deep-spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid var(--border);
-  border-top-color: var(--accent);
+  border: 2px solid var(--word-border);
+  border-top-color: var(--word-accent);
   border-radius: 50%;
   animation: proto-spin 0.6s linear infinite;
 }
@@ -570,11 +612,11 @@
 @media (max-width: 768px) {
   .proto-page {
     padding: 0;
-    font-size: 14px;
+    font-size: 16px;
   }
   .proto-page .card {
-    padding: 14px;
-    gap: 10px;
+    padding: 16px;
+    gap: 16px;
     border-radius: 0;
     border: none;
     box-shadow: none;
@@ -583,7 +625,7 @@
     gap: 8px;
   }
   .proto-page .word-header h1 {
-    font-size: 1.6em;
+    font-size: 28px;
   }
   .proto-page h2 {
     font-size: 1em;
@@ -597,10 +639,10 @@
     padding: 10px;
   }
   .proto-page .core-image p {
-    font-size: 12px;
-    line-height: 1.5;
-    margin-top: 6px;
-    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.6;
+    margin-top: 8px;
+    color: var(--word-text);
   }
   .proto-page .schema-svg {
     max-height: 120px;
@@ -623,7 +665,7 @@
   .proto-page .tests-summary {
     font-size: 0.95em;
     padding: 10px 12px;
-    background: var(--surface);
+    background: var(--word-surface);
   }
   .proto-page .tests-body {
     padding: 10px 12px;
@@ -652,8 +694,8 @@
     -webkit-overflow-scrolling: touch;
   }
   .proto-page .close-btn {
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
     font-size: 16px;
     margin-top: -2px;
     margin-bottom: -8px;
@@ -726,7 +768,7 @@
 
 .proto-page .proto-container {
   fill: none;
-  stroke: var(--accent);
+  stroke: var(--word-accent);
   stroke-width: 2;
   stroke-dasharray: 6 4;
   opacity: 0.55;
@@ -734,7 +776,7 @@
 }
 
 .proto-page .proto-item {
-  fill: var(--accent2);
+  fill: var(--word-accent-secondary);
   opacity: 0.65;
   animation: proto-bob 3.8s ease-in-out infinite;
 }
@@ -754,7 +796,7 @@
 }
 
 .proto-page .proto-flow {
-  stroke: var(--accent2);
+  stroke: var(--word-accent-secondary);
   stroke-width: 1.6;
   stroke-dasharray: 4 6;
   opacity: 0.35;
@@ -762,7 +804,7 @@
 }
 
 .proto-page .proto-arrow {
-  fill: var(--accent2);
+  fill: var(--word-accent-secondary);
   opacity: 0.6;
 }
 
@@ -771,7 +813,7 @@
 }
 
 .proto-page .proto-path {
-  stroke: var(--accent);
+  stroke: var(--word-accent);
   stroke-width: 2;
   stroke-dasharray: 5 6;
   opacity: 0.55;
@@ -779,31 +821,31 @@
 }
 
 .proto-page .proto-waypoint {
-  fill: var(--surface);
-  stroke: var(--border);
+  fill: var(--word-surface);
+  stroke: var(--word-border);
   stroke-width: 1.5;
 }
 
 .proto-page .proto-traveler {
-  fill: var(--accent2);
+  fill: var(--word-accent-secondary);
   opacity: 0.75;
   filter: drop-shadow(0 2px 3px rgba(0,0,0,.08));
 }
 
 .proto-page .proto-node {
-  fill: var(--surface);
-  stroke: var(--border);
+  fill: var(--word-surface);
+  stroke: var(--word-border);
   stroke-width: 2;
 }
 
 .proto-page .proto-link {
-  stroke: var(--accent);
+  stroke: var(--word-accent);
   stroke-width: 2.2;
   opacity: 0.25;
 }
 
 .proto-page .proto-link--dash {
-  stroke: var(--accent2);
+  stroke: var(--word-accent-secondary);
   stroke-width: 2;
   stroke-dasharray: 6 6;
   opacity: 0.6;
@@ -811,14 +853,14 @@
 }
 
 .proto-page .proto-base {
-  fill: var(--surface);
-  stroke: var(--border);
+  fill: var(--word-surface);
+  stroke: var(--word-border);
   stroke-width: 1.5;
 }
 
 .proto-page .proto-stand {
-  fill: var(--surface);
-  stroke: var(--border);
+  fill: var(--word-surface);
+  stroke: var(--word-border);
   stroke-width: 1.5;
 }
 
@@ -833,25 +875,25 @@
 }
 
 .proto-page .proto-beam-line {
-  stroke: var(--heading);
+  stroke: var(--word-heading);
   stroke-width: 2;
   opacity: 0.65;
 }
 
 .proto-page .proto-string {
-  stroke: var(--muted);
+  stroke: var(--word-muted);
   stroke-width: 1.6;
   opacity: 0.55;
 }
 
 .proto-page .proto-pan {
   fill: rgba(42, 161, 152, 0.10);
-  stroke: var(--border);
+  stroke: var(--word-border);
   stroke-width: 1.2;
 }
 
 .proto-page .proto-weight {
-  fill: var(--accent2);
+  fill: var(--word-accent-secondary);
   opacity: 0.65;
 }
 
@@ -873,4 +915,38 @@
   }
   .proto-page .cloud { opacity: 0.3; }
   .proto-page .target { opacity: 0.5; }
+}
+
+/* Core images lead; context and word comparisons remain available below. */
+.proto-page .word-meta { font-size: 14px; line-height: 1.6; }
+.proto-page .word-meta > summary { min-height: 44px; padding: 10px 0; cursor: pointer; color: var(--word-heading); }
+.proto-page .word-meta p { margin: 4px 0 8px; font-size: 14px; font-style: normal; }
+.proto-page .word-meta dl { padding-bottom: 8px; }
+.proto-page .word-meta dt { margin-top: 8px; font-weight: 600; }
+.proto-page .word-meta dd { margin-top: 4px; }
+.proto-page .core-visual { display: flex; justify-content: center; width: 100%; }
+.proto-page .core-visual > img, .proto-page .core-visual > svg { display: block; width: 100%; height: auto; max-height: 260px; object-fit: contain; }
+.proto-page .core-visual svg text { font-size: var(--word-diagram-label-size, 16px); }
+.proto-page .core-image .core-caption { font-size: 14px; font-style: normal; color: var(--word-text); line-height: 1.6; }
+.proto-page .family-cards { display: grid; gap: 12px; }
+.proto-page .family-cards > article { padding: 12px; border: 1px solid var(--word-border); border-radius: 8px; }
+.proto-page .family-cards > article.highlight { border-color: var(--word-accent); background: var(--word-surface); }
+.proto-page .family-cards h3 { margin-bottom: 6px; font-size: 16px; }
+.proto-page .family-cards p { font-size: 14px; line-height: 1.65; }
+.proto-page .test-choices { display: grid; gap: 8px; min-width: 0; padding: 0; border: 0; }
+.proto-page .test-choices legend { padding-bottom: 8px; font-size: 14px; }
+.proto-page .test-choice { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--word-border); border-radius: 8px; cursor: pointer; }
+.proto-page .test-choice input { width: 18px; height: 18px; accent-color: var(--word-accent); }
+.proto-page .test-choice:has(input:checked) { border-color: var(--word-accent); background: var(--word-surface); }
+.proto-page .reveal-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; font-size: 14px; color: var(--word-heading); }
+.proto-page .reveal-btn:disabled { cursor: default; opacity: 0.45; }
+.proto-page .test-feedback { margin-top: 8px; font-size: 14px; font-weight: 500; }
+.proto-page .test-options .opt { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 4px 8px; padding: 8px 0; }
+.proto-page .test-options .opt .reason { grid-column: 2; }
+.proto-page .test-options .opt.chosen { border-bottom: 2px solid var(--word-accent); }
+.proto-page button:focus-visible, .proto-page summary:focus-visible, .proto-page a:focus-visible { outline: 2px solid var(--word-accent); outline-offset: 2px; }
+
+@media (max-width: 768px) {
+  .word-dialog .proto-page .card { padding-top: max(16px, env(safe-area-inset-top)); padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+  .proto-page .etymology, .proto-page .scene p, .proto-page .test-blank, .proto-page .test-options, .proto-page .boundary-note { font-size: 14px; }
 }

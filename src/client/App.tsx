@@ -37,6 +37,11 @@ const pageFallback = (
 
 function AppContent() {
   const theme = useAppStore((s) => s.theme);
+  const uiLanguage = useAppStore((s) => s.uiLanguage);
+
+  useEffect(() => {
+    document.documentElement.lang = uiLanguage;
+  }, [uiLanguage]);
 
   useEffect(() => {
     applyTheme(theme);

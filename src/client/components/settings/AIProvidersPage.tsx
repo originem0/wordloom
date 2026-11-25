@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Cpu, Loader2, PlayCircle, Zap } from "lucide-react";
 import { toast } from "sonner";
-import { apiPost } from "@/client/lib/api";
+import { ApiError, apiPost } from "@/client/lib/api";
+import { errorMessage, useI18n } from "@/client/lib/i18n";
 import { Button } from "@/client/components/ui/button";
 import { Input } from "@/client/components/ui/input";
 import { Badge } from "@/client/components/ui/badge";
 import { useSettings, useUpdateSetting } from "@/client/hooks/useSettings";
+import { settingTestError } from "./setting-test-error";
 import {
   StatusDot,
   SectionHeader,
@@ -22,13 +24,13 @@ type ProviderType = "gemini" | "openai";
 const PROVIDERS: ProviderType[] = ["gemini", "openai"];
 
 const ROUTES = [
-  { key: "cards", label: "Cards", subtitle: "短 JSON、稳定结构", testTarget: "cardsModel" },
-  { key: "deep", label: "Deep Analysis", subtitle: "长 JSON、schemaAnalysis、SVG", testTarget: "deepModel" },
-  { key: "utility", label: "Utility", subtitle: "抽词、轻量文本", testTarget: "utilityModel" },
+  { key: "cards", label: ["词卡", "Cards"], subtitle: ["生成词义、音标和例句", "Generate meanings, pronunciation and examples"], testTarget: "cardsModel" },
+  { key: "deep", label: ["深度分析", "Deep Analysis"], subtitle: ["补充意象图、近义词对比和边界测试", "Add core images, word comparisons and boundary tests"], testTarget: "deepModel" },
+  { key: "utility", label: ["辅助任务", "Utility"], subtitle: ["从文本中挑词并做简短整理", "Extract words and organise short text"], testTarget: "utilityModel" },
   // No probe of its own: it is tested as a cards call on this row's provider and model.
   // `once` suppresses the fallback controls: expressions and conversation
   // stay on the selected model, even when a conversation call is retried.
-  { key: "expressions", label: "Expressions", subtitle: "表达库与对谈。留空的项沿用 Cards 路由", testTarget: "cardsModel", inherits: "cards", once: true },
+  { key: "expressions", label: ["表达", "Expressions"], subtitle: ["表达库与对谈。留空的项沿用词卡路由", "Expressions and Conversation. Empty fields inherit the Cards route"], testTarget: "cardsModel", inherits: "cards", once: true },
 ] as const;
 
 const GEMINI_DEFAULTS: Record<string, string> = {
@@ -83,6 +85,7 @@ function roleCandidates(models: string[], role: string) {
 }
 
 export function AIProvidersPage() {
+  const { t } = useI18n();
   const settingsQuery = useSettings();
   const updateSetting = useUpdateSetting();
   const settings = settingsQuery.data;
@@ -162,24 +165,24 @@ export function AIProvidersPage() {
       const payload: Record<string, unknown> = { target: "listModels", baseUrl: draftValue("gemini_base_url"), verify: true };
       if (drafts.gemini_api_key?.trim()) payload.apiKey = drafts.gemini_api_key.trim();
       const res = await apiPost<SettingTestResponse>("/api/settings/test", payload);
-      if (!res.ok) { toast.error(res.error?.message || "Gemini model detection failed"); return; }
+      if (!res.ok) { toast.error(t(`Gemini 模型识别失败：${settingTestError(res)}`, `Gemini model detection failed: ${settingTestError(res)}`)); return; }
       const { models, totalListed } = readModelList(res.result);
       setGeminiModels(models);
       try { sessionStorage.setItem("wordloom:ai-gemini-models", JSON.stringify({ models, ts: Date.now() })); } catch { /* cache is best-effort (private mode / quota) */ }
       if (models.length > 0) {
         const msg = totalListed > models.length
-          ? `${models.length} usable models (${totalListed - models.length} filtered out)`
-          : `${models.length} models verified`;
+          ? t(`${models.length} 个可用模型，已过滤 ${totalListed - models.length} 个`, `${models.length} usable model${models.length === 1 ? "" : "s"} (${totalListed - models.length} filtered out)`)
+          : t(`${models.length} 个模型已验证`, `${models.length} model${models.length === 1 ? "" : "s"} verified`);
         toast.success(msg);
       } else {
-        toast.error(totalListed > 0 ? `Listed ${totalListed} models but none responded` : "Connected, no models returned");
+        toast.error(totalListed > 0 ? t(`找到 ${totalListed} 个模型，但都没有回应`, `Listed ${totalListed} models but none responded`) : t("已连接，但没有返回模型", "Connected, no models returned"));
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(errorMessage(e));
     } finally {
       setDetectingGemini(false);
     }
-  }, [draftValue, drafts.gemini_api_key]);
+  }, [draftValue, drafts.gemini_api_key, t]);
 
   const detectOpenaiModels = useCallback(async () => {
     setDetectingOpenai(true);
@@ -187,24 +190,24 @@ export function AIProvidersPage() {
       const payload: Record<string, unknown> = { target: "openaiListModels", baseUrl: draftValue("openai_base_url"), verify: true };
       if (drafts.openai_api_key?.trim()) payload.apiKey = drafts.openai_api_key.trim();
       const res = await apiPost<SettingTestResponse>("/api/settings/test", payload);
-      if (!res.ok) { toast.error(res.error?.message || "OpenAI model detection failed"); return; }
+      if (!res.ok) { toast.error(t(`OpenAI 模型识别失败：${settingTestError(res)}`, `OpenAI model detection failed: ${settingTestError(res)}`)); return; }
       const { models, totalListed } = readModelList(res.result);
       setOpenaiModels(models);
       try { sessionStorage.setItem("wordloom:ai-openai-models", JSON.stringify({ models, ts: Date.now() })); } catch { /* cache is best-effort (private mode / quota) */ }
       if (models.length > 0) {
         const msg = totalListed > models.length
-          ? `${models.length} usable models (${totalListed - models.length} filtered out)`
-          : `${models.length} models verified`;
+          ? t(`${models.length} 个可用模型，已过滤 ${totalListed - models.length} 个`, `${models.length} usable model${models.length === 1 ? "" : "s"} (${totalListed - models.length} filtered out)`)
+          : t(`${models.length} 个模型已验证`, `${models.length} model${models.length === 1 ? "" : "s"} verified`);
         toast.success(msg);
       } else {
-        toast.error(totalListed > 0 ? `Listed ${totalListed} models but none responded` : "Connected, no models returned");
+        toast.error(totalListed > 0 ? t(`找到 ${totalListed} 个模型，但都没有回应`, `Listed ${totalListed} models but none responded`) : t("已连接，但没有返回模型", "Connected, no models returned"));
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(errorMessage(e));
     } finally {
       setDetectingOpenai(false);
     }
-  }, [draftValue, drafts.openai_api_key]);
+  }, [draftValue, drafts.openai_api_key, t]);
 
   // --- Per-route test ---
   const testRoute = useCallback(async (routeKey: string, target: string, model: string, provider: ProviderType) => {
@@ -221,17 +224,23 @@ export function AIProvidersPage() {
       }
       const res = await apiPost<SettingTestResponse>("/api/settings/test", payload);
       setRouteHealth((prev) => ({ ...prev, [healthKey]: res }));
+      const route = ROUTES.find((item) => item.key === routeKey);
+      const label = route ? t(route.label[0], route.label[1]) : routeKey;
       toast[res.ok ? "success" : "error"](
-        res.ok ? `${routeKey}: ${model} OK ${res.latencyMs ?? ""}ms` : `${routeKey}: ${res.error?.message ?? "failed"}`,
+        res.ok ? t(`${label}：${model} 已通过 ${res.latencyMs ?? ""}ms`, `${label}: ${model} OK ${res.latencyMs ?? ""}ms`)
+          : t(`${label} 测试失败：${settingTestError(res)}`, `${label} test failed: ${settingTestError(res)}`),
       );
     } catch (e) {
-      const fail: SettingTestResponse = { ok: false, error: { message: e instanceof Error ? e.message : String(e) } };
+      const fail: SettingTestResponse = { ok: false, error: {
+        message: e instanceof Error ? e.message : "",
+        ...(e instanceof ApiError ? { status: e.status, code: e.code } : {}),
+      } };
       setRouteHealth((prev) => ({ ...prev, [healthKey]: fail }));
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(errorMessage(e));
     } finally {
       setTestingSingle(null);
     }
-  }, [draftValue, drafts.gemini_api_key, drafts.openai_api_key]);
+  }, [draftValue, drafts.gemini_api_key, drafts.openai_api_key, t]);
 
   const testAllRoutes = useCallback(async () => {
     setTestingAll(true);
@@ -275,14 +284,14 @@ export function AIProvidersPage() {
         if (pair.value.trim() === "configured") continue;
         await updateSetting.mutateAsync({ key: pair.key, value: pair.value.trim() });
       }
-      toast.success("AI provider settings saved");
+      toast.success(t("AI 配置已保存", "AI provider settings saved"));
       setDrafts((prev) => ({ ...prev, rime_api_key: "" }));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(errorMessage(e));
     } finally {
       setSaving(false);
     }
-  }, [drafts, draftValue, updateSetting]);
+  }, [drafts, draftValue, updateSetting, t]);
 
   // --- Model picker ---
   const modelField = (
@@ -315,12 +324,13 @@ export function AIProvidersPage() {
           <div className="flex items-center justify-between">
             <div className="text-[13px] font-medium text-foreground">{label}</div>
             {hasDetected && (
-              <button type="button" onClick={() => setManualInput((p) => ({ ...p, [key]: false }))} className="text-[10px] text-sky-500 hover:underline">
-                ← pick from list
+              <button type="button" onClick={() => setManualInput((p) => ({ ...p, [key]: false }))} className="min-h-11 rounded-md px-2 text-sm text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring">
+                {t("从列表选择", "Pick from list")}
               </button>
             )}
           </div>
           <Input
+            aria-label={label}
             value={current}
             onChange={(e) => setDraft(key, e.target.value)}
             placeholder={placeholder}
@@ -337,17 +347,17 @@ export function AIProvidersPage() {
           <div className="text-[13px] font-medium text-foreground">{label}</div>
           <div className="flex items-center gap-2">
             {hiddenCount > 0 && (
-              <button type="button" onClick={() => setShowAllCandidates((p) => ({ ...p, [key]: !showAll }))} className="text-[10px] text-sky-500 hover:underline">
-                {showAll ? "show less" : `show all (+${hiddenCount})`}
+              <button type="button" onClick={() => setShowAllCandidates((p) => ({ ...p, [key]: !showAll }))} className="min-h-11 rounded-md px-2 text-sm text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring">
+                {showAll ? t("收起", "Show less") : t(`显示全部（另有 ${hiddenCount} 项）`, `Show all (+${hiddenCount})`)}
               </button>
             )}
-            <button type="button" onClick={() => setManualInput((p) => ({ ...p, [key]: true }))} className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground">
-              type manually
+            <button type="button" onClick={() => setManualInput((p) => ({ ...p, [key]: true }))} className="min-h-11 rounded-md px-2 text-sm text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring">
+              {t("手动输入", "Type manually")}
             </button>
           </div>
         </div>
-        <select className={`${SELECT_CLASS} font-mono`} value={current} onChange={(e) => setDraft(key, e.target.value)}>
-          {allowEmpty && <option value="">— inherit default —</option>}
+        <select aria-label={label} className={`${SELECT_CLASS} font-mono`} value={current} onChange={(e) => setDraft(key, e.target.value)}>
+          {allowEmpty && <option value="">{t("沿用默认设置", "Inherit default")}</option>}
           {visibleOptions.map((m) => (<option key={m} value={m}>{m}</option>))}
         </select>
         {helper && <div className="text-[11px] text-muted-foreground/60">{helper}</div>}
@@ -370,14 +380,14 @@ export function AIProvidersPage() {
 
   if (settingsQuery.isLoading && !initialized) {
     return (
-      <div className="flex items-center justify-center p-12">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      <div className="flex items-center justify-center p-12" role="status" aria-label={t("正在加载 AI 配置", "Loading AI settings")}>
+        <Loader2 aria-hidden className="size-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   if (settingsQuery.error) {
-    return <div className="p-6 text-destructive">Failed to load settings: {settingsQuery.error.message}</div>;
+    return <div className="p-6 text-destructive" role="alert">{t("配置加载失败", "Failed to load settings")}: {errorMessage(settingsQuery.error)}</div>;
   }
 
   const getRouteModelKey = (routeKey: string, provider: ProviderType, suffix: string) =>
@@ -385,20 +395,21 @@ export function AIProvidersPage() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 pt-6 pb-24 md:px-6">
-      <h1 className="text-xl font-semibold text-foreground">AI Providers</h1>
+      <h1 className="text-2xl font-semibold text-foreground">{t("AI 配置", "AI Providers")}</h1>
 
       {/* ══════════ GEMINI CONNECTION ══════════ */}
-      <SectionHeader>Gemini Connection</SectionHeader>
+      <SectionHeader>{t("Gemini 连接", "Gemini Connection")}</SectionHeader>
 
       <SettingRow
-        title="API Key"
-        subtitle="留空表示保留已保存的 key"
-        right={<Badge variant={hasGeminiKey ? "outline" : "destructive"} className="rounded-md text-[10px]">{hasGeminiKey ? "saved" : "missing"}</Badge>}
+        title={t("API 密钥", "API Key")}
+        subtitle={t("留空保留已保存的密钥", "Leave empty to keep the saved key")}
+        right={<Badge variant={hasGeminiKey ? "outline" : "destructive"} className="rounded-md text-[10px]">{hasGeminiKey ? t("已保存", "Saved") : t("未设置", "Missing")}</Badge>}
         defaultOpen={!hasGeminiKey}
       >
         <Input
           type="password"
-          placeholder={hasGeminiKey ? "Saved — type to replace" : "Enter Gemini / relay API key"}
+          aria-label={t("Gemini API 密钥", "Gemini API Key")}
+          placeholder={hasGeminiKey ? t("已保存，输入以替换", "Saved, type to replace") : t("输入 Gemini 或中转站 API 密钥", "Enter Gemini / relay API key")}
           value={drafts.gemini_api_key ?? ""}
           onChange={(e) => setDraft("gemini_api_key", e.target.value)}
           className={INPUT_CLASS}
@@ -406,29 +417,30 @@ export function AIProvidersPage() {
       </SettingRow>
 
       <SettingRow
-        title="Base URL"
-        subtitle="官方 API 留空；中转站填根地址"
-        value={draftValue("gemini_base_url") || "official"}
+        title={t("基础地址", "Base URL")}
+        subtitle={t("官方 API 留空；中转站填根地址", "Leave empty for the official API; enter a relay's root URL")}
+        value={draftValue("gemini_base_url") || t("官方 API", "official")}
       >
         <Input
+          aria-label={t("Gemini 基础地址", "Gemini Base URL")}
           value={draftValue("gemini_base_url")}
           onChange={(e) => setDraft("gemini_base_url", e.target.value)}
-          placeholder="Leave empty for Google official API"
+          placeholder={t("留空使用 Google 官方 API", "Leave empty for Google official API")}
           className={`${INPUT_CLASS} font-mono text-sm`}
         />
       </SettingRow>
 
-      <SettingRow title="Models" value={`${geminiModels.length} detected`}>
+      <SettingRow title={t("模型", "Models")} value={t(`已识别 ${geminiModels.length} 个`, `${geminiModels.length} detected`)}>
         <div className="space-y-2">
           {geminiModels.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
               {geminiModels.slice(0, 12).map((m) => (
                 <span key={m} className="rounded-md border border-border/60 bg-background/80 px-2 py-0.5 text-[11px] text-muted-foreground">{m}</span>
               ))}
-              {geminiModels.length > 12 && <span className="rounded-md border border-border/60 bg-background/80 px-2 py-0.5 text-[11px] text-muted-foreground">+{geminiModels.length - 12} more</span>}
+              {geminiModels.length > 12 && <span className="rounded-md border border-border/60 bg-background/80 px-2 py-0.5 text-[11px] text-muted-foreground">{t(`另有 ${geminiModels.length - 12} 个`, `+${geminiModels.length - 12} more`)}</span>}
             </div>
           ) : (
-            <div className="text-[11px] text-muted-foreground/60">Click Detect Models below.</div>
+            <div className="text-[11px] text-muted-foreground/60">{t("点击下方按钮识别模型。", "Click Detect & Verify below.")}</div>
           )}
         </div>
       </SettingRow>
@@ -436,22 +448,23 @@ export function AIProvidersPage() {
       <div className="flex flex-wrap gap-2 py-3">
         <Button size="sm" variant="outline" onClick={detectGeminiModels} disabled={detectingGemini}>
           {detectingGemini ? <Loader2 className="size-3.5 animate-spin" /> : <Cpu className="size-3.5" />}
-          Detect & Verify
+          {detectingGemini ? t("正在识别…", "Detecting…") : t("识别并验证", "Detect & Verify")}
         </Button>
       </div>
 
       {/* ══════════ OPENAI CONNECTION ══════════ */}
-      <SectionHeader>OpenAI-Compatible Connection</SectionHeader>
+      <SectionHeader>{t("OpenAI 兼容连接", "OpenAI-Compatible Connection")}</SectionHeader>
 
       <SettingRow
-        title="API Key"
-        subtitle="DeepSeek / GLM / Kimi / 中转站的 key"
-        right={<Badge variant={hasOpenaiKey ? "outline" : "destructive"} className="rounded-md text-[10px]">{hasOpenaiKey ? "saved" : "missing"}</Badge>}
+        title={t("API 密钥", "API Key")}
+        subtitle={t("DeepSeek / GLM / Kimi / 中转站的密钥", "API key for DeepSeek / GLM / Kimi / a relay")}
+        right={<Badge variant={hasOpenaiKey ? "outline" : "destructive"} className="rounded-md text-[10px]">{hasOpenaiKey ? t("已保存", "Saved") : t("未设置", "Missing")}</Badge>}
         defaultOpen={!hasOpenaiKey}
       >
         <Input
           type="password"
-          placeholder={hasOpenaiKey ? "Saved — type to replace" : "Enter OpenAI-compatible API key"}
+          aria-label={t("OpenAI API 密钥", "OpenAI API Key")}
+          placeholder={hasOpenaiKey ? t("已保存，输入以替换", "Saved, type to replace") : t("输入 OpenAI 兼容 API 密钥", "Enter OpenAI-compatible API key")}
           value={drafts.openai_api_key ?? ""}
           onChange={(e) => setDraft("openai_api_key", e.target.value)}
           className={INPUT_CLASS}
@@ -459,12 +472,13 @@ export function AIProvidersPage() {
       </SettingRow>
 
       <SettingRow
-        title="Base URL"
-        subtitle="如 https://api.deepseek.com"
-        value={draftValue("openai_base_url") || "(not set)"}
+        title={t("基础地址", "Base URL")}
+        subtitle={t("例如 https://api.deepseek.com", "For example, https://api.deepseek.com")}
+        value={draftValue("openai_base_url") || t("未设置", "(not set)")}
         defaultOpen={!draftValue("openai_base_url")}
       >
         <Input
+          aria-label={t("OpenAI 基础地址", "OpenAI Base URL")}
           value={draftValue("openai_base_url")}
           onChange={(e) => setDraft("openai_base_url", e.target.value)}
           placeholder="https://api.deepseek.com"
@@ -472,17 +486,17 @@ export function AIProvidersPage() {
         />
       </SettingRow>
 
-      <SettingRow title="Models" value={`${openaiModels.length} detected`}>
+      <SettingRow title={t("模型", "Models")} value={t(`已识别 ${openaiModels.length} 个`, `${openaiModels.length} detected`)}>
         <div className="space-y-2">
           {openaiModels.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
               {openaiModels.slice(0, 12).map((m) => (
                 <span key={m} className="rounded-md border border-border/60 bg-background/80 px-2 py-0.5 text-[11px] text-muted-foreground">{m}</span>
               ))}
-              {openaiModels.length > 12 && <span className="rounded-md border border-border/60 bg-background/80 px-2 py-0.5 text-[11px] text-muted-foreground">+{openaiModels.length - 12} more</span>}
+              {openaiModels.length > 12 && <span className="rounded-md border border-border/60 bg-background/80 px-2 py-0.5 text-[11px] text-muted-foreground">{t(`另有 ${openaiModels.length - 12} 个`, `+${openaiModels.length - 12} more`)}</span>}
             </div>
           ) : (
-            <div className="text-[11px] text-muted-foreground/60">Click Detect Models below.</div>
+            <div className="text-[11px] text-muted-foreground/60">{t("点击下方按钮识别模型。", "Click Detect & Verify below.")}</div>
           )}
         </div>
       </SettingRow>
@@ -490,17 +504,17 @@ export function AIProvidersPage() {
       <div className="flex flex-wrap gap-2 py-3">
         <Button size="sm" variant="outline" onClick={detectOpenaiModels} disabled={detectingOpenai}>
           {detectingOpenai ? <Loader2 className="size-3.5 animate-spin" /> : <Cpu className="size-3.5" />}
-          Detect & Verify
+          {detectingOpenai ? t("正在识别…", "Detecting…") : t("识别并验证", "Detect & Verify")}
         </Button>
       </div>
 
       {/* ══════════ MODEL ROUTING ══════════ */}
-      <SectionHeader>Model Routing</SectionHeader>
+      <SectionHeader>{t("模型路由", "Model Routing")}</SectionHeader>
 
       <div className="flex flex-wrap gap-2 py-2 mb-1">
         <Button size="sm" variant="outline" onClick={testAllRoutes} disabled={testingAll}>
           {testingAll ? <Loader2 className="size-3.5 animate-spin" /> : <PlayCircle className="size-3.5" />}
-          Test All Routes
+          {testingAll ? t("正在测试…", "Testing…") : t("测试全部路由", "Test All Routes")}
         </Button>
       </div>
 
@@ -511,31 +525,32 @@ export function AIProvidersPage() {
         const candidates = roleCandidates(models, follows ? route.inherits : route.key);
         const primaryKey = getRouteModelKey(route.key, provider, "model");
         const fallbackKey = getRouteModelKey(route.key, provider, "fallback_model");
-        const runtimeModel = model || "(not set)";
+        const runtimeModel = model || t("未设置", "(not set)");
         const health = routeHealth[route.key];
         const healthLabel = health
           ? health.ok
             ? `${health.latencyMs ?? ""}ms`
-            : (health.error?.message ?? "failed").slice(0, 40)
+            : settingTestError(health).slice(0, 40)
           : null;
 
         return (
           <SettingRow
             key={route.key}
-            title={route.label}
-            subtitle={route.subtitle}
+            stackOnMobile
+            title={t(route.label[0], route.label[1])}
+            subtitle={t(route.subtitle[0], route.subtitle[1])}
             right={
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 max-w-full items-center gap-2">
                 <button
                   type="button"
-                  title={`Test ${route.label}`}
-                  disabled={testingSingle === route.key || testingAll}
+                  title={t(`测试${route.label[0]}`, `Test ${route.label[1]}`)}
+                  disabled={!model || testingSingle === route.key || testingAll}
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    testRoute(route.key, route.testTarget, runtimeModel, provider);
+                    testRoute(route.key, route.testTarget, model, provider);
                   }}
-                  className="rounded-md p-1 text-muted-foreground/40 hover:text-sky-500 hover:bg-sky-500/10 disabled:opacity-40 transition-colors"
+                  className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40 transition-colors focus-visible:outline-2 focus-visible:outline-ring"
                 >
                   {testingSingle === route.key ? <Loader2 className="size-3 animate-spin" /> : <Zap className="size-3" />}
                 </button>
@@ -546,63 +561,64 @@ export function AIProvidersPage() {
                   </span>
                 )}
                 <Badge variant="outline" className="rounded-md text-[10px]">{provider}</Badge>
-                <span className="text-[12px] text-muted-foreground">{runtimeModel}</span>
+                <span className="min-w-0 max-w-[220px] truncate text-[12px] text-muted-foreground" title={runtimeModel}>{runtimeModel}</span>
               </div>
             }
           >
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <div className="text-[13px] font-medium text-foreground">Provider</div>
+                <div className="text-[13px] font-medium text-foreground">{t("提供方", "Provider")}</div>
                 <select
                   className={SELECT_CLASS}
+                  aria-label={t(`${route.label[0]}提供方`, `${route.label[1]} Provider`)}
                   value={follows ? draftValue(`${route.key}_provider`) : provider}
                   onChange={(e) => setDraft(`${route.key}_provider`, e.target.value)}
                 >
-                  {follows && <option value="">沿用 Cards</option>}
-                  {PROVIDERS.map((p) => (<option key={p} value={p}>{p === "gemini" ? "Gemini" : "OpenAI-compatible"}</option>))}
+                  {follows && <option value="">{t("沿用词卡", "Inherit Cards")}</option>}
+                  {PROVIDERS.map((p) => (<option key={p} value={p}>{p === "gemini" ? "Gemini" : t("OpenAI 兼容", "OpenAI-compatible")}</option>))}
                 </select>
               </div>
-              {modelField(primaryKey, "Primary Model", provider === "gemini" || follows ? "Leave empty to inherit" : "e.g. deepseek-chat", candidates, undefined, provider === "gemini" || follows)}
+              {modelField(primaryKey, t("主模型", "Primary Model"), provider === "gemini" || follows ? t("留空沿用默认设置", "Leave empty to inherit") : t("例如 deepseek-chat", "e.g. deepseek-chat"), candidates, undefined, provider === "gemini" || follows)}
               {"once" in route ? (
-                <div className="text-[11px] text-muted-foreground/60">这条路由使用上面选定的模型，没有后备模型。</div>
+                <div className="text-[11px] text-muted-foreground/60">{t("这条路由使用上面选定的模型，没有后备模型。", "This route uses the selected model without a fallback.")}</div>
               ) : (
-                modelField(fallbackKey, "Fallback Model", "Optional", candidates, "Primary 失败后尝试。", true)
+                modelField(fallbackKey, t("后备模型", "Fallback Model"), t("可选", "Optional"), candidates, t("主模型失败后尝试。", "Used when the primary model fails."), true)
               )}
             </div>
           </SettingRow>
         );
       })}
 
-      <SectionHeader>Rime Speech</SectionHeader>
+      <SectionHeader>{t("Rime 朗读", "Rime Speech")}</SectionHeader>
       <SettingRow
-        title="API Key" subtitle="只在对谈里点击听语音时播放。留空保留已保存的 key。"
-        right={<Badge variant={hasRimeKey ? "outline" : "destructive"} className="rounded-md text-[10px]">{hasRimeKey ? "saved" : "missing"}</Badge>}
+        title={t("API 密钥", "API Key")} subtitle={t("只在对谈里点击听语音时播放。留空保留已保存的密钥。", "Only plays when you click Listen in Conversation. Leave empty to keep the saved key.")}
+        right={<Badge variant={hasRimeKey ? "outline" : "destructive"} className="rounded-md text-[10px]">{hasRimeKey ? t("已保存", "Saved") : t("未设置", "Missing")}</Badge>}
         defaultOpen={!hasRimeKey}
       >
         <Input
-          type="password" aria-label="Rime API Key" autoComplete="new-password"
-          placeholder={hasRimeKey ? "Saved — type to replace" : "Enter Rime API key"}
+          type="password" aria-label={t("Rime API 密钥", "Rime API Key")} autoComplete="new-password"
+          placeholder={hasRimeKey ? t("已保存，输入以替换", "Saved, type to replace") : t("输入 Rime API 密钥", "Enter Rime API key")}
           value={drafts.rime_api_key ?? ""} onChange={(e) => setDraft("rime_api_key", e.target.value)} className={INPUT_CLASS}
         />
-        <a href="https://app.rime.ai/tokens/" target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-muted-foreground underline">Rime API Tokens</a>
+        <a href="https://app.rime.ai/tokens/" target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-muted-foreground underline">{t("获取 Rime API 密钥", "Rime API Tokens")}</a>
       </SettingRow>
-      <SettingRow title="Voice" value={`${draftValue("rime_speaker")} · ${draftValue("rime_speed")}×`}>
+      <SettingRow title={t("声音", "Voice")} value={`${draftValue("rime_speaker")} · ${draftValue("rime_speed")}×`}>
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="space-y-1.5 text-[13px] font-medium text-foreground">
-            <span>Model</span>
-            <select aria-label="Rime Model" className={SELECT_CLASS} value={draftValue("rime_model")} onChange={(e) => setDraft("rime_model", e.target.value)}>
+            <span>{t("模型", "Model")}</span>
+            <select aria-label={t("Rime 模型", "Rime Model")} className={SELECT_CLASS} value={draftValue("rime_model")} onChange={(e) => setDraft("rime_model", e.target.value)}>
               <option value="coda">Coda</option><option value="mist">Mist v3</option>
             </select>
           </label>
           <label className="space-y-1.5 text-[13px] font-medium text-foreground">
-            <span>Voice</span>
-            <select aria-label="Rime Voice" className={SELECT_CLASS} value={draftValue("rime_speaker")} onChange={(e) => setDraft("rime_speaker", e.target.value)}>
+            <span>{t("声音", "Voice")}</span>
+            <select aria-label={t("Rime 声音", "Rime Voice")} className={SELECT_CLASS} value={draftValue("rime_speaker")} onChange={(e) => setDraft("rime_speaker", e.target.value)}>
               <option value="astra">Astra</option><option value="luna">Luna</option>
             </select>
           </label>
           <label className="space-y-1.5 text-[13px] font-medium text-foreground">
-            <span>Speed</span>
-            <select aria-label="Rime Speed" className={SELECT_CLASS} value={draftValue("rime_speed")} onChange={(e) => setDraft("rime_speed", e.target.value)}>
+            <span>{t("语速", "Speed")}</span>
+            <select aria-label={t("Rime 语速", "Rime Speed")} className={SELECT_CLASS} value={draftValue("rime_speed")} onChange={(e) => setDraft("rime_speed", e.target.value)}>
               <option value="0.8">0.8×</option><option value="1">1×</option><option value="1.2">1.2×</option>
             </select>
           </label>
@@ -613,10 +629,10 @@ export function AIProvidersPage() {
       {isDirty && (
         <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border/60 bg-background/95 backdrop-blur px-4 py-3">
           <div className="mx-auto flex max-w-2xl items-center justify-between">
-            <span className="text-[12px] text-muted-foreground">Unsaved changes</span>
+            <span className="text-[12px] text-muted-foreground">{t("有未保存的修改", "Unsaved changes")}</span>
             <Button className={PRIMARY_BUTTON} onClick={saveAll} disabled={saving}>
               {saving && <Loader2 className="size-4 animate-spin" />}
-              Save Changes
+              {t("保存修改", "Save Changes")}
             </Button>
           </div>
         </div>

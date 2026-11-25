@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -8,6 +8,13 @@ import { toast } from "sonner";
 import type { TalkThread, TalkTurn } from "@/shared/expressions";
 import { TalkPage } from "../TalkPage";
 import { useOpenThread } from "../shared";
+import { useAppStore } from "@/client/store";
+
+// Node 26 has no localStorage without --localstorage-file. Persistence is not
+// under test here; keep only the language preference in this test process.
+useAppStore.persist.setOptions({ storage: {
+  getItem: () => null, setItem: () => {}, removeItem: () => {},
+} });
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 
@@ -75,6 +82,7 @@ const asked = (method: string, url: string) => requests.filter((r) => r.method =
 const posted = () => asked("POST", "/api/expressions/talk").map((r) => r.body);
 
 beforeEach(() => {
+  useAppStore.setState({ uiLanguage: "zh-CN" });
   server = { authenticated: true, configured: true, turns: [], next: [], failReads: 0 };
   requests = [];
   useOpenThread.setState({ thread: undefined, visit: 0 });
@@ -90,7 +98,7 @@ beforeEach(() => {
   );
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); useAppStore.setState({ uiLanguage: "zh-CN" }); });
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } });
@@ -108,6 +116,27 @@ const picker = () => screen.getByRole<HTMLSelectElement>("combobox", { name: "�
 const shown = () => document.body.textContent!;
 const click = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
 const enter = (init: object = {}) => fireEvent.keyDown(box(), { key: "Enter", ...init });
+
+it("changes labels and date formatting without reloading the conversation or clearing its draft", async () => {
+  server.turns = [...OLD, ...LATEST];
+  renderPage();
+  await screen.findByText("latest question");
+  const draft = box();
+  fireEvent.change(draft, { target: { value: "我还没写完 this thought" } });
+  const previousRequests = requests.length;
+  act(() => useAppStore.getState().setUiLanguage("en"));
+  expect(screen.getByRole("heading", { name: "Conversation" })).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Say something" })).toBe(draft);
+  expect(draft).toHaveValue("我还没写完 this thought");
+  expect(screen.getByText("latest question")).toBeInTheDocument();
+  const selected = screen.getByRole<HTMLSelectElement>("combobox", { name: "Conversation" });
+  expect(selected).toHaveValue(String(D24));
+  expect(selected.selectedOptions[0].textContent).toContain(new Date(D24 + 60_000).toLocaleDateString("en-US"));
+  expect(requests).toHaveLength(previousRequests);
+  act(() => useAppStore.getState().setUiLanguage("zh-CN"));
+  expect(box()).toBe(draft);
+  expect(draft).toHaveValue("我还没写完 this thought");
+});
 
 describe("streamed replies", () => {
   const openedStream = () => {
@@ -228,7 +257,7 @@ describe("opening the page", () => {
     server.turns = [...LATEST];
     vi.mocked(fetch).mockImplementationOnce(async () => json({ authenticated: true })).mockImplementationOnce(async () => json({ error: "boom" }, 500));
     renderPage();
-    expect(await screen.findByText("读取失败：boom")).toBeInTheDocument();
+    expect(await screen.findByText("读取失败：服务暂时不可用（HTTP 500）。")).toBeInTheDocument();
     expect(box()).toBeInTheDocument();
   });
 });
@@ -373,7 +402,7 @@ describe("a message that got no answer", () => {
     await openNew();
     server.next.push({ status: 400, body: { error: "Invalid request", code: "VALIDATION_ERROR" } });
     say("Hello");
-    expect(await screen.findByRole("alert")).toHaveTextContent("没有发出去：Invalid request。 这句话没有记下");
+    expect(await screen.findByRole("alert")).toHaveTextContent("没有发出去：请检查填写的内容。 这句话没有记下");
   });
 
   it("can be sent again as it is, and the line about the failure goes", async () => {
@@ -485,7 +514,7 @@ describe("the conversations", () => {
     server.turns = [...LATEST];
     server.failReads = 1;
     renderPage();
-    expect(await screen.findByText(/读取失败：boom/)).toBeInTheDocument();
+    expect(await screen.findByText(/读取失败：服务暂时不可用（HTTP 500）。/)).toBeInTheDocument();
     click("重试");
     expect(await screen.findByText("reply to latest follow-up")).toBeInTheDocument();
   });

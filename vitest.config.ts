@@ -28,6 +28,6 @@ export default defineConfig({
     // A shared-cache memory database is process-wide: worker threads would all
     // write into the same one. Forks give every test file its own process.
     pool: "forks",
-    setupFiles: ["src/server/__tests__/memory-db.setup.ts"],
+    setupFiles: ["src/server/__tests__/memory-db.setup.ts", "src/client/__tests__/storage.setup.ts"],
   },
 });

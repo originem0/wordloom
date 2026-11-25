@@ -28,6 +28,16 @@ export function useExtractWords() {
   });
 }
 
+/** List rows seed a card opened there; a shared URL can also load it directly. */
+export function useCard(id: number | null, initialData?: Card) {
+  return useQuery({
+    queryKey: ["cards", "detail", id],
+    queryFn: () => apiFetch<Card>(`/api/cards/${id}`),
+    enabled: id !== null,
+    initialData,
+  });
+}
+
 export function useGenerateDeep() {
   const qc = useQueryClient();
   return useMutation({

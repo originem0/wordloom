@@ -4,6 +4,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { MemoryRouter } from "react-router-dom";
 import { DRAFT_SETTING_KEY } from "@/shared/expressions";
+import { useAppStore } from "@/client/store";
 
 let saved: Record<string, string>;
 let isAdmin: boolean;
@@ -26,6 +27,7 @@ const draftSwitch = () => screen.getByRole("checkbox", { name: /帮我起草/ })
 const written = () => mutateAsync.mock.calls.map(([change]) => change).filter((change) => change.key === DRAFT_SETTING_KEY);
 
 beforeEach(() => {
+  useAppStore.setState({ uiLanguage: "zh-CN" });
   mutateAsync.mockClear();
   isAdmin = true;
   saved = {};
@@ -40,16 +42,16 @@ describe("the switch for 帮我起草", () => {
     expect(screen.getByText("表达：帮我起草")).toBeInTheDocument();
     expect(screen.getByText(/满两周.*见过.*20.*想用.*5.*自己打开/)).toBeInTheDocument();
     expect(draftSwitch()).not.toBeChecked();
-    expect(screen.queryByRole("button", { name: "Save Changes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "保存修改" })).toBeNull();
   });
 
   it('writes "1" through the page\'s own save', async () => {
     renderSettings();
     fireEvent.click(draftSwitch());
-    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+    expect(screen.getByText("1 项未保存的修改")).toBeInTheDocument();
     expect(written()).toEqual([]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
     await waitFor(() => expect(written()).toEqual([{ key: DRAFT_SETTING_KEY, value: "1" }]));
   });
 
@@ -59,7 +61,7 @@ describe("the switch for 帮我起草", () => {
     expect(draftSwitch()).toBeChecked();
 
     fireEvent.click(draftSwitch());
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
     await waitFor(() => expect(written()).toEqual([{ key: DRAFT_SETTING_KEY, value: "" }]));
   });
 

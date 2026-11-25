@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useI18n } from "@/client/lib/i18n";
 
 type State = "idle" | "loading" | "playing";
 type Problem = { message: string; setup?: boolean };
@@ -8,24 +9,32 @@ type Playback = { controller: AbortController; context: AudioContext; source: Au
 // One voice at a time, across every turn. Nothing is kept in browser storage.
 let active: { playback: Playback; stop: () => void } | null = null;
 
-const problems: Record<string, Problem> = {
-  "not configured": { message: "朗读还没配好。", setup: true },
-  timeout: { message: "语音等太久了，可以再点一次。" },
-  busy: { message: "语音服务正忙，稍后再点。" },
-  failed: { message: "没能生成语音，可以再点一次。" },
-};
+const problems = {
+  "not configured": ["朗读还没配好。", "Speech is not configured yet."],
+  timeout: ["语音等太久了，可以再点一次。", "Audio took too long. Click to try again."],
+  busy: ["语音服务正忙，稍后再点。", "The speech service is busy. Try again later."],
+  failed: ["没能生成语音，可以再点一次。", "Audio could not be generated. Click to try again."],
+  unsupported: ["这个浏览器暂时不能播放语音。", "This browser does not support audio playback."],
+  browser: ["浏览器没能播放语音。", "The browser could not play audio."],
+  expired: ["登录已失效。", "Your session has expired."],
+  empty: ["这条回复没有可以朗读的文字。", "This reply has no text to read aloud."],
+  missing: ["这条回复已经删掉了。", "This reply has been deleted."],
+  playback: ["没能播放语音，可以再点一次。", "Audio could not be played. Click to try again."],
+} as const;
+type ProblemCode = keyof typeof problems;
 
 class PlaybackError extends Error {
-  constructor(readonly problem: Problem) { super(problem.message); }
+  constructor(readonly problem: ProblemCode) { super(problem); }
 }
 
 /** A click activates the audio context before the network wait, so mobile
  * browsers recognize the playback as user initiated. Decoding uses Web Audio
  * without a blob URL, matching the app's existing content security policy. */
 export function useSpeech(turnId: number) {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const [state, setState] = useState<State>("idle");
-  const [error, setError] = useState<Problem | null>(null);
+  const [problem, setProblem] = useState<ProblemCode | null>(null);
   const playback = useRef<Playback | null>(null);
   const alive = useRef(true);
 
@@ -49,14 +58,14 @@ export function useSpeech(turnId: number) {
   const toggle = async () => {
     if (playback.current) { stop(); return; }
     active?.stop();
-    setError(null);
+    setProblem(null);
     const Context = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Context) { setError({ message: "这个浏览器暂时不能播放语音。" }); return; }
+    if (!Context) { setProblem("unsupported"); return; }
     let current: Playback;
     try {
       current = { controller: new AbortController(), context: new Context(), source: null };
     } catch {
-      setError({ message: "浏览器没能播放语音。" });
+      setProblem("browser");
       return;
     }
     playback.current = current;
@@ -71,15 +80,15 @@ export function useSpeech(turnId: number) {
         });
         if (res.status === 401) {
           qc.clear();
-          throw new PlaybackError({ message: "登录已失效。" });
+          throw new PlaybackError("expired");
         }
         if (!res.ok) {
           const body = await res.json().catch(() => ({})) as { reason?: string; code?: string };
-          throw new PlaybackError(body.code === "SPEECH_EMPTY" ? { message: "这条回复没有可以朗读的文字。" }
-            : res.status === 404 ? { message: "这条回复已经删掉了。" } : problems[body.reason ?? "failed"] ?? problems.failed);
+          const reason = body.reason && Object.hasOwn(problems, body.reason) ? body.reason as ProblemCode : "failed";
+          throw new PlaybackError(body.code === "SPEECH_EMPTY" ? "empty" : res.status === 404 ? "missing" : reason);
         }
         total = Number(res.headers.get("X-Speech-Parts"));
-        if (!Number.isInteger(total) || total < 1 || total > 32) throw new PlaybackError(problems.failed);
+        if (!Number.isInteger(total) || total < 1 || total > 32) throw new PlaybackError("failed");
         const audio = await current.context.decodeAudioData(await res.arrayBuffer());
         if (playback.current !== current) return;
         setState("playing");
@@ -103,12 +112,15 @@ export function useSpeech(turnId: number) {
       }
     } catch (e) {
       if (playback.current === current && !current.controller.signal.aborted) {
-        setError(e instanceof PlaybackError ? e.problem : { message: "没能播放语音，可以再点一次。" });
+        setProblem(e instanceof PlaybackError ? e.problem : "playback");
       }
     } finally {
       if (playback.current === current) stop();
     }
   };
 
+  // Keep the failure code rather than a translated string, so changing UI
+  // language updates an already visible error without touching playback.
+  const error: Problem | null = problem ? { message: t(problems[problem][0], problems[problem][1]), setup: problem === "not configured" } : null;
   return { state, error, toggle, stop };
 }

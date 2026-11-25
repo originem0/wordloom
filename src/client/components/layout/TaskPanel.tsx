@@ -9,8 +9,9 @@ import {
   Layers,
   Ban,
 } from "lucide-react";
-import { useTaskStore, type Task } from "@/client/store/tasks";
+import { taskError, taskLabel, useTaskStore, type Task } from "@/client/store/tasks";
 import { Button } from "@/client/components/ui/button";
+import { useI18n } from "@/client/lib/i18n";
 
 function StatusBadge({ status }: { status: Task["status"] }) {
   switch (status) {
@@ -26,6 +27,7 @@ function StatusBadge({ status }: { status: Task["status"] }) {
 }
 
 function TaskItem({ task }: { task: Task }) {
+  const { t } = useI18n();
   const cancelTask = useTaskStore((s) => s.cancelTask);
   const removeTask = useTaskStore((s) => s.removeTask);
 
@@ -34,12 +36,12 @@ function TaskItem({ task }: { task: Task }) {
       <Layers className="size-3.5 shrink-0 text-muted-foreground" />
       <StatusBadge status={task.status} />
       <span className="min-w-0 flex-1 truncate">
-        {task.label}
+        {taskLabel(task)}
         {task.status === "failed" && task.error && (
-          <span className="ml-1 text-xs text-destructive">— {task.error}</span>
+          <span className="ml-1 text-xs text-destructive"> · {taskError(task)}</span>
         )}
         {task.status === "cancelled" && (
-          <span className="ml-1 text-xs text-muted-foreground">— 已取消</span>
+          <span className="ml-1 text-xs text-muted-foreground"> · {t("已取消", "Cancelled")}</span>
         )}
       </span>
       {task.status === "running" ? (
@@ -49,7 +51,8 @@ function TaskItem({ task }: { task: Task }) {
           size="icon-xs"
           className="shrink-0"
           onClick={() => cancelTask(task.id)}
-          title="取消"
+          title={t("取消", "Cancel")}
+          aria-label={t("取消任务", "Cancel task")}
         >
           <X className="size-3" />
         </Button>
@@ -60,7 +63,8 @@ function TaskItem({ task }: { task: Task }) {
           size="icon-xs"
           className="shrink-0"
           onClick={() => removeTask(task.id)}
-          title="移除"
+          title={t("移除", "Remove")}
+          aria-label={t("移除任务", "Remove task")}
         >
           <X className="size-3" />
         </Button>
@@ -70,6 +74,7 @@ function TaskItem({ task }: { task: Task }) {
 }
 
 export function TaskPanel() {
+  const { t } = useI18n();
   const tasks = useTaskStore((s) => s.tasks);
   const clearDone = useTaskStore((s) => s.clearDone);
   const [collapsed, setCollapsed] = useState(false);
@@ -91,10 +96,10 @@ export function TaskPanel() {
           {running > 0 && (
             <Loader2 className="size-3.5 animate-spin text-blue-500" />
           )}
-          任务队列
+          {t("任务队列", "Tasks")}
           {running > 0 && (
             <span className="text-xs font-normal text-muted-foreground">
-              {running} 进行中
+              {t(`${running} 进行中`, `${running} running`)}
             </span>
           )}
         </span>
@@ -108,7 +113,7 @@ export function TaskPanel() {
                 clearDone();
               }}
             >
-              清除
+              {t("清除", "Clear")}
             </span>
           )}
           {collapsed ? (

@@ -14,6 +14,7 @@ import { useCards, useExtractWords } from "@/client/hooks/useCards";
 import { useIsAdmin } from "@/client/hooks/useAuth";
 import { useTaskStore } from "@/client/store/tasks";
 import { cn } from "@/client/lib/utils";
+import { errorMessage, useI18n } from "@/client/lib/i18n";
 
 const MAX_WORDS = 10;
 
@@ -123,12 +124,14 @@ function UnifiedSearchBar({
   onEnter: () => void;
   canGenerate: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <div className="relative">
       <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         className="h-11 pl-9 pr-9 text-base"
-        placeholder={canGenerate ? "查询或生成词卡（多词用逗号/空格分隔）" : "搜索词卡"}
+        aria-label={canGenerate ? t("查询或生成词卡", "Search or generate cards") : t("搜索词卡", "Search cards")}
+        placeholder={canGenerate ? t("查询或生成词卡（多词用逗号/空格分隔）", "Search or generate cards (separate words with commas or spaces)") : t("搜索词卡", "Search cards")}
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => {
@@ -144,7 +147,7 @@ function UnifiedSearchBar({
           type="button"
           onClick={() => setInput("")}
           className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-accent"
-          aria-label="Clear"
+          aria-label={t("清空", "Clear")}
         >
           <X className="size-3.5" />
         </button>
@@ -164,10 +167,11 @@ function MultiWordBar({
   words: string[];
   onGenerate: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-md border bg-card p-3">
       <span className="shrink-0 text-xs text-muted-foreground">
-        将生成 {words.length} 张：
+        {t(`将生成 ${words.length} 张：`, `Generate ${words.length} card${words.length === 1 ? "" : "s"}:`)}
       </span>
       {words.map((w) => (
         <Badge key={w} variant="secondary" className="font-mono">
@@ -176,7 +180,7 @@ function MultiWordBar({
       ))}
       <Button size="sm" className="ml-auto" onClick={onGenerate}>
         <Sparkles className="size-3.5" />
-        生成
+        {t("生成", "Generate")}
       </Button>
     </div>
   );
@@ -193,16 +197,17 @@ function GenerateCta({
   word: string;
   onGenerate: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border border-dashed bg-muted/30 p-3">
       <span className="text-sm text-muted-foreground">
-        词库中没有{" "}
+        {t("词库中没有 ", "No card for ")}
         <span className="font-mono font-semibold text-foreground">{word}</span>
-        ，回车直接生成
+        {t("，回车直接生成", ". Press Enter to generate it.")}
       </span>
       <Button size="sm" onClick={onGenerate}>
         <Sparkles className="size-3.5" />
-        生成词卡
+        {t("生成词卡", "Generate card")}
       </Button>
     </div>
   );
@@ -213,6 +218,7 @@ function GenerateCta({
 // ---------------------------------------------------------------------------
 
 function SecondaryEntries() {
+  const { t } = useI18n();
   const [extractOpen, setExtractOpen] = useState(false);
 
   return (
@@ -220,6 +226,7 @@ function SecondaryEntries() {
       <div className="flex flex-wrap items-center gap-1 text-xs">
         <button
           type="button"
+          aria-expanded={extractOpen}
           onClick={() => setExtractOpen((v) => !v)}
           className={cn(
             "inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors",
@@ -229,7 +236,7 @@ function SecondaryEntries() {
           )}
         >
           <ScanText className="size-3.5" />
-          从文本抽取
+          {t("从文本抽取", "Extract from text")}
           <ChevronDown
             className={cn(
               "size-3 transition-transform",
@@ -249,6 +256,7 @@ function SecondaryEntries() {
 // ---------------------------------------------------------------------------
 
 function ExtractPanel({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const extract = useExtractWords();
@@ -285,7 +293,8 @@ function ExtractPanel({ onClose }: { onClose: () => void }) {
     <div className="space-y-3 rounded-md border bg-card/40 p-3">
       <textarea
         className="min-h-[100px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none dark:bg-input/30"
-        placeholder="粘贴英文文本，自动抽取候选单词…"
+        aria-label={t("用于抽取的英文文本", "English text to extract from")}
+        placeholder={t("粘贴英文文本，自动抽取候选单词…", "Paste English text to extract candidate words…")}
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
@@ -298,15 +307,16 @@ function ExtractPanel({ onClose }: { onClose: () => void }) {
           disabled={!text.trim() || extract.isPending}
         >
           {extract.isPending && <Loader2 className="size-3.5 animate-spin" />}
-          {extract.isPending ? "抽取中…" : "抽取单词"}
+          {extract.isPending ? t("抽取中…", "Extracting…") : t("抽取单词", "Extract words")}
         </Button>
         {extract.isError && (
-          <p className="text-xs text-destructive">{extract.error.message}</p>
+          <p role="alert" className="text-xs text-destructive">{t("抽取失败：", "Extraction failed: ")}{errorMessage(extract.error)}</p>
         )}
       </div>
 
       {extract.data && (
         <div className="space-y-2">
+          {extract.data.words.length === 0 && <p className="text-xs text-muted-foreground">{t("没有抽取到单词。", "No words were extracted.")}</p>}
           <div className="flex flex-wrap gap-1.5">
             {extract.data.words.map((word) => (
               <Badge
@@ -322,7 +332,7 @@ function ExtractPanel({ onClose }: { onClose: () => void }) {
           {selected.size > 0 && (
             <Button type="button" size="sm" onClick={handleGenerate}>
               <Sparkles className="size-3.5" />
-              {`生成 ${selected.size} 张词卡`}
+              {t(`生成 ${selected.size} 张词卡`, `Generate ${selected.size} card${selected.size === 1 ? "" : "s"}`)}
             </Button>
           )}
         </div>

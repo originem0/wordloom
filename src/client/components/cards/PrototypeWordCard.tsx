@@ -1,29 +1,27 @@
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useGenerateDeep } from "@/client/hooks/useCards";
 import { AdminOnly } from "@/client/components/auth/AdminOnly";
 import type { BoundaryTest, BoundaryTestOption, Card } from "@/shared/types";
-import { SchemaBlockageSvgProto } from "./SchemaBlockageSvgProto";
-import { SchemaBalanceSvgProto } from "./SchemaBalanceSvgProto";
-import { SchemaContainerSvgProto } from "./SchemaContainerSvgProto";
-import { SchemaLinkSvgProto } from "./SchemaLinkSvgProto";
-import { SchemaPathSvgProto } from "./SchemaPathSvgProto";
+import { CoreImageVisual } from "./CoreImageVisual";
 import { BoldMarkup } from "./UntrustedText";
-import { svgToImageSrc } from "@/client/lib/svg";
+import { errorMessage, useI18n } from "@/client/lib/i18n";
 import "./prototype-word-card.css";
 
 interface NormalizedBoundaryTest {
   sentence: string;
   options: BoundaryTestOption[];
+  legacy: boolean;
 }
 
 function normalizeBoundaryTests(tests: BoundaryTest[]): NormalizedBoundaryTest[] {
   return tests.map((t) => {
     if (t.sentence && t.options && t.options.length > 0) {
-      return { sentence: t.sentence, options: t.options };
+      return { sentence: t.sentence, options: t.options, legacy: false };
     }
     return {
       sentence: t.scenario ?? "",
+      legacy: true,
       options: [
         {
           verdict: (t.answer === "yes"
@@ -51,7 +49,16 @@ function hasDeepData(card: Card): boolean {
 }
 
 function BoundaryTestItem({ test }: { test: NormalizedBoundaryTest }) {
+  const { t } = useI18n();
   const [revealed, setRevealed] = useState(false);
+  const [choice, setChoice] = useState<string | null>(null);
+  const name = useId();
+  const verdict = (value: string) => value === "yes" ? t("适用", "Fits") : value === "no" ? t("不适用", "Does not fit") : t("视情境而定", "Depends on context");
+  const choices = test.legacy
+    ? ["yes", "no", "maybe"].map((value) => ({ value, label: verdict(value) }))
+    : test.options.map((option, i) => ({ value: String(i), label: option.word }));
+  const selected = test.legacy ? choice && verdict(choice) : choice === null ? null : test.options[Number(choice)]?.word;
+  const reference = test.legacy ? test.options[0]?.verdict : choice === null ? null : test.options[Number(choice)]?.verdict;
 
   return (
     <div className="test-item">
@@ -69,19 +76,24 @@ function BoundaryTestItem({ test }: { test: NormalizedBoundaryTest }) {
       </div>
 
       {!revealed && (
-        <button
-          type="button"
-          className="reveal-btn"
-          onClick={() => setRevealed(true)}
-        >
-          显示答案
-        </button>
+        <fieldset className="test-choices">
+          <legend>{test.legacy ? t("你认为这个词适用吗", "Does this word fit?") : t("你会选哪个词", "Which word would you choose?")}</legend>
+          {choices.map((option) => <label key={option.value} className="test-choice">
+            <input type="radio" name={name} value={option.value} checked={choice === option.value} onChange={() => setChoice(option.value)} />
+            <span>{option.label}</span>
+          </label>)}
+          <button type="button" className="reveal-btn" disabled={choice === null} onClick={() => setRevealed(true)}>
+            {t("显示答案", "Show answer")}
+          </button>
+        </fieldset>
       )}
 
-      <div className={`test-options${revealed ? " visible" : ""}`}>
+      {revealed && <>
+      <p className="test-feedback" role="status">{t(`你选了 ${selected}，参考判断是${verdict(reference ?? "maybe")}。`, `You chose ${selected}. Reference: ${verdict(reference ?? "maybe")}.`)}</p>
+      <div className="test-options visible">
         {test.options.map((opt, i) => (
-          <div key={i} className="opt">
-            <span className={`verdict ${opt.verdict}`}>
+          <div key={i} className={`opt${!test.legacy && choice === String(i) ? " chosen" : ""}`}>
+            <span className={`verdict ${opt.verdict}`} role="img" aria-label={opt.verdict === "yes" ? t("适用", "Fits") : opt.verdict === "no" ? t("不适用", "Does not fit") : t("视情境而定", "Depends on context")}>
               {opt.verdict === "yes" ? "✓" : opt.verdict === "no" ? "✗" : "?"}
             </span>
             <span className="word-choice">{opt.word}</span>
@@ -89,12 +101,28 @@ function BoundaryTestItem({ test }: { test: NormalizedBoundaryTest }) {
           </div>
         ))}
       </div>
+      <button type="button" className="reveal-btn" onClick={() => { setChoice(null); setRevealed(false); }}>{t("再试一次", "Try again")}</button>
+      </>}
     </div>
   );
 }
 
+function useCompactCard() {
+  const [compact, setCompact] = useState(() => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 768px)").matches);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia("(max-width: 768px)");
+    const change = (event: MediaQueryListEvent) => setCompact(event.matches);
+    query.addEventListener("change", change);
+    return () => query.removeEventListener("change", change);
+  }, []);
+  return compact;
+}
+
 export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () => void }) {
+  const { t } = useI18n();
   const generateDeep = useGenerateDeep();
+  const compact = useCompactCard();
 
   const deepData = generateDeep.data;
   const deepCard = useMemo(() => (deepData ? { ...card, ...deepData } : card), [card, deepData]);
@@ -111,10 +139,6 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
   const schemaType = deepCard.schemaAnalysis?.coreSchema?.toLowerCase();
   const coreImageText =
     deepCard.schemaAnalysis?.coreImageText || deepCard.schemaAnalysis?.coreSchema;
-  const customSvgSrc = useMemo(
-    () => svgToImageSrc(deepCard.schemaAnalysis?.coreSvg),
-    [deepCard.schemaAnalysis?.coreSvg],
-  );
 
   const evolutionChain = deepCard.schemaAnalysis?.etymologyChain;
 
@@ -140,7 +164,7 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
             type="button"
             className="close-btn"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("关闭", "Close")}
           >
             ✕
           </button>
@@ -156,18 +180,12 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
               </span>
             ))}
             {deepCard.cefr && <span className="chip">CEFR {deepCard.cefr}</span>}
-            {deepCard.wad != null && (
-              <span className="chip">WAD {deepCard.wad.toFixed(1)}</span>
-            )}
-            {deepCard.wap != null && (
-              <span className="chip">WAP {deepCard.wap.toFixed(1)}</span>
-            )}
           </div>
           {/* Leads to the capture box with this word as the focus. Nothing is
               saved until the admin presses 收下 there. */}
           <AdminOnly>
-            <Link className="reveal-btn" title="收进表达库" to={`/#focus=${encodeURIComponent(deepCard.word)}`}>
-              收
+            <Link className="reveal-btn" title={t("收进表达库", "Save to expressions")} to={`/#focus=${encodeURIComponent(deepCard.word)}`}>
+              {t("收", "Save")}
             </Link>
           </AdminOnly>
         </header>
@@ -175,37 +193,23 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
         {/* 2. Core image — custom SVG or fallback template */}
         {deepCard.schemaAnalysis && (
           <section className="core-image">
-            <h2>核心意象 Core image</h2>
+            <h2>{t("核心意象", "Core image")}</h2>
 
-            {customSvgSrc ? (
-              <div className="custom-schema-svg">
-                <img src={customSvgSrc} alt={`${deepCard.word} — core image`} />
-              </div>
-            ) : (
-              <>
-                {schemaType === "blockage" && <SchemaBlockageSvgProto />}
-                {schemaType === "container" && <SchemaContainerSvgProto />}
-                {schemaType === "path" && <SchemaPathSvgProto />}
-                {schemaType === "link" && <SchemaLinkSvgProto />}
-                {schemaType === "balance" && <SchemaBalanceSvgProto />}
-              </>
-            )}
-
-            {coreImageText && <p>{coreImageText}</p>}
+            <CoreImageVisual word={deepCard.word} type={schemaType ?? ""} raw={deepCard.schemaAnalysis.coreSvg} caption={coreImageText} />
           </section>
         )}
 
         {/* Deep layer: missing / loading / error — top-level so it's always visible */}
         {missingDeep && !generateDeep.isPending && (
           <div className="deep-missing">
-            <span>这张词卡还没有深度分析。</span>
+            <span>{t("这张词卡还没有深度分析。", "This card has no deep analysis yet.")}</span>
             <AdminOnly>
               <button
                 type="button"
                 className="reveal-btn"
                 onClick={() => generateDeep.mutate(card.id)}
               >
-                {generateDeep.isError ? "重试" : "生成深度分析"}
+                {generateDeep.isError ? t("重试", "Retry") : t("生成深度分析", "Generate deep analysis")}
               </button>
             </AdminOnly>
           </div>
@@ -214,20 +218,20 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
         {generateDeep.isPending && (
           <div className="deep-loading">
             <span className="deep-spinner" />
-            正在生成深度分析…
+            {t("正在生成深度分析…", "Generating deep analysis…")}
           </div>
         )}
 
         {generateDeep.isError && (
           <div className="deep-error">
-            深度分析生成失败：{generateDeep.error.message}
+            {t("深度分析生成失败：", "Deep analysis failed: ")}{errorMessage(generateDeep.error)}
           </div>
         )}
 
         {/* 3. Etymology */}
         {deepCard.etymology && (
           <section className="etymology">
-            <h2>词根词源 Etymology</h2>
+            <h2>{t("词根词源", "Etymology")}</h2>
             <p>{deepCard.etymology}</p>
             {evolutionChain && evolutionChain.length > 0 && (
               <div className="evolution-chain">
@@ -246,7 +250,7 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
         {scenes.length > 0 && (
           <details className="tests-toggle">
             <summary className="tests-summary">
-              <span className="chevron">&#9654;</span> 场景激活 Frame activation
+              <span className="chevron">&#9654;</span> {t("场景激活", "Frame activation")}
             </summary>
             <div className="tests-body">
               {scenes.map((scene, i) => (
@@ -256,7 +260,7 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
                   <p className="scene-example">
                     <BoldMarkup text={scene.example} />
                   </p>
-                  {scene.associatedWords.length > 0 && (
+                  {scene.associatedWords?.length > 0 && (
                     <div className="associated-words">
                       {scene.associatedWords.map((w) => (
                         <span key={w}>{w}</span>
@@ -273,17 +277,29 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
         {family.length > 0 && (
           <details className="tests-toggle">
             <summary className="tests-summary">
-              <span className="chevron">&#9654;</span> 家族对比 Family comparison
+              <span className="chevron">&#9654;</span> {t("家族对比", "Family comparison")}
             </summary>
             <div className="tests-body">
-              <div className="table-scroll">
+              {compact ? <div className="family-cards">
+                {family.map((entry) => <article key={entry.word} className={entry.word.toLowerCase() === deepCard.word.toLowerCase() ? "highlight" : ""}>
+                  <h3>{entry.word}</h3>
+                  <p>{entry.distinction}</p>
+                  <details className="word-meta">
+                    <summary>{t("语域与场景", "Register and context")}</summary>
+                    <dl>
+                      <dt>{t("情感 / 语域", "Tone / register")}</dt><dd>{entry.register}</dd>
+                      <dt>{t("典型场景", "Typical context")}</dt><dd>{entry.typicalScene}</dd>
+                    </dl>
+                  </details>
+                </article>)}
+              </div> : <div className="table-scroll">
                 <table className="family-table">
                   <thead>
                     <tr>
-                      <th>词</th>
-                      <th>核心区别</th>
-                      <th>情感 / 语域</th>
-                      <th>典型场景</th>
+                      <th>{t("词", "Word")}</th>
+                      <th>{t("核心区别", "Key distinction")}</th>
+                      <th>{t("情感 / 语域", "Tone / register")}</th>
+                      <th>{t("典型场景", "Typical scene")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -304,7 +320,7 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </div>}
               {boundaryNote && (
                 <div className="boundary-note" style={{ whiteSpace: "pre-line" }}>
                   {boundaryNote}
@@ -318,7 +334,7 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
         {tests.length > 0 && (
           <details className="tests-toggle">
             <summary className="tests-summary">
-              <span className="chevron">&#9654;</span> 边界测试 Boundary tests
+              <span className="chevron">&#9654;</span> {t("边界测试", "Boundary tests")}
             </summary>
             <div className="tests-body">
               {tests.map((t, i) => (

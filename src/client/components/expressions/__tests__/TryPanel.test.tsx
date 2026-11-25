@@ -358,7 +358,7 @@ describe("giving up", () => {
     renderPanel();
     const c = await card();
     press(c, "看答案");
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有揭开：boom"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有揭开：服务暂时不可用（HTTP 500）。"));
     expect(c.getByRole("button", { name: "看答案" })).toBeEnabled();
     expect(c.queryByText("看过答案再写一句，不计档位")).toBeNull();
   });
@@ -507,7 +507,7 @@ describe("an attempt", () => {
     server.judgements = [refuses(400, "The question is not the stored scene", "VALIDATION_ERROR")];
     renderPanel();
     answerWith(await card(), "It dawned on me.");
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有交上：The question is not the stored scene"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有交上：请检查填写的内容。"));
     expect(screen.queryByText(SCENE)).toBeNull();
   });
 
@@ -516,7 +516,7 @@ describe("an attempt", () => {
     renderPanel();
     const c = await card();
     answerWith(c, "It dawned on me.");
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有交上：boom"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有交上：服务暂时不可用（HTTP 500）。"));
     expect(box(c)).toHaveValue("It dawned on me.");
 
     // Nothing was seen in between, so the level has not moved.
@@ -559,7 +559,7 @@ describe("再来一条", () => {
     renderPanel();
     await card();
     press(screen, "再来一条");
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有取到：boom"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有取到：服务暂时不可用（HTTP 500）。"));
     expect(screen.getByText(SCENE)).toBeInTheDocument();
 
     press(screen, "再来一条");

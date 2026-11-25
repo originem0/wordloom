@@ -1,6 +1,7 @@
 import { Button } from "@/client/components/ui/button";
 import type { DuplicateResponse } from "@/shared/expressions";
 import { day, titleOf } from "./shared";
+import { useI18n } from "@/client/lib/i18n";
 
 /**
  * What a 409 from capture asks. Nothing was saved: the library has the same
@@ -14,18 +15,19 @@ export function DuplicateQuestion({ existing, disabled, onAgain, onNew }: {
   onAgain: (id: number) => void;
   onNew: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-      <p>已经收过同样的。是又一次遇到，还是另一个意思？</p>
+      <p>{t("已经收过同样的。是又一次遇到，还是另一个意思？", "You have saved this before. Did you meet it again, or does it have a different meaning?")}</p>
       {existing.map((e) => (
         <div key={e.id} className="flex items-center justify-between gap-2">
           <span className="min-w-0 truncate">
             {titleOf(e)} <span className="text-xs text-muted-foreground">{day(e.createdAt)}</span>
           </span>
-          <Button size="sm" variant="outline" disabled={disabled} onClick={() => onAgain(e.id)}>又一次遇到</Button>
+          <Button size="sm" variant="outline" disabled={disabled} onClick={() => onAgain(e.id)}>{t("又一次遇到", "Met it again")}</Button>
         </div>
       ))}
-      <Button size="sm" variant="ghost" disabled={disabled} onClick={onNew}>另存</Button>
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={onNew}>{t("另存", "Save separately")}</Button>
     </div>
   );
 }

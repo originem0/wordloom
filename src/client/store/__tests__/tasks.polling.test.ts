@@ -6,7 +6,8 @@ vi.mock("sonner", () => ({
 }));
 
 import { toast } from "sonner";
-import { useTaskStore } from "../tasks";
+import { taskError, useTaskStore } from "../tasks";
+import { useAppStore } from "..";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
@@ -29,6 +30,7 @@ function stubServer(pollResponse: () => Response | Promise<Response>) {
 const task = (id: string) => useTaskStore.getState().tasks.find((t) => t.id === id)!;
 
 beforeEach(() => {
+  useAppStore.setState({ uiLanguage: "zh-CN" });
   vi.useFakeTimers();
   vi.mocked(toast.error).mockClear();
   useTaskStore.setState({ tasks: [] });
@@ -68,6 +70,8 @@ describe("job polling", () => {
     await vi.advanceTimersByTimeAsync(10_000);
     expect(task(id).status).toBe("failed");
     expect(task(id).error).toMatch(/登录/);
+    useAppStore.getState().setUiLanguage("en");
+    expect(taskError(task(id))).toBe("Your session has expired. Sign in again to view the results");
     expect(polls).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(polls).toHaveBeenCalledTimes(1);
@@ -84,6 +88,19 @@ describe("job polling", () => {
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(polls.mock.calls.length).toBe(settled);
   });
+});
+
+it("uses the current language for submission failures and retranslates the stored error", async () => {
+  useAppStore.getState().setUiLanguage("en");
+  vi.stubGlobal("fetch", vi.fn(async () => json({ error: "Unauthorized", code: "AUTH_REQUIRED" }, 401)));
+  const id = useTaskStore.getState().submitCards(["anchor"]);
+  await vi.advanceTimersByTimeAsync(1_000);
+
+  expect(task(id).status).toBe("failed");
+  expect(toast.error).toHaveBeenCalledWith("Card generation failed: Please sign in as an administrator.");
+  expect(taskError(task(id))).toBe("Please sign in as an administrator.");
+  useAppStore.getState().setUiLanguage("zh-CN");
+  expect(taskError(task(id))).toBe("请先登录管理员账号。");
 });
 
 // Signing out empties the list: the tasks were the admin's, and following

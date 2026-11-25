@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import { useAppStore } from "@/client/store";
 
 type ProbeArgs = [params: { search?: string; limit?: number }, options?: { enabled?: boolean }];
 let isAdmin: boolean;
@@ -11,10 +12,11 @@ const useCardsMock = vi.fn((...args: ProbeArgs) => {
   return { data: { cards: inLibrary.map((word) => ({ word })) }, isFetching: false };
 });
 const submitCards = vi.fn();
+const extraction = { mutate: vi.fn(), isPending: false, isError: false, data: undefined as { words: string[] } | undefined };
 
 vi.mock("@/client/hooks/useCards", () => ({
   useCards: (...args: ProbeArgs) => useCardsMock(...args),
-  useExtractWords: () => ({ mutate: vi.fn(), isPending: false, isError: false, data: undefined }),
+  useExtractWords: () => extraction,
 }));
 vi.mock("@/client/hooks/useAuth", () => ({ useIsAdmin: () => isAdmin }));
 vi.mock("@/client/store/tasks", () => ({
@@ -33,9 +35,13 @@ function renderInput(input: string) {
 const lookupEnabled = () => new Set(useCardsMock.mock.calls.map(([, options]) => options?.enabled));
 
 beforeEach(() => {
+  useAppStore.persist.setOptions({ storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } });
+  useAppStore.getState().setUiLanguage("zh-CN");
   useCardsMock.mockClear();
   submitCards.mockClear();
   inLibrary = [];
+  extraction.mutate.mockReset();
+  extraction.data = undefined;
 });
 
 // Generating is the admin's, and the server answers anyone else with 401. For
@@ -111,5 +117,23 @@ describe("WordInput for the admin", () => {
   it("looks nothing up while there is no single word to look up", () => {
     renderInput("");
     expect(lookupEnabled()).toEqual(new Set([false]));
+  });
+
+  it("switches labels in place without resetting the open extraction or the typed text", () => {
+    extraction.data = { words: ["anchor", "harbor"] };
+    renderInput("existing search");
+    fireEvent.click(screen.getByRole("button", { name: /从文本抽取/ }));
+    const text = screen.getByRole("textbox", { name: "用于抽取的英文文本" });
+    fireEvent.change(text, { target: { value: "A draft passage." } });
+    act(() => useAppStore.getState().setUiLanguage("en"));
+    expect(screen.getByRole("textbox", { name: "Search or generate cards" })).toHaveValue("existing search");
+    expect(screen.getByRole("button", { name: /Extract from text/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("textbox", { name: "English text to extract from" })).toBe(text);
+    expect(text).toHaveValue("A draft passage.");
+    fireEvent.click(screen.getByText("anchor", { selector: '[data-slot="badge"]' }));
+    expect(screen.getByRole("button", { name: "Generate 1 card" })).toBeInTheDocument();
+    act(() => useAppStore.getState().setUiLanguage("zh-CN"));
+    expect(screen.getByRole("button", { name: "生成 1 张词卡" })).toBeInTheDocument();
+    expect(text).toHaveValue("A draft passage.");
   });
 });

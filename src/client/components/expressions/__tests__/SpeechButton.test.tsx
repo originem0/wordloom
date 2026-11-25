@@ -5,6 +5,13 @@ import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { SpeechButton } from "../SpeechButton";
+import { useAppStore } from "@/client/store";
+
+// Node 26 has no localStorage without --localstorage-file. Persistence is not
+// under test here; keep only the language preference in this test process.
+useAppStore.persist.setOptions({ storage: {
+  getItem: () => null, setItem: () => {}, removeItem: () => {},
+} });
 
 type Source = { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn>; connect: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn>; buffer: unknown; onended: (() => void) | null };
 let contexts: FakeContext[];
@@ -24,11 +31,12 @@ class FakeContext {
 
 const audio = (parts = 1) => new Response(new Uint8Array([0xff, 0xfb]), { headers: { "Content-Type": "audio/mpeg", "X-Speech-Parts": String(parts) } });
 beforeEach(() => {
+  useAppStore.setState({ uiLanguage: "zh-CN" });
   contexts = [];
   vi.stubGlobal("AudioContext", FakeContext);
   vi.stubGlobal("fetch", vi.fn(async () => audio()));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); useAppStore.setState({ uiLanguage: "zh-CN" }); });
 
 function show(children = <SpeechButton turnId={12} />) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -40,6 +48,30 @@ const started = () => waitFor(() => expect(contexts[0].sources[0]?.start).toHave
 const end = (context = contexts[0], part = context.sources.length - 1) => act(() => { context.sources[part].onended?.(); });
 
 describe("a reply's speech button", () => {
+  it("changes the labels of active playback without restarting or stopping it", async () => {
+    show();
+    click();
+    await started();
+    act(() => useAppStore.getState().setUiLanguage("en"));
+    expect(screen.getByRole("button", { name: "Stop reading" })).toHaveAttribute("aria-pressed", "true");
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0].sources[0].stop).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Stop reading" }));
+    expect(screen.getByRole("button", { name: "Listen" })).toBeInTheDocument();
+    expect(contexts[0].sources[0].stop).toHaveBeenCalledOnce();
+  });
+
+  it("translates a speech error that was already visible", async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ code: "SPEECH_FAILED", reason: "not configured" }), { status: 503 }));
+    show();
+    click();
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("朗读还没配好。"));
+    act(() => useAppStore.getState().setUiLanguage("en"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Speech is not configured yet.");
+    expect(screen.getByRole("link", { name: "Open settings" })).toHaveAttribute("href", "/providers");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it("makes no audio or network request before a click", () => {
     show();
     expect(fetch).not.toHaveBeenCalled();

@@ -6,6 +6,9 @@ import { ApiError } from "@/client/lib/api";
 import { useCapture, useMetAgain } from "@/client/hooks/useExpressions";
 import type { DuplicateResponse, EncounterSource, PickResponse } from "@/shared/expressions";
 import { DuplicateQuestion } from "./DuplicateQuestion";
+import { errorMessage, useI18n } from "@/client/lib/i18n";
+
+const DONE_LABELS = { saved: ["已收下", "Saved"], met: ["又一次遇到", "Met it again"] } as const;
 
 /**
  * What the model picked out of a pasted conversation. It only points: nothing
@@ -18,11 +21,12 @@ export function PickList({ picks, from, onSaved, onClose }: {
   onSaved: (id: number) => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const capture = useCapture();
   const metAgain = useMetAgain();
   const [ticked, setTicked] = useState<number[]>([]);
   // How each pick ended: 已收下, or 又一次遇到 on an entry the library had.
-  const [done, setDone] = useState<Record<number, string>>({});
+  const [done, setDone] = useState<Record<number, keyof typeof DONE_LABELS>>({});
   // The picks whose words the library has already, each with the entries it
   // collides with. A question, as on the box: nothing was saved for them yet.
   const [held, setHeld] = useState<Record<number, DuplicateResponse["existing"]>>({});
@@ -30,13 +34,13 @@ export function PickList({ picks, from, onSaved, onClose }: {
   const met = (i: number) => ({ text: picks[i].text, textBefore: picks[i].before ?? undefined, ...from });
 
   /** One write for one pick. False when it failed: that is said, and the pick stays as it was. */
-  const write = async (i: number, label: string, request: () => Promise<unknown>) => {
+  const write = async (i: number, label: keyof typeof DONE_LABELS, request: () => Promise<unknown>) => {
     try {
       await request();
       setDone((d) => ({ ...d, [i]: label }));
     } catch (e) {
       if (!(e instanceof ApiError && e.code === "DUPLICATE")) {
-        toast.error(`没有存上：${e instanceof Error ? e.message : e}`);
+        toast.error(t(`没有存上：${errorMessage(e)}`, `Could not save: ${errorMessage(e)}`));
         return false;
       }
       setHeld((h) => ({ ...h, [i]: (e.body as DuplicateResponse).existing ?? [] }));
@@ -44,7 +48,7 @@ export function PickList({ picks, from, onSaved, onClose }: {
     setTicked((t) => t.filter((x) => x !== i));
     return true;
   };
-  const save = (i: number, force?: true) => write(i, "已收下", async () => onSaved((await capture.mutateAsync({ ...met(i), force })).id));
+  const save = (i: number, force?: true) => write(i, "saved", async () => onSaved((await capture.mutateAsync({ ...met(i), force })).id));
   const busy = async (work: () => Promise<unknown>) => {
     setSaving(true);
     await work();
@@ -59,12 +63,12 @@ export function PickList({ picks, from, onSaved, onClose }: {
 
   return (
     <div className="space-y-2 rounded-md border p-3 text-sm">
-      {picks.length === 0 && <p className="text-muted-foreground">没有挑出来。可以自己选中一段再收下。</p>}
+      {picks.length === 0 && <p className="text-muted-foreground">{t("没有挑出来。可以自己选中一段再收下。", "No expressions were picked. Select a passage yourself to save it.")}</p>}
       {picks.map((p, i) => (
         <div key={i} className="space-y-2">
           <label className="flex items-start gap-2">
             {done[i] || held[i] ? (
-              <span className="shrink-0 text-xs text-muted-foreground">{done[i] ?? "已收过"}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">{done[i] ? t(DONE_LABELS[done[i]][0], DONE_LABELS[done[i]][1]) : t("已收过", "Already saved")}</span>
             ) : (
               <input type="checkbox" className="mt-1" disabled={saving} checked={ticked.includes(i)} onChange={(e) => setTicked((t) => (e.target.checked ? [...t, i] : t.filter((x) => x !== i)))} />
             )}
@@ -78,18 +82,18 @@ export function PickList({ picks, from, onSaved, onClose }: {
             <DuplicateQuestion
               existing={held[i]}
               disabled={saving}
-              onAgain={(id) => busy(() => write(i, "又一次遇到", () => metAgain.mutateAsync({ id, ...met(i) })))}
+              onAgain={(id) => busy(() => write(i, "met", () => metAgain.mutateAsync({ id, ...met(i) })))}
               onNew={() => busy(() => save(i, true))}
             />
           )}
         </div>
       ))}
       <div className="flex justify-end gap-1.5">
-        <Button size="sm" variant="ghost" disabled={saving} onClick={onClose}>关掉</Button>
+        <Button size="sm" variant="ghost" disabled={saving} onClick={onClose}>{t("关掉", "Close")}</Button>
         {picks.length > 0 && (
           <Button size="sm" disabled={!ticked.length || saving} onClick={keep}>
             {saving && <Loader2 className="animate-spin" />}
-            收下选中的
+            {t("收下选中的", "Save selected")}
           </Button>
         )}
       </div>

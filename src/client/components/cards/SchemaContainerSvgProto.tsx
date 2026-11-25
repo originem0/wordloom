@@ -1,19 +1,23 @@
+import { useI18n } from "@/client/lib/i18n";
+
 /**
  * SchemaContainerSvgProto — Animated SVG for the "container" cognitive schema.
  * Visual: a container with an "inside vs outside" boundary; items move in/out.
  */
 export function SchemaContainerSvgProto() {
+  const { t } = useI18n();
   return (
     <svg
+      role="img"
       className="schema-svg"
       viewBox="0 0 600 180"
-      aria-label="Container schema — boundary, inside/outside"
+      aria-label={t("容器图式，边界、内部与外部", "Container schema — boundary, inside/outside")}
     >
       {/* Container */}
       <g transform="translate(250, 40)">
         <rect className="proto-container" x="0" y="0" width="220" height="110" rx="14" />
         <text className="label" x="110" y="135" textAnchor="middle">
-          boundary / inside vs outside
+          {t("边界 / 内部与外部", "boundary / inside vs outside")}
         </text>
 
         {/* Inside items */}
@@ -32,7 +36,7 @@ export function SchemaContainerSvgProto() {
         />
         <polygon className="proto-arrow" points="250,88 242,84 242,92" />
         <text className="label" x="155" y="128" textAnchor="middle">
-          outside → inside
+          {t("外部 → 内部", "outside → inside")}
         </text>
       </g>
     </svg>

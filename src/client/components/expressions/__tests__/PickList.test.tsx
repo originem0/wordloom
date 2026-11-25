@@ -203,7 +203,7 @@ describe("收下选中的", () => {
     answers.push({ status: 500, body: { error: "boom" } });
     fireEvent.click(screen.getByRole("button", { name: "又一次遇到" }));
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有存上：boom"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有存上：服务暂时不可用（HTTP 500）。"));
     await waitFor(() => expect(screen.getByRole("button", { name: "又一次遇到" })).toBeEnabled());
     expect(screen.getByRole("button", { name: "另存" })).toBeEnabled();
     expect(screen.getByText("已收过")).toBeInTheDocument();
@@ -216,7 +216,7 @@ describe("收下选中的", () => {
     tick("it hit me");
     keep();
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有存上：boom"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有存上：服务暂时不可用（HTTP 500）。"));
     expect(sent).toHaveLength(1);
     expect(onSaved).not.toHaveBeenCalled();
     expect(screen.getByRole("checkbox", { name: /it dawned on me/ })).toBeChecked();

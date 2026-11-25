@@ -78,21 +78,22 @@
 }
 
 .dark {
-  /* Solarized Dark */
+  /* Solarized Dark: reading text and paired control colors keep contrast on
+     the page and on the slightly lighter card surface. */
   --background: oklch(0.267 0.049 219.8);
-  --foreground: oklch(0.654 0.020 205.3);
+  --foreground: oklch(0.74 0.020 205.3);
   --card: oklch(0.309 0.052 219.7);
-  --card-foreground: oklch(0.698 0.016 196.8);
+  --card-foreground: oklch(0.74 0.020 205.3);
   --popover: oklch(0.309 0.052 219.7);
-  --popover-foreground: oklch(0.698 0.016 196.8);
-  --primary: oklch(0.615 0.139 244.9);
+  --popover-foreground: oklch(0.74 0.020 205.3);
+  --primary: oklch(0.53 0.139 244.9);
   --primary-foreground: oklch(0.974 0.026 90.1);
   --secondary: oklch(0.309 0.052 219.7);
-  --secondary-foreground: oklch(0.654 0.020 205.3);
+  --secondary-foreground: oklch(0.74 0.020 205.3);
   --muted: oklch(0.309 0.052 219.7);
-  --muted-foreground: oklch(0.523 0.028 219.1);
-  --accent: oklch(0.644 0.102 187.4);
-  --accent-foreground: oklch(0.974 0.026 90.1);
+  --muted-foreground: oklch(0.68 0.020 205.3);
+  --accent: oklch(0.35 0.052 219.7);
+  --accent-foreground: oklch(0.74 0.020 205.3);
   --destructive: oklch(0.586 0.206 27.1);
   --destructive-foreground: oklch(0.974 0.026 90.1);
   --border: oklch(0.340 0.045 219.8);
@@ -120,4 +121,36 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Native disclosures share the reading pages' type and keyboard treatment. */
+.reading-details {
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
+.reading-details > summary,
+.reading-help > summary {
+  min-height: 44px;
+  padding: 10px 0;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+.reading-help > summary {
+  color: var(--muted-foreground);
+}
+.reading-help > p {
+  max-width: 65ch;
+  padding-bottom: 8px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+.reading-details > summary:focus-visible,
+.reading-help > summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 4px;
 }

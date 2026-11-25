@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CaptureBox } from "../CaptureBox";
 import { useLastSource } from "../shared";
+import { useAppStore } from "@/client/store";
+
+// Node 26 has no localStorage without --localstorage-file. Persistence is not
+// under test here; keep only the language preference in this test process.
+useAppStore.persist.setOptions({ storage: {
+  getItem: () => null, setItem: () => {}, removeItem: () => {},
+} });
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 
@@ -15,6 +22,7 @@ let writes: Array<{ method: string; url: string; body: unknown }>;
 let answers: Array<{ status: number; body: unknown; hold?: Promise<void> }>;
 
 beforeEach(() => {
+  useAppStore.setState({ uiLanguage: "zh-CN" });
   writes = [];
   answers = [];
   useLastSource.setState({ source: null });
@@ -31,6 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  useAppStore.setState({ uiLanguage: "zh-CN" });
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -71,6 +80,24 @@ function select(box: HTMLTextAreaElement, part: string) {
 const keep = () => fireEvent.click(screen.getByRole("button", { name: "收下" }));
 
 const CHAT = "Me: how do I say 我突然意识到?\n\nAI: You could say it dawned on me.\nOr simply: it hit me.";
+
+it("switches interface language while preserving the selected source, focus, and original draft", async () => {
+  const { box } = renderBox();
+  type(box, "It dawned on me that I was wrong.");
+  select(box, "dawned on me");
+  fireEvent.click(screen.getByRole("button", { name: "书" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "出处" }), { target: { value: "私人书名" } });
+  act(() => useAppStore.getState().setUiLanguage("en"));
+  expect(screen.getByRole("textbox", { name: "Original text" })).toBe(box);
+  expect(box).toHaveValue("It dawned on me that I was wrong.");
+  expect(screen.getByRole("textbox", { name: "Source" })).toHaveValue("私人书名");
+  expect(screen.getByRole("button", { name: "Book" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Focus: dawned on me" })).toBeInTheDocument();
+  expect(writes).toEqual([]);
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].body).toEqual({ text: "It dawned on me that I was wrong.", focus: "dawned on me", sourceType: "book", sourceTitle: "私人书名" });
+});
 
 describe("what 收下 makes of the box", () => {
   it("saves the whole box as the text when nothing is selected", async () => {
@@ -295,7 +322,7 @@ describe("a save that does not go through", () => {
     type(box, "It dawned on me.");
     keep();
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有存上：boom"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有存上：服务暂时不可用（HTTP 500）。"));
     expect(box).toHaveValue("It dawned on me.");
     expect(onSaved).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "收下" })).toBeEnabled();
@@ -362,7 +389,7 @@ describe("帮我挑", () => {
     answers.push({ status: 502, body: { error: "The model did not answer", code: "PICK_FAILED" } });
     type(box, CHAT);
     choose();
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有挑成：The model did not answer"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("没有挑成：服务暂时不可用（HTTP 502）。"));
     expect(screen.queryByRole("button", { name: "关掉" })).toBeNull();
     expect(box).toHaveValue(CHAT);
     expect(screen.getByRole("button", { name: "帮我挑" })).toBeEnabled();

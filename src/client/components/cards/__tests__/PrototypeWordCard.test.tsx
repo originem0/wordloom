@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { MemoryRouter } from "react-router-dom";
 import { PrototypeWordCard } from "../PrototypeWordCard";
 import type { Card } from "@/shared/types";
+import { useAppStore } from "@/client/store";
 
 let isAdmin: boolean;
 let deep: { isPending: boolean; isError: boolean; data: unknown; error?: Error };
@@ -16,6 +17,8 @@ vi.mock("@/client/hooks/useCards", () => ({
 vi.mock("@/client/hooks/useAuth", () => ({ useIsAdmin: () => isAdmin }));
 
 beforeEach(() => {
+  useAppStore.persist.setOptions({ storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } });
+  useAppStore.getState().setUiLanguage("zh-CN");
   mutate.mockClear();
   isAdmin = false;
   deep = { isPending: false, isError: false, data: null };
@@ -69,6 +72,10 @@ describe("cards stored in an older or partial shape", () => {
       />,
     );
     expect(screen.getByText("Old scenario without blanks")).toBeInTheDocument();
+    expect(screen.queryByText("— Old reason")).toBeNull();
+    expect(screen.getByRole("button", { name: "显示答案" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("radio", { name: "适用" }));
+    fireEvent.click(screen.getByRole("button", { name: "显示答案" }));
     expect(screen.getByText("— Old reason")).toBeInTheDocument();
     expect(screen.getByText("✓")).toBeInTheDocument();
   });
@@ -87,8 +94,8 @@ describe("cards stored in an older or partial shape", () => {
     );
     expect(screen.getByText("fragment")).toBeInTheDocument();
     expect(screen.getByText("unknown")).toBeInTheDocument();
-    expect(screen.queryByText(/Etymology/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Boundary tests/)).not.toBeInTheDocument();
+    expect(screen.queryByText("词根词源")).not.toBeInTheDocument();
+    expect(screen.queryByText("边界测试")).not.toBeInTheDocument();
     expect(screen.queryByText("这张词卡还没有深度分析。")).toBeNull();
   });
 });
@@ -158,5 +165,34 @@ describe("收 on a card", () => {
     isAdmin = true;
     render(<PrototypeWordCard card={makeCard({ word: "rock & roll" })} />, { wrapper: MemoryRouter });
     expect(screen.getByRole("link", { name: "收" })).toHaveAttribute("href", "/#focus=rock%20%26%20roll");
+  });
+});
+
+describe("the card interface language", () => {
+  it("updates labels and schema text while preserving the revealed answer and stored content", () => {
+    isAdmin = true;
+    const { container } = render(<PrototypeWordCard card={makeCard({
+      etymology: "生成过的解释保持中文。",
+      boundaryTests: [{ sentence: "A ______ in the road.", options: [{ verdict: "yes", word: "block", reason: "生成过的理由。" }] }],
+    })} onClose={vi.fn()} />, { wrapper: MemoryRouter });
+    const detail = container.querySelector("details")!;
+    fireEvent.click(screen.getByText("边界测试"));
+    fireEvent.click(screen.getByRole("radio", { name: "block" }));
+    fireEvent.click(screen.getByRole("button", { name: "显示答案" }));
+    expect(container.querySelector(".test-options")).toHaveClass("visible");
+    act(() => useAppStore.getState().setUiLanguage("en"));
+    expect(screen.getByRole("heading", { name: "Core image" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Etymology" })).toBeInTheDocument();
+    expect(screen.getByText("Boundary tests")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Save" })).toHaveAttribute("title", "Save to expressions");
+    expect(screen.getByRole("img", { name: "Blocking schema — observer, obstacle, hidden target" })).toBeInTheDocument();
+    expect(screen.getByText("hidden target")).toBeInTheDocument();
+    expect(screen.getByText("生成过的解释保持中文。")).toBeInTheDocument();
+    expect(screen.getByText("— 生成过的理由。")).toBeInTheDocument();
+    expect(container.querySelector(".test-options")).toHaveClass("visible");
+    expect(container.querySelector("details")).toBe(detail);
+    expect(screen.queryByRole("button", { name: "Show answer" })).toBeNull();
+    expect(mutate).not.toHaveBeenCalled();
   });
 });

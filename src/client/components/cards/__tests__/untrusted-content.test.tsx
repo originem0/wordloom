@@ -94,7 +94,7 @@ describe("PrototypeWordCard core image", () => {
 
   it("shows the SVG as an image, where browsers run no script and load no subresources", () => {
     const { container } = render(<PrototypeWordCard card={hostileCard()} />);
-    const img = container.querySelector(".custom-schema-svg img");
+    const img = container.querySelector(".core-visual img");
     expect(img).not.toBeNull();
     const src = img!.getAttribute("src") ?? "";
     expect(src.startsWith("data:image/svg+xml;charset=utf-8,")).toBe(true);
@@ -105,7 +105,7 @@ describe("PrototypeWordCard core image", () => {
     const card = hostileCard();
     card.schemaAnalysis!.coreSvg = "not an svg at all";
     const { container } = render(<PrototypeWordCard card={card} />);
-    expect(container.querySelector(".custom-schema-svg")).toBeNull();
-    expect(container.querySelector("svg")).not.toBeNull();
+    expect(container.querySelector(".core-visual img")).toBeNull();
+    expect(container.querySelector(".core-visual svg")).not.toBeNull();
   });
 });

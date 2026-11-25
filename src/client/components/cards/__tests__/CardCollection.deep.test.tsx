@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { queryClient } from "@/client/lib/query-client";
+import { useAppStore } from "@/client/store";
+import { MemoryRouter } from "react-router-dom";
+import { useReadingStore } from "@/client/store/reading";
 
 let isAdmin: boolean;
 const useMissingDeepMock = vi.fn((enabled: boolean) => {
@@ -13,6 +16,7 @@ const useMissingDeepMock = vi.fn((enabled: boolean) => {
 
 vi.mock("@/client/hooks/useCards", () => ({
   useCards: () => ({ data: { cards: [], total: 0, page: 1, limit: 20 }, isLoading: false }),
+  useCard: () => ({ data: undefined, error: null }),
   useDeleteCard: () => ({ mutate: vi.fn(), isPending: false }),
   useMissingDeep: (enabled: boolean) => useMissingDeepMock(enabled),
 }));
@@ -24,6 +28,9 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { CardCollection } from "../CardCollection";
 
 beforeEach(() => {
+  useReadingStore.getState().reset();
+  useAppStore.persist.setOptions({ storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } });
+  useAppStore.getState().setUiLanguage("en");
   useMissingDeepMock.mockClear();
   vi.stubGlobal("matchMedia", () => ({ addEventListener: vi.fn(), removeEventListener: vi.fn() }));
 });
@@ -38,7 +45,7 @@ afterEach(() => {
 describe("the batch deep retry", () => {
   it("is neither asked about nor offered to a visitor", () => {
     isAdmin = false;
-    render(<CardCollection searchInput="" />);
+    render(<CardCollection searchInput="" />, { wrapper: MemoryRouter });
     // Leaving the argument out would mean "enabled", so every call must say no.
     expect(new Set(useMissingDeepMock.mock.calls.map(([enabled]) => enabled))).toEqual(new Set([false]));
     expect(screen.queryByRole("button", { name: /Retry Deep/ })).toBeNull();
@@ -57,7 +64,7 @@ describe("the batch deep retry", () => {
       }),
     );
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    render(<CardCollection searchInput="" />);
+    render(<CardCollection searchInput="" />, { wrapper: MemoryRouter });
     expect(useMissingDeepMock).toHaveBeenLastCalledWith(true);
 
     fireEvent.click(screen.getByRole("button", { name: "Retry Deep (2)" }));
