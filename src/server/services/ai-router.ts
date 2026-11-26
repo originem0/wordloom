@@ -46,6 +46,8 @@ export async function generateDeepLayer(
 ): Promise<{
   familyComparison: unknown[];
   familyBoundaryNote?: string;
+  familyAxes?: string;
+  familyChoiceRule?: string;
   schemaAnalysis?: unknown;
   boundaryTests: unknown[];
 }> {

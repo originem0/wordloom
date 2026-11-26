@@ -2,5 +2,11 @@ node_modules
 dist
 data
 .git
+.claude
+.codex
+backups
+tmp
 .env
+.env.*
+!.env.example
 *.md

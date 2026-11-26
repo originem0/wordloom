@@ -11,7 +11,7 @@ import {
   type StreamCall,
   type ParsedCard,
 } from "./ai-shared.js";
-import { parseJsonLenient, normalizeCardsPayload } from "./ai-normalize.js";
+import { parseJsonLenient, normalizeCardsPayload, withCoreSchema } from "./ai-normalize.js";
 import {
   CARDS_PROMPT,
   DEEP_PROMPT,
@@ -127,6 +127,8 @@ export async function geminiGenerateDeepLayer(
 ): Promise<{
   familyComparison: unknown[];
   familyBoundaryNote?: string;
+  familyAxes?: string;
+  familyChoiceRule?: string;
   schemaAnalysis?: unknown;
   boundaryTests: unknown[];
 }> {
@@ -164,47 +166,7 @@ export async function geminiGenerateDeepLayer(
           throw new Error(`Deep layer validation failed for "${word}"`);
         }
 
-        const ALLOWED = ["blockage", "container", "path", "link", "balance"] as const;
-        type CoreSchema = (typeof ALLOWED)[number];
-        const normalizeCoreSchema = (raw: unknown): CoreSchema => {
-          if (typeof raw !== "string") return "blockage";
-          const v = raw.trim().toLowerCase();
-          if ((ALLOWED as readonly string[]).includes(v)) return v as CoreSchema;
-          if (["scale", "weigh", "weighing", "tradeoff", "trade-off", "equilibrium"].includes(v)) {
-            return "balance";
-          }
-          if (["force", "pressure", "push", "pull"].includes(v)) return "blockage";
-          if (["cycle", "loop", "repeat", "repetition"].includes(v)) return "path";
-          if (v.includes("contain") || v.includes("inside") || v.includes("outside") || v.includes("boundary") || v === "box") {
-            return "container";
-          }
-          if (v.includes("journey") || v.includes("route") || v.includes("progress") || v.includes("path")) {
-            return "path";
-          }
-          if (v.includes("connect") || v.includes("relation") || v.includes("association") || v.includes("link")) {
-            return "link";
-          }
-          if (v.includes("balance") || v.includes("equilib") || v.includes("weigh")) {
-            return "balance";
-          }
-          return "blockage";
-        };
-
-        const out = result.data;
-        if (!out.schemaAnalysis) {
-          out.schemaAnalysis = {
-            coreSchema: "blockage",
-            coreImageText: "",
-            metaphoricalExtensions: [],
-            registerVariation: "",
-            etymologyChain: [],
-            sceneActivation: [],
-          };
-        } else {
-          out.schemaAnalysis.coreSchema = normalizeCoreSchema(out.schemaAnalysis.coreSchema);
-        }
-
-        return out;
+        return withCoreSchema(result.data);
       },
     });
   } finally {

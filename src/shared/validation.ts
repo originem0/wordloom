@@ -112,6 +112,19 @@ export const aiCardSchema = z.object({
 
 export const aiCardsResponseSchema = z.array(aiCardSchema);
 
+// The notes around the family table. A model that sends a list where one line
+// was asked for, or nothing usable, loses the note and keeps its deep layer.
+const looseLine = (separator: string) =>
+  z.preprocess((value) => {
+    const parts = Array.isArray(value) ? value : [value];
+    const line = parts
+      .filter((part): part is string => typeof part === "string")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(separator);
+    return line || undefined;
+  }, z.string().optional());
+
 export const aiDeepLayerSchema = z.object({
   familyComparison: z
     .array(
@@ -125,14 +138,18 @@ export const aiDeepLayerSchema = z.object({
     )
     .optional()
     .default([]),
-  familyBoundaryNote: z.string().optional(),
+  familyBoundaryNote: looseLine("\n"),
+  familyAxes: looseLine(" / "),
+  familyChoiceRule: looseLine(" "),
   schemaAnalysis: z
     .object({
       coreSchema: z.string(),
       coreImageText: z.string().optional(),
       coreSvg: z.string().optional(),
-      metaphoricalExtensions: z.array(z.string()),
-      registerVariation: z.string(),
+      wordType: z.string().optional().catch(undefined),
+      // No longer asked for; tolerated from models that still send them.
+      metaphoricalExtensions: z.array(z.string()).optional().catch(undefined),
+      registerVariation: z.string().optional().catch(undefined),
       etymologyChain: z.array(z.string()).optional(),
       sceneActivation: z
         .array(

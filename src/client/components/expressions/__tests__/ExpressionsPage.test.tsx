@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate, type InitialEntry } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Cue, EncounterView, ExpressionDetail, StatsResponse } from "@/shared/expressions";
@@ -126,12 +126,22 @@ afterEach(() => {
 
 let client: QueryClient;
 
-function renderPage() {
+function LocationProbe() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return <div hidden>
+    <output data-testid="location">{location.pathname + location.search + location.hash}</output>
+    <button type="button" data-testid="back" onClick={() => navigate(-1)}>Back</button>
+  </div>;
+}
+
+function renderPage(initialEntries?: InitialEntry[]) {
   // The app's own freshness window: a detail just read or written is not asked for again on opening it.
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
+        {initialEntries && <LocationProbe />}
         <ExpressionsPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -154,6 +164,81 @@ async function openRow(part: string) {
   }
 }
 const closeDetail = () => fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+
+describe("links from word cards to a saved expression", () => {
+  beforeEach(() => {
+    server.entries = [entry({ id: 88, text: "A tree blocked the road.", focus: "blocked" })];
+  });
+
+  it("opens an id-only link despite existing filters, and closes a copied link without adding history", async () => {
+    useReadingStore.getState().setExpressionQuery("a different private search");
+    renderPage(["/cards", "/?expression=88&keep=1"]);
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog).toHaveTextContent("A tree blocked the road."));
+    expect(asked("GET", "/api/expressions/88")).toHaveLength(1);
+    expect(requests.every((r) => r.method === "GET")).toBe(true);
+    expect(requests.some((r) => r.url.includes("private search") || r.url.includes("blocked"))).toBe(false);
+
+    closeDetail();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByTestId("location")).toHaveTextContent("/?keep=1");
+    expect(useReadingStore.getState().expressions.query).toBe("a different private search");
+    fireEvent.click(screen.getByTestId("back"));
+    expect(screen.getByTestId("location")).toHaveTextContent("/cards");
+  });
+
+  it("returns to the originating word card when its entry is closed", async () => {
+    renderPage(["/cards?card=7", { pathname: "/", search: "?expression=88", state: { expressionDetail: true } }]);
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog).toHaveTextContent("A tree blocked the road."));
+    closeDetail();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByTestId("location")).toHaveTextContent("/cards?card=7");
+  });
+
+  it("follows browser Back instead of keeping a stale linked dialog open", async () => {
+    renderPage(["/", "/?expression=88"]);
+    await screen.findByRole("dialog");
+    fireEvent.click(screen.getByTestId("back"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByTestId("location").textContent).toBe("/");
+  });
+
+  it("still reads an entry through the mask when it entered practice after the word card was read", async () => {
+    Object.assign(server.entries[0], { status: "active", intent: "想说道路不通了" });
+    renderPage(["/?expression=88"]);
+    await screen.findByRole("button", { name: "看答案" });
+    expect(document.body).not.toHaveTextContent("A tree blocked the road.");
+    expect(screen.getByRole("textbox", { name: /提示句/ })).toHaveValue("想说道路不通了");
+    expect(requests.every((r) => r.method === "GET")).toBe(true);
+  });
+
+  it("does not read a private entry from a visitor's link", async () => {
+    server.authenticated = false;
+    renderPage(["/?expression=88"]);
+    await waitFor(() => expect(client.getQueryData(["auth", "me"])).toEqual({ authenticated: false }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(requests.map((r) => r.url)).toEqual(["/api/auth/me"]);
+  });
+
+  it.each(["0", "-1", "not-an-id", "Infinity", "1.2", "9007199254740992"])("ignores an invalid entry id %s", async (id) => {
+    server.entries = [];
+    renderPage([`/?expression=${id}`]);
+    await screen.findByText("还没有收下任何表达。");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(requests.some((r) => /^\/api\/expressions\/\d/.test(r.url))).toBe(false);
+  });
+
+  it("shows a missing entry's error once and lets a copied link close onto the library", async () => {
+    renderPage(["/?expression=999&keep=1"]);
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog).toHaveTextContent("读取失败："));
+    expect(asked("GET", "/api/expressions/999")).toHaveLength(1);
+    closeDetail();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByTestId("location")).toHaveTextContent("/?keep=1");
+  });
+});
 
 describe("expression library paging and the first learning step", () => {
   const many = (count: number) => Array.from({ length: count }, (_, i) => entry({ id: i + 1, text: `Saved expression ${String(i + 1).padStart(2, "0")}` }));

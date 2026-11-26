@@ -1,3 +1,6 @@
+import type { z } from "zod";
+import type { aiDeepLayerSchema } from "../../shared/validation.js";
+
 // ---------------------------------------------------------------------------
 // Lenient JSON parsing (some models wrap JSON in markdown fences)
 // ---------------------------------------------------------------------------
@@ -209,4 +212,42 @@ export function normalizeCardsPayload(parsed: unknown): unknown {
 
   if (Array.isArray(payload)) return payload.map(normalizeCardObject);
   return payload;
+}
+
+// ---------------------------------------------------------------------------
+// Deep layer — shared by both providers
+// ---------------------------------------------------------------------------
+
+const CORE_SCHEMAS = ["blockage", "container", "path", "link", "balance", "none"] as const;
+export type CoreSchema = (typeof CORE_SCHEMAS)[number];
+type DeepLayer = z.infer<typeof aiDeepLayerSchema>;
+
+/**
+ * Maps a model's label onto the schemas the card can draw. A label that fits
+ * none of them stays "none" and the card shows no template: the old fallback
+ * drew the blockage diagram for every word the model could not place.
+ */
+export function normalizeCoreSchema(raw: unknown): CoreSchema {
+  if (typeof raw !== "string") return "none";
+  const v = raw.trim().toLowerCase();
+  if ((CORE_SCHEMAS as readonly string[]).includes(v)) return v as CoreSchema;
+  if (["scale", "weigh", "weighing", "tradeoff", "trade-off", "equilibrium"].includes(v)) return "balance";
+  if (["force", "pressure", "push", "pull"].includes(v)) return "blockage";
+  if (["cycle", "loop", "repeat", "repetition"].includes(v)) return "path";
+  if (v.includes("contain") || v.includes("inside") || v.includes("outside") || v.includes("boundary") || v === "box") return "container";
+  if (v.includes("journey") || v.includes("route") || v.includes("progress") || v.includes("path")) return "path";
+  if (v.includes("connect") || v.includes("relation") || v.includes("association") || v.includes("link")) return "link";
+  if (v.includes("balance") || v.includes("equilib") || v.includes("weigh")) return "balance";
+  if (v.includes("block") || v.includes("obstacle") || v.includes("barrier")) return "blockage";
+  return "none";
+}
+
+/** A deep layer always carries a schemaAnalysis; one the model left out draws nothing. */
+export function withCoreSchema(out: DeepLayer): DeepLayer {
+  if (out.schemaAnalysis) {
+    out.schemaAnalysis.coreSchema = normalizeCoreSchema(out.schemaAnalysis.coreSchema);
+  } else {
+    out.schemaAnalysis = { coreSchema: "none" };
+  }
+  return out;
 }

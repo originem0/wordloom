@@ -27,15 +27,17 @@
 
 ### 阅读顺序
 
-卡头保留单词、音标、词性与 CEFR，接着是核心意象、完整图解、词源，以及可展开的场景、家族对比和边界测试。
+卡头保留单词、音标、词性与 CEFR（新生成的卡另有词类标签），接着是核心意象、词源、边界测试，然后是家族对比、我收过的原句（仅管理员）、搭配与例句、场景激活四个折叠区。
 
-用户最终明确撤掉了顶部直接中文释义、先看一句的例句预览和更多评分信息。WAD/WAP、分级例句等仍在数据/API 中，不额外铺在详情顶部。列表继续显示简短释义；用法例句通过场景激活查看。
+用户最终明确撤掉了顶部直接中文释义、先看一句的例句预览和更多评分信息，这一条仍然有效：WAD/WAP、分级语境仍只在数据/API 中，顶部不加任何块。搭配、短语、三句例句、易混词和反义词原先生成并存储却从不显示，现在收在靠后的"搭配与例句"折叠区里，默认关闭；搭配与短语去重合并。列表继续显示简短释义。
+
+测试排在家族对比之前，是因为对比表的典型场景就是测试题的场景，先看表等于先看答案。家族对比因此默认折叠，第一次显示答案后自动展开；读者手动开合过就不再替他决定。没有测试题的卡直接展开对比。
 
 核心图解直接展示已保存内容，不再给同一段内容加简化翻译或完整图解折叠。这让界面语言与生成内容语言保持各自的作用范围。
 
 ### 图与主题
 
-account、grim、compromise、assume 使用代码中人工校对的场景图，避免只改某一本机数据库才能得到新图。其余优先使用已保存的模型 SVG，缺失时使用既有五种图式模板。
+account、grim、compromise、assume 使用代码中人工校对的场景图，避免只改某一本机数据库才能得到新图。其余优先使用已保存的模型 SVG，缺失时使用既有五种图式模板。图式为 `none` 时不画模板：有文字意象就只显示文字，两者都没有则整段不出现。
 
 模型 SVG 始终作为 `<img>`，解析和序列化只用于字号、位置与主题呈现，不插入页面 DOM、不回写数据。代码图作为受控 React SVG。词卡使用主站表面与文字色；`--word-*` 变量只负责词卡呈现，不覆盖控件使用的全局 `--card`、`--muted`。
 
@@ -45,9 +47,33 @@ account、grim、compromise、assume 使用代码中人工校对的场景图，�
 
 详情用 `?card=<id>` 接入浏览器历史，返回先关详情，关闭后焦点回原按钮。直接打开的详情链接也有返回词库的路径。桌面和手机使用 Radix Dialog 的焦点与滚动锁定，手机全屏；弹窗作为单一滚动文档，避免固定高度挤压折叠区。
 
-桌面保留四列家族对比，手机先显示词与核心区别，语域/场景随后展开。边界测试先选择，再显示参考判断和各选项解释；旧情境格式使用适用、不适用、视情境而定三个选择。可再次尝试，但没有写入表达练习、升级或产出统计。
+家族对比按"区分轴 → 怎么选 → 关键边界 → 表"的顺序读：前两行只有新生成的卡才有；关键边界一对一行，旧卡的单段文字在句末的 "X vs Y" 处切开（`card-detail.ts` 的 `splitBoundaryNote`）。桌面保留四列表，手机每个词一张卡，语域和场景直接列出，不再嵌套折叠。家族里的其他词可点：把词填进词库搜索框并关闭详情，有卡就看到卡，没有卡管理员可以直接生成。
 
-实现见 `src/client/components/cards/CardCollection.tsx`、`PrototypeWordCard.tsx`、`CoreImageVisual.tsx`、`ReviewedCoreImage.tsx` 与 `prototype-word-card.css`。
+边界测试一次一题，带进度。先选择，再显示参考判断和各选项解释；可再试一次，再进入下一题，最后一题之后给出"第一次就选对几题"，重试不计入。旧情境格式使用适用、不适用、视情境而定三个选择。选项顺序由词卡、轮次、题号和重试次数算出的种子打乱（`shuffleOptions`）：模型几乎总把合适的词写在第一个（本机 100 张卡的 334 道题里有 306 道），按存储顺序显示等于把答案排在最前。同一题在重新渲染之间顺序不变。自检结果只在页面内存里，没有写入表达练习、升级或产出统计。
+
+### 我收过的原句
+
+管理员展开后才读取表达库，复用 `useExpressions` 的私人缓存和失效规则，不另建按词缓存或查询接口。只匹配条目的原文，排除已收起、`masked` 或无原文的摘要；不读取隐藏字段、学习记录或对谈历史来补足命中。展开、查看记录和重试均不发起模型调用、不写学习记录、不计为练习。
+
+匹配完整单词，不把 `car` 命中到 `care`；已知名词和动词兼容常规词形，未知词性只找原词，不猜不规则变化。短语保留词间分隔符，避免跨标点拼出一个并不存在的短语。焦点中的命中优先，其余沿用表达库由新到旧的顺序；同一句原文因不同焦点重复收藏时只显示一次，优先链接到焦点包含当前词的条目。每条只显示一个命中片段，长原文在命中两侧各保留约 120 个字符，突出当前词，附出处和日期。默认显示三条，随后每次多看三条；空库、无匹配、加载和失败分别反馈，失败时不继续显示旧缓存片段。
+
+原句链接只携带数字 id（`/?expression=<id>`），不把原文或私人筛选词放进 URL。点击后打开既有表达详情；从词卡进入的记录关闭后返回原词卡，直接打开的链接关闭后回到表达列表并保留查询参数。原有表达筛选和分页不重置。详情仍经过服务端遮挡；若条目在两次读取之间进入想用，打开记录也不会直接显示答案。
+
+实现见 `src/client/components/cards/OwnSentencesSection.tsx`、`card-detail.ts` 和 `src/client/components/expressions/ExpressionsPage.tsx`。
+
+### 生成内容
+
+以下只影响此后新生成的卡，已有的卡不迁移、不重新生成。
+
+表层提示词不再要求 contextLadder、phrases、synonyms：前者与三句分级例句重复，后两者并入 4–6 条搭配，近义词由家族对比承担。对应的列和校验保留，旧数据照常读取。
+
+深层提示词先让模型判断词类（spatial、action、light、abstract、academic、scene、general），再按词类决定后面的内容：区分轴怎么选，以及要不要画图。`coreSvg` 改为可选，只有空间词、动作词或确有一幅具体画面的词才画；`coreSchema` 允许 `none`，不再要求"选最接近的"。新增 `familyAxes`（区分轴）与 `familyChoiceRule`（一句话怎么选），`familyBoundaryNote` 改为一对一行；三者都并入 `schemaAnalysis` JSON 列，没有新的数据库列。`metaphoricalExtensions` 与 `registerVariation` 不再生成，它们与词源链、场景和语域列重复，也从未显示过。
+
+三条家族说明的校验是宽松的：模型给了数组就拼接，给了读不懂的东西就丢弃这一条，不让整层失败。两个提供方共用 `ai-normalize.ts` 的 `normalizeCoreSchema`，认不出的图式标签归为 `none`；此前归为 `blockage`，任何放不进五种图式的词都会画一堵墙。
+
+2026-11-26 用实际配置的模型各跑了一次（只读设置，不写库）：spontaneous 判为 abstract、`none`、不画图；withstand 判为 spatial、`blockage`、带 SVG；两者都给出三条轴、一句选择规则和每行一对的边界说明，并通过校验。两个词不构成对模型稳定性的评估。
+
+实现见 `src/client/components/cards/CardCollection.tsx`、`PrototypeWordCard.tsx`、`card-detail.ts`、`CoreImageVisual.tsx`、`ReviewedCoreImage.tsx` 与 `prototype-word-card.css`；生成侧见 `src/server/services/ai-prompts.ts`、`ai-normalize.ts` 与 `src/shared/validation.ts`。
 
 ## 4. 表达库
 
@@ -73,15 +99,24 @@ account、grim、compromise、assume 使用代码中人工校对的场景图，�
 
 交付前复验通过：`pnpm exec tsc -b --force`（客户端与服务端）、全项目 `pnpm lint`、49 个测试文件/823 项测试、`pnpm build`，以及官方 registry 的生产依赖审计（无已知漏洞）。最后的词卡显示修正还通过了 3 个文件、19 项回归测试。
 
-浏览器覆盖 1440px 桌面、390px 手机与 320px 配置页，检查返回、键盘、焦点、分页、筛选、首次学习、图示、对谈、配置和登录，并确认顶部新增块已移除、完整图解可直接阅读。验收图片与脚本留在仓库外，不提交私人界面截图；检查没有发起模型生成或写入真实学习记录。
+词卡详情重排与生成提示词调整之后再次通过类型检查、lint 与 51 个测试文件/851 项测试，并在 390px 与 1280px 下用无头浏览器走过选择、显示答案、重试、下一题、统计、家族对比自动展开和家族词跳转，无横向溢出、无控制台错误。这一轮只重新构建了客户端，没有跑完整 `pnpm build` 和依赖审计。
+
+第 3 档原句连接之后通过类型检查、全项目 lint 和 52 个测试文件/884 项测试；完成 `pnpm build`，原句去重与手机折叠区最小 44px 触达尺寸修正后又完成最终客户端构建。浏览器复验覆盖 1280px、390px、320px，浅色/深色、延迟读取、完整记录与返回、原文去重、分批展开、长出处、空库、无匹配、读取失败与重试、访客不挂载私人区。没有横向溢出、控制台错误或写请求，也没有发起模型调用。该轮脚本与私人截图曾存于仓库外，已按后续清理要求删除。
+
+发布整理时清理旧数据库备份、演练数据库副本、导入中间材料和本轮浏览器验收文件，共约 222 MB；正式数据库、提词脚本及其本地输入保留。退出本机权限配置的版本控制，补齐提词输入、缓存与 Docker 构建的忽略规则。生产依赖审计再次通过，无已知漏洞；项目说明和实现记录随代码提交。
+
+此前的浏览器验收覆盖 1440px 桌面、390px 手机与 320px 配置页，检查返回、键盘、焦点、分页、筛选、首次学习、图示、对谈、配置和登录，并确认顶部新增块已移除、完整图解可直接阅读。私人验收材料未提交；检查没有发起模型生成或写入真实学习记录。
 
 | 当前实现 | 源码入口 |
 |---|---|
 | 界面语言 | [i18n.ts:6](../../src/client/lib/i18n.ts#L6) |
 | 词库历史、键盘与焦点 | [CardCollection.tsx:32](../../src/client/components/cards/CardCollection.tsx#L32) |
-| 词卡顺序与自检 | [PrototypeWordCard.tsx:122](../../src/client/components/cards/PrototypeWordCard.tsx#L122) |
+| 词卡顺序与自检 | [PrototypeWordCard.tsx:191](../../src/client/components/cards/PrototypeWordCard.tsx#L191) |
+| 选项打乱与边界说明拆行 | [card-detail.ts:18](../../src/client/components/cards/card-detail.ts#L18) |
+| 自己的原句与按需读取 | [OwnSentencesSection.tsx:57](../../src/client/components/cards/OwnSentencesSection.tsx#L57) |
+| 深层提示词 | [ai-prompts.ts:33](../../src/server/services/ai-prompts.ts#L33) |
 | 图与完整图解 | [CoreImageVisual.tsx:26](../../src/client/components/cards/CoreImageVisual.tsx#L26) |
-| 表达分页 | [ExpressionsPage.tsx:24](../../src/client/components/expressions/ExpressionsPage.tsx#L24) |
+| 表达分页 | [ExpressionsPage.tsx:25](../../src/client/components/expressions/ExpressionsPage.tsx#L25) |
 | 表达学习动作 | [ExpressionDetail.tsx:158](../../src/client/components/expressions/ExpressionDetail.tsx#L158) |
 | 对谈反馈 | [TalkTurn.tsx:130](../../src/client/components/expressions/TalkTurn.tsx#L130) |
 | 可见配置状态 | [SettingWidgets.tsx:16](../../src/client/components/settings/SettingWidgets.tsx#L16) |

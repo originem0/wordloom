@@ -53,6 +53,8 @@ backups/
 .claude/worktrees/
 tmp/batch-progress.json
 tmp/batch-failed.json
+tmp/cefr_cache.json
+tmp/word.xml
 
 # Python tooling caches (tools/*.py)
 __pycache__/

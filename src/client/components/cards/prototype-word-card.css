@@ -461,6 +461,7 @@
   display: none;
 }
 .proto-page .tests-summary {
+  min-height: 44px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -918,12 +919,6 @@
 }
 
 /* Core images lead; context and word comparisons remain available below. */
-.proto-page .word-meta { font-size: 14px; line-height: 1.6; }
-.proto-page .word-meta > summary { min-height: 44px; padding: 10px 0; cursor: pointer; color: var(--word-heading); }
-.proto-page .word-meta p { margin: 4px 0 8px; font-size: 14px; font-style: normal; }
-.proto-page .word-meta dl { padding-bottom: 8px; }
-.proto-page .word-meta dt { margin-top: 8px; font-weight: 600; }
-.proto-page .word-meta dd { margin-top: 4px; }
 .proto-page .core-visual { display: flex; justify-content: center; width: 100%; }
 .proto-page .core-visual > img, .proto-page .core-visual > svg { display: block; width: 100%; height: auto; max-height: 260px; object-fit: contain; }
 .proto-page .core-visual svg text { font-size: var(--word-diagram-label-size, 16px); }
@@ -943,8 +938,40 @@
 .proto-page .test-feedback { margin-top: 8px; font-size: 14px; font-weight: 500; }
 .proto-page .test-options .opt { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 4px 8px; padding: 8px 0; }
 .proto-page .test-options .opt .reason { grid-column: 2; }
-.proto-page .test-options .opt.chosen { border-bottom: 2px solid var(--word-accent); }
+/* A filled row, not an underline: between rows an underline reads as a divider. */
+.proto-page .test-options .opt.chosen { margin: 0 -8px; padding: 8px; border-radius: 8px; background: var(--word-surface); }
 .proto-page button:focus-visible, .proto-page summary:focus-visible, .proto-page a:focus-visible { outline: 2px solid var(--word-accent); outline-offset: 2px; }
+
+/* Tests come before the comparison that explains them, one question at a time. */
+.proto-page .boundary-tests h2 { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.proto-page .test-progress { font-size: 13px; font-weight: 400; color: var(--word-muted); font-variant-numeric: tabular-nums; }
+.proto-page .test-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.proto-page .test-actions:empty { display: none; }
+.proto-page .test-summary { margin-top: 8px; font-size: 14px; color: var(--word-muted); }
+.proto-page .family-line { font-size: 14px; line-height: 1.65; }
+.proto-page .family-line > span { margin-right: 8px; font-size: 12px; font-weight: 600; color: var(--word-muted); }
+.proto-page .family-cards .family-line { margin-top: 4px; }
+.proto-page ul.boundary-note { display: grid; gap: 6px; margin-top: 0; list-style: none; }
+.proto-page .family-link { margin: -6px 0; padding: 6px 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-decoration: underline dotted var(--word-accent); text-underline-offset: 4px; }
+.proto-page .family-link:hover { color: var(--word-accent); }
+.proto-page .usage-phrases { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; list-style: none; }
+.proto-page .usage-phrases li { padding: 3px 10px; border: 1px solid var(--word-border); border-radius: 999px; font-size: 14px; color: var(--word-heading); }
+.proto-page .usage-example { font-size: 15px; line-height: 1.6; color: var(--word-heading); }
+.proto-page .usage-example .usage-translation { font-size: 14px; color: var(--word-muted); }
+
+.proto-page .own-sentences { display: grid; gap: 8px; padding: 0; list-style: none; }
+.proto-page .own-sentence-link { display: block; padding: 12px; border: 1px solid var(--word-border); border-radius: 8px; color: var(--word-heading); text-decoration: none; overflow-wrap: anywhere; transition: border-color 0.15s; }
+.proto-page .own-sentence-link:hover { border-color: var(--word-accent); }
+.proto-page .own-sentence-link p { font-size: 15px; line-height: 1.65; }
+.proto-page .own-sentence-link mark { background: transparent; color: var(--word-accent); font-weight: 600; }
+.proto-page .own-sentence-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin-top: 8px; font-size: 12px; color: var(--word-muted); }
+.proto-page .own-sentence-open { flex-shrink: 0; color: var(--word-accent); }
+.proto-page .own-note { font-size: 14px; line-height: 1.6; color: var(--word-muted); }
+
+@media (min-width: 769px) {
+  .proto-page .test-choices { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .proto-page .test-choices .reveal-btn { grid-column: 1 / -1; justify-self: start; padding-inline: 20px; }
+}
 
 @media (max-width: 768px) {
   .word-dialog .proto-page .card { padding-top: max(16px, env(safe-area-inset-top)); padding-bottom: max(20px, env(safe-area-inset-bottom)); }

@@ -1,18 +1,34 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useGenerateDeep } from "@/client/hooks/useCards";
 import { AdminOnly } from "@/client/components/auth/AdminOnly";
-import type { BoundaryTest, BoundaryTestOption, Card } from "@/shared/types";
+import { useReadingStore } from "@/client/store/reading";
+import type { BoundaryTest, BoundaryTestOption, Card, FamilyEntry } from "@/shared/types";
 import { CoreImageVisual } from "./CoreImageVisual";
+import { OwnSentencesSection } from "./OwnSentencesSection";
 import { BoldMarkup } from "./UntrustedText";
+import { mergePhrases, seedOf, shuffleOptions, splitBoundaryNote } from "./card-detail";
 import { errorMessage, useI18n } from "@/client/lib/i18n";
 import "./prototype-word-card.css";
+
+type Verdict = BoundaryTestOption["verdict"];
 
 interface NormalizedBoundaryTest {
   sentence: string;
   options: BoundaryTestOption[];
   legacy: boolean;
 }
+
+// Step 0 of the method the deep layer follows: what kind of word this is.
+// Cards generated before the field existed simply show no chip.
+const WORD_TYPES: Record<string, readonly [string, string]> = {
+  spatial: ["空间词", "Spatial"],
+  action: ["动作词", "Action"],
+  light: ["高频大词", "Light verb"],
+  academic: ["学术词", "Academic"],
+  abstract: ["抽象词", "Abstract"],
+  scene: ["场景词", "Frame word"],
+};
 
 function normalizeBoundaryTests(tests: BoundaryTest[]): NormalizedBoundaryTest[] {
   return tests.map((t) => {
@@ -48,17 +64,29 @@ function hasDeepData(card: Card): boolean {
   );
 }
 
-function BoundaryTestItem({ test }: { test: NormalizedBoundaryTest }) {
+function BoundaryTestItem({ test, seed, onReveal, children }: { test: NormalizedBoundaryTest; seed: number; onReveal: (verdict: Verdict) => void; children?: ReactNode }) {
   const { t } = useI18n();
   const [revealed, setRevealed] = useState(false);
   const [choice, setChoice] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const name = useId();
   const verdict = (value: string) => value === "yes" ? t("适用", "Fits") : value === "no" ? t("不适用", "Does not fit") : t("视情境而定", "Depends on context");
+  // Stored order puts the fitting word first; a retry draws a new order.
+  const options = useMemo(
+    () => (test.legacy ? test.options : shuffleOptions(test.options, seedOf(seed, attempt))),
+    [test, seed, attempt],
+  );
   const choices = test.legacy
     ? ["yes", "no", "maybe"].map((value) => ({ value, label: verdict(value) }))
-    : test.options.map((option, i) => ({ value: String(i), label: option.word }));
-  const selected = test.legacy ? choice && verdict(choice) : choice === null ? null : test.options[Number(choice)]?.word;
-  const reference = test.legacy ? test.options[0]?.verdict : choice === null ? null : test.options[Number(choice)]?.verdict;
+    : options.map((option, i) => ({ value: String(i), label: option.word }));
+  const selected = test.legacy ? choice && verdict(choice) : choice === null ? null : options[Number(choice)]?.word;
+  const reference = test.legacy ? options[0]?.verdict : choice === null ? null : options[Number(choice)]?.verdict;
+  const reveal = () => {
+    setRevealed(true);
+    // A legacy question asks for the verdict itself; a word question is right
+    // when the chosen word fits.
+    onReveal(test.legacy ? (choice === reference ? "yes" : "no") : reference ?? "maybe");
+  };
 
   return (
     <div className="test-item">
@@ -82,7 +110,7 @@ function BoundaryTestItem({ test }: { test: NormalizedBoundaryTest }) {
             <input type="radio" name={name} value={option.value} checked={choice === option.value} onChange={() => setChoice(option.value)} />
             <span>{option.label}</span>
           </label>)}
-          <button type="button" className="reveal-btn" disabled={choice === null} onClick={() => setRevealed(true)}>
+          <button type="button" className="reveal-btn" disabled={choice === null} onClick={reveal}>
             {t("显示答案", "Show answer")}
           </button>
         </fieldset>
@@ -91,7 +119,7 @@ function BoundaryTestItem({ test }: { test: NormalizedBoundaryTest }) {
       {revealed && <>
       <p className="test-feedback" role="status">{t(`你选了 ${selected}，参考判断是${verdict(reference ?? "maybe")}。`, `You chose ${selected}. Reference: ${verdict(reference ?? "maybe")}.`)}</p>
       <div className="test-options visible">
-        {test.options.map((opt, i) => (
+        {options.map((opt, i) => (
           <div key={i} className={`opt${!test.legacy && choice === String(i) ? " chosen" : ""}`}>
             <span className={`verdict ${opt.verdict}`} role="img" aria-label={opt.verdict === "yes" ? t("适用", "Fits") : opt.verdict === "no" ? t("不适用", "Does not fit") : t("视情境而定", "Depends on context")}>
               {opt.verdict === "yes" ? "✓" : opt.verdict === "no" ? "✗" : "?"}
@@ -101,9 +129,50 @@ function BoundaryTestItem({ test }: { test: NormalizedBoundaryTest }) {
           </div>
         ))}
       </div>
-      <button type="button" className="reveal-btn" onClick={() => { setChoice(null); setRevealed(false); }}>{t("再试一次", "Try again")}</button>
       </>}
+      <div className="test-actions">
+        {revealed && <button type="button" className="reveal-btn" onClick={() => { setChoice(null); setRevealed(false); setAttempt((n) => n + 1); }}>{t("再试一次", "Try again")}</button>}
+        {children}
+      </div>
     </div>
+  );
+}
+
+/** One question at a time: four open questions pushed the comparison that
+ * explains them a full screen further down. */
+function BoundaryTests({ tests, cardId, onAnswer }: { tests: NormalizedBoundaryTest[]; cardId: number; onAnswer: () => void }) {
+  const { t } = useI18n();
+  const [index, setIndex] = useState(0);
+  const [round, setRound] = useState(0);
+  // Only the first answer to a question counts: a retry has read the reasons.
+  const [first, setFirst] = useState<Record<number, Verdict>>({});
+  const current = Math.min(index, tests.length - 1);
+  const answered = first[current] !== undefined;
+  const last = current === tests.length - 1;
+  const right = Object.values(first).filter((value) => value === "yes").length;
+
+  return (
+    <section className="boundary-tests">
+      <h2>
+        {t("边界测试", "Boundary tests")}
+        {tests.length > 1 && <span className="test-progress">{current + 1} / {tests.length}</span>}
+      </h2>
+      <BoundaryTestItem
+        key={`${round}:${current}`}
+        test={tests[current]}
+        seed={seedOf(cardId, round, current)}
+        onReveal={(value) => {
+          setFirst((previous) => (previous[current] === undefined ? { ...previous, [current]: value } : previous));
+          onAnswer();
+        }}
+      >
+        {answered && !last && <button type="button" className="reveal-btn" onClick={() => setIndex(current + 1)}>{t("下一题", "Next")}</button>}
+        {answered && last && tests.length > 1 && <button type="button" className="reveal-btn" onClick={() => { setFirst({}); setIndex(0); setRound((n) => n + 1); }}>{t("再来一遍", "Start over")}</button>}
+      </BoundaryTestItem>
+      {answered && last && tests.length > 1 && (
+        <p className="test-summary" role="status">{t(`${tests.length} 题里，第一次就选对 ${right} 题。`, `Right on the first try: ${right} of ${tests.length}.`)}</p>
+      )}
+    </section>
   );
 }
 
@@ -123,6 +192,9 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
   const { t } = useI18n();
   const generateDeep = useGenerateDeep();
   const compact = useCompactCard();
+  const setCardInput = useReadingStore((s) => s.setCardInput);
+  // null until the reader or a first answer decides; see the family section.
+  const [familyOpen, setFamilyOpen] = useState<boolean | null>(null);
 
   const deepData = generateDeep.data;
   const deepCard = useMemo(() => (deepData ? { ...card, ...deepData } : card), [card, deepData]);
@@ -136,24 +208,36 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
     ? deepCard.pos.split(/[,/]/).map((p) => p.trim()).filter(Boolean)
     : [];
 
-  const schemaType = deepCard.schemaAnalysis?.coreSchema?.toLowerCase();
-  const coreImageText =
-    deepCard.schemaAnalysis?.coreImageText || deepCard.schemaAnalysis?.coreSchema;
+  const schema = deepCard.schemaAnalysis;
+  const schemaType = schema?.coreSchema?.toLowerCase();
+  const wordType = WORD_TYPES[schema?.wordType?.toLowerCase() ?? ""];
+  // "none" is the model saying no schema fits: neither a drawing nor a caption.
+  const coreImageText = schema?.coreImageText || (schemaType !== "none" ? schema?.coreSchema : undefined);
+  const hasCoreImage = !!schema && (schemaType !== "none" || !!schema.coreSvg || !!coreImageText);
 
-  const evolutionChain = deepCard.schemaAnalysis?.etymologyChain;
+  const evolutionChain = schema?.etymologyChain;
 
-  const scenes = deepCard.schemaAnalysis?.sceneActivation ?? [];
+  const scenes = schema?.sceneActivation ?? [];
 
   const family = deepCard.familyComparison ?? [];
+  const noteLines = schema?.familyBoundaryNote ? splitBoundaryNote(schema.familyBoundaryNote) : [];
 
-  const boundaryNote =
-    (deepCard.schemaAnalysis as (typeof deepCard.schemaAnalysis) & {
-      familyBoundaryNote?: string;
-    })?.familyBoundaryNote;
+  const boundaryTests = deepCard.boundaryTests;
+  const tests = useMemo(() => (boundaryTests ? normalizeBoundaryTests(boundaryTests) : []), [boundaryTests]);
 
-  const tests = deepCard.boundaryTests
-    ? normalizeBoundaryTests(deepCard.boundaryTests)
-    : [];
+  const phrases = mergePhrases(deepCard.collocations, deepCard.phrases);
+  const examples = (Array.isArray(deepCard.examples) ? deepCard.examples : []).filter((example) => typeof example?.sentence === "string" && example.sentence);
+  const antonyms = mergePhrases(deepCard.antonyms);
+  const minPair = typeof deepCard.minPair === "string" ? deepCard.minPair.trim() : "";
+
+  // A family word leads to its own card, or to the box that can generate one:
+  // the library's search takes the word and the detail closes onto it.
+  const familyWord = (entry: FamilyEntry) =>
+    !onClose || entry.word.toLowerCase() === deepCard.word.toLowerCase() ? entry.word : (
+      <button type="button" className="family-link" title={t(`在词库里查 ${entry.word}`, `Look up ${entry.word} in the library`)} onClick={() => { setCardInput(entry.word); onClose(); }}>
+        {entry.word}
+      </button>
+    );
 
   return (
     <div className="proto-page">
@@ -180,6 +264,7 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
               </span>
             ))}
             {deepCard.cefr && <span className="chip">CEFR {deepCard.cefr}</span>}
+            {wordType && <span className="chip">{t(...wordType)}</span>}
           </div>
           {/* Leads to the capture box with this word as the focus. Nothing is
               saved until the admin presses 收下 there. */}
@@ -191,11 +276,11 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
         </header>
 
         {/* 2. Core image — custom SVG or fallback template */}
-        {deepCard.schemaAnalysis && (
+        {hasCoreImage && (
           <section className="core-image">
             <h2>{t("核心意象", "Core image")}</h2>
 
-            <CoreImageVisual word={deepCard.word} type={schemaType ?? ""} raw={deepCard.schemaAnalysis.coreSvg} caption={coreImageText} />
+            <CoreImageVisual word={deepCard.word} type={schemaType ?? ""} raw={schema.coreSvg} caption={coreImageText} />
           </section>
         )}
 
@@ -246,51 +331,33 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
           </section>
         )}
 
-        {/* 4. Scene activation — collapsible */}
-        {scenes.length > 0 && (
-          <details className="tests-toggle">
-            <summary className="tests-summary">
-              <span className="chevron">&#9654;</span> {t("场景激活", "Frame activation")}
-            </summary>
-            <div className="tests-body">
-              {scenes.map((scene, i) => (
-                <div key={i} className="scene">
-                  <h3>{scene.title}</h3>
-                  <p>{scene.description}</p>
-                  <p className="scene-example">
-                    <BoldMarkup text={scene.example} />
-                  </p>
-                  {scene.associatedWords?.length > 0 && (
-                    <div className="associated-words">
-                      {scene.associatedWords.map((w) => (
-                        <span key={w}>{w}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </details>
+        {/* 4. Boundary tests — answered before the comparison that explains them */}
+        {tests.length > 0 && (
+          <BoundaryTests tests={tests} cardId={deepCard.id} onAnswer={() => setFamilyOpen((open) => open ?? true)} />
         )}
 
-        {/* 5. Family comparison — collapsible */}
+        {/* 5. Family comparison. Its typical scenes are the scenes the tests
+            ask about, so it stays folded until a first answer is in; a card
+            with no tests opens with it. */}
         {family.length > 0 && (
-          <details className="tests-toggle">
+          <details className="tests-toggle" open={familyOpen ?? tests.length === 0} onToggle={(event) => setFamilyOpen(event.currentTarget.open)}>
             <summary className="tests-summary">
               <span className="chevron">&#9654;</span> {t("家族对比", "Family comparison")}
             </summary>
             <div className="tests-body">
+              {schema?.familyAxes && <p className="family-line"><span>{t("区分轴", "Axes")}</span>{schema.familyAxes}</p>}
+              {schema?.familyChoiceRule && <p className="family-line"><span>{t("怎么选", "How to choose")}</span>{schema.familyChoiceRule}</p>}
+              {noteLines.length > 0 && (
+                <ul className="boundary-note">
+                  {noteLines.map((line, i) => <li key={i}>{line}</li>)}
+                </ul>
+              )}
               {compact ? <div className="family-cards">
                 {family.map((entry) => <article key={entry.word} className={entry.word.toLowerCase() === deepCard.word.toLowerCase() ? "highlight" : ""}>
-                  <h3>{entry.word}</h3>
+                  <h3>{familyWord(entry)}</h3>
                   <p>{entry.distinction}</p>
-                  <details className="word-meta">
-                    <summary>{t("语域与场景", "Register and context")}</summary>
-                    <dl>
-                      <dt>{t("情感 / 语域", "Tone / register")}</dt><dd>{entry.register}</dd>
-                      <dt>{t("典型场景", "Typical context")}</dt><dd>{entry.typicalScene}</dd>
-                    </dl>
-                  </details>
+                  {entry.register && <p className="family-line"><span>{t("语域", "Register")}</span>{entry.register}</p>}
+                  {entry.typicalScene && <p className="family-line"><span>{t("场景", "Scene")}</span>{entry.typicalScene}</p>}
                 </article>)}
               </div> : <div className="table-scroll">
                 <table className="family-table">
@@ -312,7 +379,7 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
                             : ""
                         }
                       >
-                        <td className="word-col">{entry.word}</td>
+                        <td className="word-col">{familyWord(entry)}</td>
                         <td>{entry.distinction}</td>
                         <td>{entry.register}</td>
                         <td>{entry.typicalScene}</td>
@@ -321,24 +388,61 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
                   </tbody>
                 </table>
               </div>}
-              {boundaryNote && (
-                <div className="boundary-note" style={{ whiteSpace: "pre-line" }}>
-                  {boundaryNote}
-                </div>
-              )}
             </div>
           </details>
         )}
 
-        {/* 6. Boundary tests (collapsed, answers hidden) */}
-        {tests.length > 0 && (
+        <AdminOnly>
+          <OwnSentencesSection key={deepCard.id} word={deepCard.word} pos={deepCard.pos} />
+        </AdminOnly>
+
+        {/* 7. Collocations and examples — folded: the top of the card stays
+            with the image, and usage is one tap away. */}
+        {(phrases.length > 0 || examples.length > 0 || antonyms.length > 0 || minPair) && (
           <details className="tests-toggle">
             <summary className="tests-summary">
-              <span className="chevron">&#9654;</span> {t("边界测试", "Boundary tests")}
+              <span className="chevron">&#9654;</span> {t("搭配与例句", "Collocations and examples")}
             </summary>
             <div className="tests-body">
-              {tests.map((t, i) => (
-                <BoundaryTestItem key={i} test={t} />
+              {phrases.length > 0 && (
+                <ul className="usage-phrases">
+                  {phrases.map((phrase) => <li key={phrase}>{phrase}</li>)}
+                </ul>
+              )}
+              {examples.map((example, i) => (
+                <div key={i} className="usage-example">
+                  <p>{example.sentence}</p>
+                  {example.translation && <p className="usage-translation">{example.translation}</p>}
+                </div>
+              ))}
+              {minPair && <p className="family-line"><span>{t("易混", "Often confused")}</span>{minPair}</p>}
+              {antonyms.length > 0 && <p className="family-line"><span>{t("反义", "Opposites")}</span>{antonyms.join(" · ")}</p>}
+            </div>
+          </details>
+        )}
+
+        {/* 8. Scene activation — collapsible */}
+        {scenes.length > 0 && (
+          <details className="tests-toggle">
+            <summary className="tests-summary">
+              <span className="chevron">&#9654;</span> {t("场景激活", "Frame activation")}
+            </summary>
+            <div className="tests-body">
+              {scenes.map((scene, i) => (
+                <div key={i} className="scene">
+                  <h3>{scene.title}</h3>
+                  <p>{scene.description}</p>
+                  <p className="scene-example">
+                    <BoldMarkup text={scene.example} />
+                  </p>
+                  {scene.associatedWords?.length > 0 && (
+                    <div className="associated-words">
+                      {scene.associatedWords.map((w) => (
+                        <span key={w}>{w}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           </details>

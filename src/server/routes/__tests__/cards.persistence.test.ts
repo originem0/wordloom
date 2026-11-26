@@ -87,6 +87,18 @@ describe("POST /api/cards/:id/deep persistence", () => {
     expect(JSON.parse(row!.schemaAnalysis!)).not.toHaveProperty("familyBoundaryNote");
   });
 
+  it("stores the family's axes and choice rule beside the note", async () => {
+    mockDeep.mockResolvedValue({ ...DEEP, familyAxes: "程度 / 语域", familyChoiceRule: "完全不通 → block" });
+    const card = await seedCard("stall");
+
+    const body = (await (await postDeep(card.id)).json()) as { schemaAnalysis: Record<string, unknown> };
+    expect(body.schemaAnalysis).toMatchObject({
+      familyBoundaryNote: "hinder is slower than block",
+      familyAxes: "程度 / 语域",
+      familyChoiceRule: "完全不通 → block",
+    });
+  });
+
   it("does not call the model again once a deep layer is stored", async () => {
     mockDeep.mockResolvedValue(DEEP);
     const card = await seedCard("clog");

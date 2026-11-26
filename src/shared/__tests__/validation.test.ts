@@ -86,6 +86,34 @@ describe("Scenario 1: AI Data Schema Validation Resilience", () => {
       expect(result.data.boundaryTests[0].scenario).toBe("Old scenario");
     }
   });
+
+  it("accepts a layer written under the current prompt", () => {
+    const parsed = aiDeepLayerSchema.parse({
+      familyAxes: "程度 / 语域",
+      familyBoundaryNote: "block vs hinder：…\nblock vs clog：…",
+      familyChoiceRule: "完全不通 → block",
+      // no drawing, no schema, and none of the retired fields
+      schemaAnalysis: { wordType: "abstract", coreSchema: "none", coreImageText: "…" },
+    });
+    expect(parsed.familyAxes).toBe("程度 / 语域");
+    expect(parsed.familyChoiceRule).toBe("完全不通 → block");
+    expect(parsed.schemaAnalysis).toEqual({ wordType: "abstract", coreSchema: "none", coreImageText: "…" });
+  });
+
+  // The notes decorate the family table; their shape must never cost the layer.
+  it("joins a note sent as a list and drops one it cannot read", () => {
+    const parsed = aiDeepLayerSchema.parse({
+      familyAxes: ["程度", " 语域 ", 3],
+      familyBoundaryNote: ["block vs hinder：…", "block vs clog：…"],
+      familyChoiceRule: { rule: "not a line" },
+      schemaAnalysis: { coreSchema: "path", wordType: 7, registerVariation: ["formal"] },
+    });
+    expect(parsed.familyAxes).toBe("程度 / 语域");
+    expect(parsed.familyBoundaryNote).toBe("block vs hinder：…\nblock vs clog：…");
+    expect(parsed.familyChoiceRule).toBeUndefined();
+    expect(parsed.schemaAnalysis?.wordType).toBeUndefined();
+    expect(parsed.schemaAnalysis?.registerVariation).toBeUndefined();
+  });
 });
 
 describe("card generation request", () => {

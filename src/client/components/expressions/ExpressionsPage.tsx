@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { ModuleErrorBoundary } from "@/client/components/layout/ErrorBoundary";
 import { Button } from "@/client/components/ui/button";
 import { Input } from "@/client/components/ui/input";
@@ -38,6 +39,12 @@ function ExpressionsInner() {
   const setLayer = useReadingStore((s) => s.setExpressionLayer);
   const setPage = useReadingStore((s) => s.setExpressionPage);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const candidate = Number(searchParams.get("expression"));
+  const linkedId = Number.isSafeInteger(candidate) && candidate > 0 ? candidate : null;
+  const selectedId = linkedId ?? openId;
   const [focusCue, setFocusCue] = useState(false);
   const all = list.data?.expressions ?? NO_EXPRESSIONS;
   const listStart = useRef<HTMLElement>(null);
@@ -88,6 +95,18 @@ function ExpressionsInner() {
     watchGloss(id);
     setQuery("");
     setLayer("all");
+  };
+  const closeDetail = () => {
+    setOpenId(null);
+    if (linkedId === null) return;
+    // A word card links here with only an id. Closing returns to that card;
+    // a copied link instead closes onto the library, keeping other URL state.
+    if (location.state?.expressionDetail) navigate(-1);
+    else {
+      const next = new URLSearchParams(searchParams);
+      next.delete("expression");
+      navigate({ pathname: location.pathname, search: next.toString(), hash: location.hash }, { replace: true });
+    }
   };
 
   return (
@@ -144,7 +163,7 @@ function ExpressionsInner() {
             </ul>
             <PaginationControls page={page} total={shown.length} pageSize={PAGE_SIZE} noun={t("条", "expressions")} label={t("表达分页", "Expression pages")} onChange={changePage} />
           </section>
-          <ExpressionDetailDialog id={openId} glossing={glossing === openId} draft={draft} focusCue={focusCue} onClose={() => setOpenId(null)} />
+          <ExpressionDetailDialog id={isAdmin ? selectedId : null} glossing={glossing === selectedId} draft={draft} focusCue={linkedId === null && focusCue} onClose={closeDetail} />
         </>
       )}
     </div>

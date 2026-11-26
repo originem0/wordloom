@@ -252,7 +252,7 @@ cardRoutes.post("/:id/deep", async (c) => {
     return c.json({ error: msg, code: "GENERATION_FAILED" }, 500);
   }
 
-  // Merge familyBoundaryNote into schemaAnalysis blob (no new DB column)
+  // The family's notes ride in the schemaAnalysis blob (no new DB column)
   const schemaBlob = {
     ...(typeof deep.schemaAnalysis === "object" && deep.schemaAnalysis
       ? deep.schemaAnalysis
@@ -260,6 +260,8 @@ cardRoutes.post("/:id/deep", async (c) => {
     ...(deep.familyBoundaryNote
       ? { familyBoundaryNote: deep.familyBoundaryNote }
       : {}),
+    ...(deep.familyAxes ? { familyAxes: deep.familyAxes } : {}),
+    ...(deep.familyChoiceRule ? { familyChoiceRule: deep.familyChoiceRule } : {}),
   };
 
   await db

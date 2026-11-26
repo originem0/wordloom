@@ -44,13 +44,20 @@ export interface FamilyEntry {
 }
 
 export interface SchemaAnalysis {
+  /** One of the five image schemas, or "none" when no schema fits the word. */
   coreSchema: string;
   coreImageText?: string;
   coreSvg?: string;
-  metaphoricalExtensions: string[];
-  registerVariation: string;
+  wordType?: string;
+  /** No longer generated; cards made before that still carry them. */
+  metaphoricalExtensions?: string[];
+  registerVariation?: string;
   etymologyChain?: string[];
   sceneActivation?: SceneFrame[];
+  /** The family's notes ride in this blob: the table has no column for them. */
+  familyBoundaryNote?: string;
+  familyAxes?: string;
+  familyChoiceRule?: string;
 }
 
 export interface SceneFrame {
