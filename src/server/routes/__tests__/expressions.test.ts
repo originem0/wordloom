@@ -38,6 +38,7 @@ import type {
   DuplicateResponse,
   ExpressionDetail,
   ExpressionListResponse,
+  TalkThreadResponse,
 } from "../../../shared/expressions.js";
 
 const HOST = "wordloom.test";
@@ -109,6 +110,50 @@ afterEach(() => {
   process.env = { ...originalEnv };
 });
 
+describe("permanently deleting an expression", () => {
+  it.each(["seen", "active", "retired"])("deletes a %s entry and its timeline, keeping other entries and conversations", async (status) => {
+    const now = Date.now();
+    const [target, other] = await db.insert(expressions).values([
+      { text: `Delete this ${MARKER}`, norm: "delete this", status, intent: "我想测试删除", createdAt: now, updatedAt: now },
+      { text: "Keep this one.", norm: "keep this one", createdAt: now, updatedAt: now },
+    ]).returning();
+    await db.insert(encounters).values([
+      { expressionId: target.id, kind: "met", text: target.text, createdAt: now },
+      { expressionId: target.id, kind: "attempt", text: `Attempt ${MARKER}`, outcome: "pass", createdAt: now + 1 },
+      { expressionId: other.id, kind: "met", text: other.text, createdAt: now },
+    ]);
+    await db.insert(talkTurns).values({
+      thread: now, said: "A conversation remains.", reply: "Its reply remains.", createdAt: now,
+      notes: JSON.stringify({ fix: null, rewrites: [], fresh: [], mine: [{ id: target.id, why: "matched before deletion" }], searched: 2, total: 2 }),
+    });
+
+    const res = await req(`/api/expressions/${target.id}`, { method: "DELETE" });
+    expect(res.status).toBe(204);
+    expect(await res.text()).toBe("");
+    expect(res.headers.get("cache-control")).toContain("no-store");
+    expect(await db.select().from(expressions).where(eq(expressions.id, target.id)).get()).toBeUndefined();
+    expect(await metRows(target.id)).toEqual([]);
+    expect(await row(other.id)).toMatchObject({ text: "Keep this one." });
+    expect(await metRows(other.id)).toHaveLength(1);
+    expect(await db.select().from(talkTurns).all()).toHaveLength(1);
+    const thread = await (await req(`/api/expressions/talk/${now}`)).json() as TalkThreadResponse;
+    expect(thread.turns[0]).toMatchObject({ reply: "Its reply remains.", mine: [] });
+    expect((await req(`/api/expressions/${target.id}`)).status).toBe(404);
+    expect(model).not.toHaveBeenCalled();
+    expect(printed()).not.toContain(MARKER);
+  });
+
+  it("returns not found without changing the library when the id is absent", async () => {
+    const now = Date.now();
+    await db.insert(expressions).values({ text: "Keep me.", norm: "keep me", createdAt: now, updatedAt: now });
+    const res = await req("/api/expressions/999999", { method: "DELETE" });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ code: "NOT_FOUND" });
+    expect(await stored()).toHaveLength(1);
+    expect(model).not.toHaveBeenCalled();
+  });
+});
+
 describe("the guard on the expression library", () => {
   // Read off the app, so a route added later is probed without anyone
   // remembering to list it here.
@@ -130,8 +175,9 @@ describe("the guard on the expression library", () => {
     });
   const conversations = () => db.select().from(talkTurns).all();
 
-  it("is probed on all twenty routes", () => {
+  it("is probed on all twenty-one routes", () => {
     expect(routes().map(([method, path]) => `${method} ${path}`).sort()).toEqual([
+      "DELETE /api/expressions/1",
       "DELETE /api/expressions/talk/1",
       "GET /api/expressions",
       "GET /api/expressions/1",
@@ -614,7 +660,7 @@ describe("the list and the detail", () => {
     ["POST", "/api/expressions/abc/encounters"],
     ["GET", "/api/expressions/12x"],
     ["GET", "/api/expressions/-1"],
-    ["DELETE", "/api/expressions/1"],
+    ["DELETE", "/api/expressions/abc"],
     ["DELETE", "/api/expressions/talk"],
     ["GET", "/api/expressions/talk/abc"],
     ["DELETE", "/api/expressions/talk/12x"],

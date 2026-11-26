@@ -1,6 +1,6 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { encounters, talkTurns } from "../db/schema.js";
+import { encounters, expressions, talkTurns } from "../db/schema.js";
 import { failureReason } from "./ai-shared.js";
 import { answerReview, chooseReview } from "./expressions-review.js";
 import { attemptResponse } from "./expressions-try.js";
@@ -303,9 +303,17 @@ async function saveTurn(
       const previous = JSON.parse(current.notes) as TalkNotes;
       if (!previous.coachingPending && !previous.coachingFailure) return current;
     }
+    // An entry may have been deleted while the model was answering. Recheck
+    // under the write transaction so its old hit cannot recreate a timeline
+    // or make an otherwise valid conversation fail its foreign-key check.
+    const liveIds = new Set((await tx.select({ id: expressions.id }).from(expressions).all()).map((entry) => entry.id));
+    const liveHits = [...hits.keys()].filter((entry) => liveIds.has(entry.row.id));
+    notes.mine = notes.mine.filter((hit) => liveIds.has(hit.id));
+    if (notes.review && !liveIds.has(notes.review.id)) delete notes.review;
+    if (notes.reviewCandidate && !liveIds.has(notes.reviewCandidate.id)) delete notes.reviewCandidate;
     await tx.insert(encounters).values(
-      hits.size > 0
-        ? [...hits.keys()].map((e) => ({ ...asked, expressionId: e.row.id, cue: isMasked(e) && !open ? "masked" : null }))
+      liveHits.length > 0
+        ? liveHits.map((e) => ({ ...asked, expressionId: e.row.id, cue: isMasked(e) && !open ? "masked" : null }))
         : [{ ...asked, expressionId: null, cue: null }],
     );
     const values = { reply: out.reply, notes: JSON.stringify(notes) };

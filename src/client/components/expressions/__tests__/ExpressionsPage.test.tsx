@@ -49,7 +49,7 @@ function addRow(e: ExpressionDetail, over: Partial<EncounterView> & Pick<Encount
 // gives it (newest first, each with its English) and answers the routes of the
 // contract that this page uses.
 let server: {
-  authenticated: boolean; configured: boolean; entries: ExpressionDetail[]; glossOnAnnotate: string | null; draftOnAnnotate: string | null;
+  authenticated: boolean; configured: boolean; entries: ExpressionDetail[]; glossOnAnnotate: string | null; draftOnAnnotate: string | null; deleteFails: boolean;
   settings: Record<string, string>; stats: StatsResponse | null;
 };
 let requests: Array<{ method: string; url: string; body: Record<string, unknown> | null }>;
@@ -78,6 +78,11 @@ function answer(method: string, url: string, body: Record<string, unknown> | nul
   }
   const found = server.entries.find((e) => e.id === Number(id));
   if (!found) return json({ error: "Not found" }, 404);
+  if (method === "DELETE") {
+    if (server.deleteFails) return json({ error: "Unavailable" }, 500);
+    server.entries = server.entries.filter((e) => e.id !== found.id);
+    return new Response(null, { status: 204 });
+  }
   if (method === "PATCH") {
     const next = { ...found, ...body };
     if (next.status === "active" && !next.intent) return json({ error: "An entry in 想用 needs an intent", code: "INTENT_REQUIRED" }, 400);
@@ -102,7 +107,7 @@ beforeEach(() => {
   useReadingStore.getState().reset();
   useAppStore.setState({ uiLanguage: "zh-CN" });
   server = {
-    authenticated: true, configured: true, entries: [], glossOnAnnotate: "to begin to be understood", draftOnAnnotate: null, settings: {}, stats: NO_STATS,
+    authenticated: true, configured: true, entries: [], glossOnAnnotate: "to begin to be understood", draftOnAnnotate: null, deleteFails: false, settings: {}, stats: NO_STATS,
   };
   requests = [];
   vi.mocked(toast.error).mockClear();
@@ -164,6 +169,78 @@ async function openRow(part: string) {
   }
 }
 const closeDetail = () => fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+
+describe("permanently deleting a saved expression", () => {
+  beforeEach(() => { vi.spyOn(window, "confirm").mockReturnValue(true); });
+  afterEach(() => { vi.mocked(window.confirm).mockRestore(); });
+
+  it("keeps the entry when the confirmation is cancelled", async () => {
+    server.entries = [entry({ id: 71, text: "Keep this expression." })];
+    vi.mocked(window.confirm).mockReturnValue(false);
+    renderPage();
+    await openRow("Keep this expression.");
+    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+    expect(asked("DELETE", "/api/expressions/71")).toHaveLength(0);
+    expect(server.entries).toHaveLength(1);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it.each(["seen", "active", "retired"] as const)("deletes a %s expression after confirmation and closes its detail", async (status) => {
+    server.entries = [entry({ id: 71, text: "Delete this expression.", status, intent: "我想删掉这条" })];
+    renderPage(["/?expression=71"]);
+    fireEvent.click(await screen.findByRole("button", { name: "永久删除" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(window.confirm).toHaveBeenCalledWith("永久删除这条表达及其学习记录？删除后无法恢复。");
+    expect(asked("DELETE", "/api/expressions/71")).toHaveLength(1);
+    expect(server.entries).toEqual([]);
+    expect(client.getQueryData(["expressions", 71])).toBeUndefined();
+    expect(screen.getByTestId("location").textContent).toBe("/");
+  });
+
+  it("keeps the detail and unsaved note when deletion fails", async () => {
+    server.entries = [entry({ id: 71, text: "Keep this expression." })];
+    server.deleteFails = true;
+    renderPage();
+    await openRow("Keep this expression.");
+    fireEvent.change(screen.getByRole("textbox", { name: "备注" }), { target: { value: "An unsaved note" } });
+    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/^删除失败：/)));
+    expect(server.entries).toHaveLength(1);
+    expect(screen.getByRole("textbox", { name: "备注" })).toHaveValue("An unsaved note");
+    expect(screen.getByRole("button", { name: "永久删除" })).toBeEnabled();
+  });
+
+  it("returns to the originating word card after deleting a linked expression", async () => {
+    server.entries = [entry({ id: 71, text: "Delete this expression." })];
+    renderPage(["/cards?card=7", { pathname: "/", search: "?expression=71", state: { expressionDetail: true } }]);
+    fireEvent.click(await screen.findByRole("button", { name: "永久删除" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByTestId("location")).toHaveTextContent("/cards?card=7");
+  });
+
+  it("moves off an empty last page when its last expression is deleted", async () => {
+    server.entries = Array.from({ length: 41 }, (_, i) => entry({ id: i + 1, text: `Expression ${i + 1}.` }));
+    renderPage();
+    await waitFor(() => expect(rows()).toHaveLength(20));
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    await openRow("Expression 41.");
+    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(rows()).toHaveLength(20));
+    expect(screen.getByText(/第 2 \/ 2 页/)).toBeInTheDocument();
+  });
+
+  it("uses the current interface language for the destructive confirmation", async () => {
+    server.entries = [entry({ id: 71, text: "Delete this expression." })];
+    renderPage();
+    await openRow("Delete this expression.");
+    act(() => useAppStore.setState({ uiLanguage: "en" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(window.confirm).toHaveBeenCalledWith("Permanently delete this expression and its learning history? This cannot be undone.");
+  });
+});
 
 describe("links from word cards to a saved expression", () => {
   beforeEach(() => {

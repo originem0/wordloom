@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useCards, useGenerateDeep, useMissingDeep } from "../useCards";
-import { EXPRESSIONS_KEY, useAnnotate, useAttempt, useExpression, useExpressions, useReveal, useScene, useStats, useTry } from "../useExpressions";
+import { EXPRESSIONS_KEY, useAnnotate, useAttempt, useDeleteExpression, useExpression, useExpressions, useReveal, useScene, useStats, useTry } from "../useExpressions";
 import { useSettings } from "../useSettings";
 
 let client: QueryClient;
@@ -20,6 +20,78 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("deleting an expression", () => {
+  const ENTRY = { id: 7, text: "Delete this expression." };
+  const OTHER = { id: 8, text: "Keep this expression." };
+
+  it("removes the entry and scene caches and refreshes the shared list and statistics", async () => {
+    let deleted = false;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (init?.method === "DELETE") { deleted = true; return new Response(null, { status: 204 }); }
+      return new Response(JSON.stringify(url === "/api/expressions" ? { expressions: deleted ? [OTHER] : [ENTRY, OTHER] } : {}), { status: 200 });
+    });
+    client.setQueryData([...EXPRESSIONS_KEY, 7], ENTRY);
+    client.setQueryData([...EXPRESSIONS_KEY, 7, "scene"], { text: "Old scene" });
+    client.setQueryData([...EXPRESSIONS_KEY, 8], OTHER);
+    const { result } = renderHook(() => ({ list: useExpressions(true), stats: useStats(true), remove: useDeleteExpression() }), { wrapper });
+    await waitFor(() => expect(result.current.list.isSuccess && result.current.stats.isSuccess).toBe(true));
+    await result.current.remove.mutateAsync(7);
+    await waitFor(() => expect(requested().filter((url) => url === "/api/expressions/stats")).toHaveLength(2));
+    expect(client.getQueryData([...EXPRESSIONS_KEY, 7])).toBeUndefined();
+    expect(client.getQueryData([...EXPRESSIONS_KEY, 7, "scene"])).toBeUndefined();
+    expect(client.getQueryData([...EXPRESSIONS_KEY, 8])).toEqual(OTHER);
+    expect(client.getQueryData(EXPRESSIONS_KEY)).toEqual({ expressions: [OTHER] });
+    expect(vi.mocked(fetch).mock.calls.find(([url]) => url === "/api/expressions/7")?.[1]?.method).toBe("DELETE");
+  });
+
+  it("does not restore a deleted entry when an older annotation response arrives", async () => {
+    let answer!: (response: Response) => void;
+    let deleted = false;
+    vi.mocked(fetch).mockImplementation((url, init) => {
+      if (init?.method === "DELETE") { deleted = true; return Promise.resolve(new Response(null, { status: 204 })); }
+      if (String(url).endsWith("/annotate")) return new Promise<Response>((resolve) => { answer = resolve; });
+      return Promise.resolve(new Response(JSON.stringify({ expressions: deleted ? [] : [ENTRY] }), { status: 200 }));
+    });
+    const { result } = renderHook(() => ({ list: useExpressions(true), annotate: useAnnotate(), remove: useDeleteExpression() }), { wrapper });
+    await waitFor(() => expect(result.current.list.isSuccess).toBe(true));
+    const writing = result.current.annotate.mutateAsync(7);
+    await waitFor(() => expect(requested()).toContain("/api/expressions/7/annotate"));
+    await result.current.remove.mutateAsync(7);
+    answer(new Response(JSON.stringify(ENTRY), { status: 200 }));
+    await writing;
+    expect(client.getQueryData([...EXPRESSIONS_KEY, 7])).toBeUndefined();
+    expect(client.getQueryData(EXPRESSIONS_KEY)).toEqual({ expressions: [] });
+  });
+
+  it("keeps no private cache when deletion completes after sign-out", async () => {
+    let answer!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation((url, init) => init?.method === "DELETE"
+      ? new Promise<Response>((resolve) => { answer = resolve; })
+      : Promise.resolve(new Response(JSON.stringify({ expressions: [ENTRY] }), { status: 200 })));
+    const page = renderHook(() => ({ list: useExpressions(true), remove: useDeleteExpression() }), { wrapper });
+    await waitFor(() => expect(page.result.current.list.isSuccess).toBe(true));
+    const deleting = page.result.current.remove.mutateAsync(7);
+    await waitFor(() => expect(requested()).toContain("/api/expressions/7"));
+    client.clear();
+    page.unmount();
+    answer(new Response(null, { status: 204 }));
+    await deleting;
+    expect(client.getQueryCache().findAll()).toEqual([]);
+  });
+
+  it("keeps the cached record when deletion fails", async () => {
+    vi.mocked(fetch).mockImplementation(async (_url, init) => init?.method === "DELETE"
+      ? new Response(JSON.stringify({ error: "Unavailable" }), { status: 500 })
+      : new Response(JSON.stringify({ expressions: [ENTRY] }), { status: 200 }));
+    client.setQueryData([...EXPRESSIONS_KEY, 7], ENTRY);
+    const { result } = renderHook(() => ({ list: useExpressions(true), remove: useDeleteExpression() }), { wrapper });
+    await waitFor(() => expect(result.current.list.isSuccess).toBe(true));
+    await expect(result.current.remove.mutateAsync(7)).rejects.toMatchObject({ status: 500 });
+    expect(client.getQueryData([...EXPRESSIONS_KEY, 7])).toEqual(ENTRY);
+    expect(client.getQueryData(EXPRESSIONS_KEY)).toEqual({ expressions: [ENTRY] });
+  });
+});
 
 // The server refuses these reads to a visitor. The components switch them off
 // for one; this is the other half of that: a query switched off sends nothing.

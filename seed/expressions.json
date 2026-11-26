@@ -1,0 +1,766 @@
+{
+  "format": "wordloom-expression-seed",
+  "version": 1,
+  "expressions": [
+    {
+      "id": 1,
+      "text": "That makes sense.",
+      "norm": "that makes sense",
+      "focus": "That makes sense",
+      "intent": "我想回应对方的解释，说这样就讲得通了。",
+      "intentBy": "ai",
+      "aiIntent": "我想回应对方的解释，说这样就讲得通了。",
+      "gloss": "这样说有道理，讲得通。\n可回应解释、理由或提议。",
+      "note": "例句性质：笔记整理的表达模板。\n笔记摘录：| 回应 | It depends. / That makes sense. |\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "好句摘录",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 2,
+      "text": "Have we considered …?",
+      "norm": "have we considered",
+      "focus": "Have we considered",
+      "intent": "我想提议大家看看是否考虑过另一种办法。",
+      "intentBy": "ai",
+      "aiIntent": "我想提议大家看看是否考虑过另一种办法。",
+      "gloss": "我们有没有考虑过……？\n本次自拟例句：Have we considered moving the meeting to Friday?",
+      "note": "例句性质：笔记整理的表达模板。\n笔记摘录：| 提议 | Have we considered …? / One option might be … / I would like to propose …（正式）/ Maybe we could …（非正式） |\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "好句摘录",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 3,
+      "text": "I appreciate the offer, but …",
+      "norm": "i appreciate the offer, but",
+      "focus": "I appreciate the offer, but",
+      "intent": "我想先感谢对方的提议，再礼貌拒绝。",
+      "intentBy": "ai",
+      "aiIntent": "我想先感谢对方的提议，再礼貌拒绝。",
+      "gloss": "谢谢你的提议，不过……。\n本次自拟例句：I appreciate the offer, but I can't take on another project right now.",
+      "note": "例句性质：笔记整理的表达模板。\n笔记摘录：| 委婉拒绝、转折 | I appreciate the offer, but … / That sounds great; however, … |\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "好句摘录",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 4,
+      "text": "From my perspective, …",
+      "norm": "from my perspective",
+      "focus": "From my perspective",
+      "intent": "我想先标明接下来是从自己的角度表达看法。",
+      "intentBy": "ai",
+      "aiIntent": "我想先标明接下来是从自己的角度表达看法。",
+      "gloss": "从我的角度看。\n本次自拟例句：From my perspective, the plan needs more time.",
+      "note": "例句性质：笔记整理的表达模板。\n笔记摘录：| 表达看法 | From my perspective, … / I tend to think … / Given the current situation, … |\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "好句摘录",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 5,
+      "text": "How we read largely determines what we notice and, therefore, what we remember.",
+      "norm": "largely determines",
+      "focus": "largely determines",
+      "intent": "我想说阅读方式影响注意到什么，进而影响记住什么。",
+      "intentBy": "ai",
+      "aiIntent": "我想说阅读方式影响注意到什么，进而影响记住什么。",
+      "gloss": "很大程度上决定……，并因此影响……。\nHow we ... largely determines ... and, therefore, ...。",
+      "note": "例句性质：笔记里的仿写。\n笔记摘录：- 仿写：How we read largely determines what we notice and, therefore, what we remember.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "好句摘录",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 6,
+      "text": "While I do enjoy grammar, I certainly don't intend to memorize every rule.",
+      "norm": "while i do",
+      "focus": "While I do",
+      "intent": "我想说虽然喜欢语法，但不打算把每条规则都背下来。",
+      "intentBy": "ai",
+      "aiIntent": "我想说虽然喜欢语法，但不打算把每条规则都背下来。",
+      "gloss": "虽然我确实……，但我并不打算……。\nwhile 表示让步，do 强调前面的承认。",
+      "note": "例句性质：笔记里的仿写。\n笔记摘录：- 仿写：While I do enjoy grammar, I certainly don't intend to memorize every rule.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "好句摘录",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 7,
+      "text": "I'm not denying the importance of achieving one's goals, maintaining one's health, or keeping one's children clothed and fed—but most of us spend our time seeking happiness and security without acknowledging the underlying purpose of our search.",
+      "norm": "i'm not denying",
+      "focus": "I'm not denying",
+      "intent": "我想承认实现目标和照顾生活的重要性，再补充另一层考虑。",
+      "intentBy": "ai",
+      "aiIntent": "我想承认实现目标和照顾生活的重要性，再补充另一层考虑。",
+      "gloss": "我并不否认……的重要性，但……。\nI'm not denying ... , but ... 用来先承认一点，再补充主张。",
+      "note": "例句性质：笔记注明的 Waking Up 原句。\n笔记摘录：I'm not denying the importance of achieving one's goals, maintaining one's health, or keeping one's children clothed and fed—but most of us spend our time seeking happiness and security without acknowledging the underlying purpose of our search. —— Waking Up\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "book",
+        "title": "Waking Up（好句摘录笔记）",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 8,
+      "text": "Just because you have read a grammar rule does not mean that you can use it.",
+      "norm": "just because",
+      "focus": "Just because",
+      "intent": "我想说读懂语法规则不代表会使用它。",
+      "intentBy": "ai",
+      "aiIntent": "我想说读懂语法规则不代表会使用它。",
+      "gloss": "仅仅因为 A，并不意味着 B。\nJust because + 从句 + does not mean (that) + 从句。",
+      "note": "例句性质：笔记里的仿写。\n笔记摘录：- 仿写：Just because you have read a grammar rule does not mean that you can use it.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "好句摘录",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 9,
+      "text": "I was more than a little surprised.",
+      "norm": "more than a little",
+      "focus": "more than a little",
+      "intent": "我想用比较克制的说法表达自己其实非常惊讶。",
+      "intentBy": "ai",
+      "aiIntent": "我想用比较克制的说法表达自己其实非常惊讶。",
+      "gloss": "相当、非常，带轻描淡写的强调。\nmore than a little + 形容词。",
+      "note": "例句性质：笔记整理的表达模板。\n笔记摘录：| more than a little + adj | 非常（轻描淡写式强调） | I was more than a little surprised. |\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "短语动词与搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 10,
+      "text": "In a way, I agree with you.",
+      "norm": "in a way",
+      "focus": "In a way",
+      "intent": "我想表示从某个角度看，我同意对方。",
+      "intentBy": "ai",
+      "aiIntent": "我想表示从某个角度看，我同意对方。",
+      "gloss": "从某个角度看、在某种程度上。\n插入语 In a way；in the way 则表示挡路。",
+      "note": "例句性质：笔记整理的表达模板。\n笔记摘录：| In a way, ...（插入语） | 在某种程度上、从某个角度看 | In a way, I agree with you. |\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "短语动词与搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 11,
+      "text": "I avoided the sore subject to spare her feelings.",
+      "norm": "spare her feelings",
+      "focus": "spare her feelings",
+      "intent": "我想说为了顾及她的感受，我没有提那个话题。",
+      "intentBy": "ai",
+      "aiIntent": "我想说为了顾及她的感受，我没有提那个话题。",
+      "gloss": "顾及她的感受，避免让她难受。\nspare someone's feelings；具体怎样顾及感受由语境确定。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：自拟例句：I avoided the sore subject to spare her feelings.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "短语动词与搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 12,
+      "text": "I avoided the sore subject to spare her feelings.",
+      "norm": "sore subject",
+      "focus": "sore subject",
+      "intent": "我想说有个话题容易让她难受，所以我避开了。",
+      "intentBy": "ai",
+      "aiIntent": "我想说有个话题容易让她难受，所以我避开了。",
+      "gloss": "容易让人难受的敏感话题。\na sore subject；是否敏感取决于对象和经历。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：自拟例句：I avoided the sore subject to spare her feelings.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "短语动词与搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 13,
+      "text": "I read the whole chapter in one go.",
+      "norm": "in one go",
+      "focus": "in one go",
+      "intent": "我想说自己一口气读完了整章。",
+      "intentBy": "ai",
+      "aiIntent": "我想说自己一口气读完了整章。",
+      "gloss": "一口气、一次完成。\nin stages / in phases 则表示分阶段。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：自拟对照：I'll explain it in three steps. / I read the whole chapter in one go.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "短语动词与搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 14,
+      "text": "This is a skill in its own right. You won't necessarily acquire it simply by reading more or memorizing more vocabulary.",
+      "norm": "in its own right",
+      "focus": "in its own right",
+      "intent": "我想强调这本身就是一项独立技能，多读书背词未必能获得它。",
+      "intentBy": "ai",
+      "aiIntent": "我想强调这本身就是一项独立技能，多读书背词未必能获得它。",
+      "gloss": "凭自身的资格、地位或价值独立成立。\none's 随对象变化，如 in her own right、in its own right。",
+      "note": "例句性质：原笔记例句，材料出处未记录。\n笔记摘录：This is a skill in its own right. You won't necessarily acquire it simply by reading more or memorizing more vocabulary.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "英语随手记",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 15,
+      "text": "The app processes the data in real time.",
+      "norm": "in real time",
+      "focus": "in real time",
+      "intent": "我想说这个应用会实时处理数据。",
+      "intentBy": "ai",
+      "aiIntent": "我想说这个应用会实时处理数据。",
+      "gloss": "实时、即时进行。\n名词前作修饰语常写 real-time，如 real-time data。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：自拟例句：The app processes the data in real time.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "短语动词与搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 16,
+      "text": "That's not much of a plan.",
+      "norm": "not much of a plan",
+      "focus": "not much of a plan",
+      "intent": "我想说这个方案算不上什么好方案。",
+      "intentBy": "ai",
+      "aiIntent": "我想说这个方案算不上什么好方案。",
+      "gloss": "作为一个方案不怎么样。\nnot much of a/an + 单数可数名词，评价程度或质量。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：自拟例句：That's not much of a plan.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "短语动词与搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 17,
+      "text": "I wound up staying another week.",
+      "norm": "wound up staying",
+      "focus": "wound up staying",
+      "intent": "我想说最后又多待了一周。",
+      "intentBy": "ai",
+      "aiIntent": "我想说最后又多待了一周。",
+      "gloss": "最终做了某事或处于某种状态。\nwind up + doing / 形容词 / 介词短语；过去式 wound up。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：自拟例句：We took a wrong turn and wound up at the station. / I wound up staying another week.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "短语动词与搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 18,
+      "text": "I called on the off chance that she was still awake.",
+      "norm": "on the off chance",
+      "focus": "on the off chance",
+      "intent": "我想说虽然希望不大，还是打电话试试她是否醒着。",
+      "intentBy": "ai",
+      "aiIntent": "我想说虽然希望不大，还是打电话试试她是否醒着。",
+      "gloss": "抱着虽小但可能实现的希望试一试。\non the off chance (that) + 从句；in case 常用于预防可能情况。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：自拟对照：I called on the off chance that she was still awake. / I took an umbrella in case it rained.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "短语动词与搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 19,
+      "text": "Preparations are under way for the wedding.",
+      "norm": "under way",
+      "focus": "under way",
+      "intent": "我想说婚礼准备工作已经展开。",
+      "intentBy": "ai",
+      "aiIntent": "我想说婚礼准备工作已经展开。",
+      "gloss": "正在进行，进程已经展开。\nbe under way / be underway；两种拼写都可见。",
+      "note": "例句性质：原笔记例句，材料出处未记录。\n笔记摘录：Preparations are under way for the wedding.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 20,
+      "text": "The rain gave way to sunshine.",
+      "norm": "gave way to",
+      "focus": "gave way to",
+      "intent": "我想描述雨停后天气转晴。",
+      "intentBy": "ai",
+      "aiIntent": "我想描述雨停后天气转晴。",
+      "gloss": "让位于、被取代。\ngive way to + 名词；不带 to 的 give way 也可表示坍塌。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：The rain gave way to sunshine.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 21,
+      "text": "I could use a hand with this box.",
+      "norm": "could use a hand",
+      "focus": "could use a hand",
+      "intent": "我想请对方帮我搬一下这个箱子。",
+      "intentBy": "ai",
+      "aiIntent": "我想请对方帮我搬一下这个箱子。",
+      "gloss": "现在需要帮忙。\ncould use + 名词；a hand 表示帮助，也可说 a break。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：I could use a hand with this box.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 22,
+      "text": "Let's get coffee. This one's on me.",
+      "norm": "this one's on me",
+      "focus": "This one's on me",
+      "intent": "我想说这次咖啡我请客。",
+      "intentBy": "ai",
+      "aiIntent": "我想说这次咖啡我请客。",
+      "gloss": "这次由我付款。\n谈一顿饭或一轮饮料时，be on someone 表示由谁付款。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：Let's get coffee. This one's on me.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 23,
+      "text": "I sent the wrong file. That's on me.",
+      "norm": "that's on me",
+      "focus": "That's on me",
+      "intent": "我想承认刚才发错文件的责任在我。",
+      "intentBy": "ai",
+      "aiIntent": "我想承认刚才发错文件的责任在我。",
+      "gloss": "这个责任在我。\n差错之后用来承认责任。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：I sent the wrong file. That's on me.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 24,
+      "text": "She took to walking every evening.",
+      "norm": "took to walking",
+      "focus": "took to walking",
+      "intent": "我想说她开始养成每晚散步的习惯。",
+      "intentBy": "ai",
+      "aiIntent": "我想说她开始养成每晚散步的习惯。",
+      "gloss": "开始经常做某事，形成习惯。\ntake to + doing；to 是介词，过去式是 took。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：| take to + doing | She took to walking every evening. | 开始经常这样做 |\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 25,
+      "text": "Don't take it out on me just because you had a bad day.",
+      "norm": "take it out on me",
+      "focus": "take it out on me",
+      "intent": "我想让对方别因为自己过得不顺就迁怒于我。",
+      "intentBy": "ai",
+      "aiIntent": "我想让对方别因为自己过得不顺就迁怒于我。",
+      "gloss": "把别处产生的怒气发到我身上。\ntake it out on someone；on 后接承受怒气的人。",
+      "note": "例句性质：原笔记例句，材料出处未记录。\n笔记摘录：Don't take it out on me just because you had a bad day.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 26,
+      "text": "His story doesn't add up. He wasn't even in town that day.",
+      "norm": "doesn't add up",
+      "focus": "doesn't add up",
+      "intent": "我想指出他的说法前后对不上，那天他根本不在城里。",
+      "intentBy": "ai",
+      "aiIntent": "我想指出他的说法前后对不上，那天他根本不在城里。",
+      "gloss": "说法前后无法自洽，解释说不通。\n谈数字时 add up 也可以表示相加。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：His story doesn't add up. He wasn't even in town that day.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 27,
+      "text": "I don't know what to make of his silence.",
+      "norm": "what to make of",
+      "focus": "what to make of",
+      "intent": "我想说不知道该怎样理解他的沉默。",
+      "intentBy": "ai",
+      "aiIntent": "我想说不知道该怎样理解他的沉默。",
+      "gloss": "不知道怎样解读、评价。\nWhat do you make of ...? 可询问对方怎么看。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：I don't know what to make of his silence.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 28,
+      "text": "Sorry, I can't make it.",
+      "norm": "can't make it",
+      "focus": "can't make it",
+      "intent": "我想婉拒今晚的晚饭邀请，因为无法到场。",
+      "intentBy": "ai",
+      "aiIntent": "我想婉拒今晚的晚饭邀请，因为无法到场。",
+      "gloss": "无法赶到或出席。\n邀请场景里的 can't make it 通常谈能否到场。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：Sorry, I can't make it.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 29,
+      "text": "Something's off.",
+      "norm": "something's off",
+      "focus": "Something's off",
+      "intent": "我想说感觉有地方不对劲，但还没确定问题。",
+      "intentBy": "ai",
+      "aiIntent": "我想说感觉有地方不对劲，但还没确定问题。",
+      "gloss": "有地方不对劲，偏离了预期。\n可谈状态、味道或说法；具体问题由语境确定。",
+      "note": "例句性质：原笔记例句，材料出处未记录。\n笔记摘录：Something's off.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "英语随手记",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 30,
+      "text": "I'm off tomorrow.",
+      "norm": "off tomorrow",
+      "focus": "off tomorrow",
+      "intent": "我想说自己明天不上班。",
+      "intentBy": "ai",
+      "aiIntent": "我想说自己明天不上班。",
+      "gloss": "明天不上班、休假。\n这里 off 描述工作安排。",
+      "note": "例句性质：原笔记例句，材料出处未记录。\n笔记摘录：| I'm off tomorrow. | 明天不上班、休假 |\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 31,
+      "text": "The meeting is off.",
+      "norm": "is off",
+      "focus": "is off",
+      "intent": "我想通知大家会议取消了。",
+      "intentBy": "ai",
+      "aiIntent": "我想通知大家会议取消了。",
+      "gloss": "会议取消了。\n谈安排时 be off 表示取消；over 表示已经结束。",
+      "note": "例句性质：原笔记例句，材料出处未记录。\n笔记摘录：| The meeting is off. | 会议取消了 |\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 32,
+      "text": "We're out of coffee.",
+      "norm": "out of coffee",
+      "focus": "out of coffee",
+      "intent": "我想说咖啡已经用完了。",
+      "intentBy": "ai",
+      "aiIntent": "我想说咖啡已经用完了。",
+      "gloss": "咖啡没有剩余了。\nbe out of + 资源，如 coffee、time、money。",
+      "note": "例句性质：原笔记例句，材料出处未记录。\n笔记摘录：We're out of coffee.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 33,
+      "text": "Let me know when you're through with the laptop.",
+      "norm": "through with",
+      "focus": "through with",
+      "intent": "我想让对方用完电脑后告诉我一声。",
+      "intentBy": "ai",
+      "aiIntent": "我想让对方用完电脑后告诉我一声。",
+      "gloss": "已经用完、看完或处理完某物。\nbe through with something；对象是人时可能表示不再打交道。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：Let me know when you're through with the laptop.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 34,
+      "text": "Buying a house now is out of the question.",
+      "norm": "out of the question",
+      "focus": "out of the question",
+      "intent": "我想说现在买房根本不可行。",
+      "intentBy": "ai",
+      "aiIntent": "我想说现在买房根本不可行。",
+      "gloss": "不可行、不能考虑或不可接受。\nbe out of the question；the 不省略。",
+      "note": "例句性质：原笔记例句，材料出处未记录。\n笔记摘录：Buying a house now is out of the question.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 35,
+      "text": "If you need help, you can count on me.",
+      "norm": "count on me",
+      "focus": "count on me",
+      "intent": "我想让对方知道有需要可以依靠我。",
+      "intentBy": "ai",
+      "aiIntent": "我想让对方知道有需要可以依靠我。",
+      "gloss": "可以依靠、指望我。\ncount on someone；与表示参加的 count someone in 区分。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：If you need help, you can count on me.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 36,
+      "text": "You're ordering pizza? Count me in.",
+      "norm": "count me in",
+      "focus": "Count me in",
+      "intent": "我想说这件活动也算我一个。",
+      "intentBy": "ai",
+      "aiIntent": "我想说这件活动也算我一个。",
+      "gloss": "算我一个，我也参加。\n表示加入活动；参与本身不自动承诺负责整件事。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：You're ordering pizza? Count me in.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 37,
+      "text": "That works for me.",
+      "norm": "that works for me",
+      "focus": "That works for me",
+      "intent": "我想说对方提出的见面时间适合我。",
+      "intentBy": "ai",
+      "aiIntent": "我想说对方提出的见面时间适合我。",
+      "gloss": "这个安排对我来说合适。\n可回应时间、地点或方案。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：That works for me.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 38,
+      "text": "I'm good, thanks.",
+      "norm": "i'm good, thanks",
+      "focus": "I'm good, thanks",
+      "intent": "我想礼貌地说不用再续杯了。",
+      "intentBy": "ai",
+      "aiIntent": "我想礼貌地说不用再续杯了。",
+      "gloss": "已经够了，不用了，谢谢。\n回应继续提供食物、饮料或帮助；回应 How are you 时意思不同。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：I'm good, thanks.\n原遇见日期未记录。",
+      "status": "retired",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599886741,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 39,
+      "text": "I'm up for a walk, but I'm not up to a long hike.",
+      "norm": "up to",
+      "focus": "up to",
+      "intent": "我想说现在没精力进行长途徒步。",
+      "intentBy": "ai",
+      "aiIntent": "我想说现在没精力进行长途徒步。",
+      "gloss": "能力、精力或状态能应付。\nbe up to + 名词或 doing；up to you 则是由你决定。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：I'm up for a walk, but I'm not up to a long hike.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    },
+    {
+      "id": 40,
+      "text": "I'm up for a walk, but I'm not up to a long hike.",
+      "norm": "up for",
+      "focus": "up for",
+      "intent": "我想说自己有兴致参加散步。",
+      "intentBy": "ai",
+      "aiIntent": "我想说自己有兴致参加散步。",
+      "gloss": "愿意、有兴致参与。\nbe up for + 名词或 doing；这里谈参与意愿。",
+      "note": "例句性质：笔记自拟例句。\n笔记摘录：I'm up for a walk, but I'm not up to a long hike.\n原遇见日期未记录。",
+      "status": "seen",
+      "createdAt": 1795599648622,
+      "updatedAt": 1795599648622,
+      "source": {
+        "type": "other",
+        "title": "日常表达与易混搭配",
+        "occurredAt": null
+      }
+    }
+  ]
+}

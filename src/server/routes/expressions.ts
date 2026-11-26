@@ -163,7 +163,16 @@ expressionRoutes.patch("/:id{[0-9]+}", async (c) => {
     await tx.update(expressions).set(set).where(eq(expressions.id, id));
     if (met) await tx.update(encounters).set({ occurredAt: patch.occurredAt }).where(eq(encounters.id, met.id));
   });
-  return c.json(await detailOf(id));
+  const detail = await detailOf(id);
+  return detail ? c.json(detail) : notFound(c);
+});
+
+// DELETE /:id — permanent removal, unlike moving an entry to retired.
+expressionRoutes.delete("/:id{[0-9]+}", async (c) => {
+  // SQLite cascades the timeline in the same statement. Conversations remain;
+  // their reads already leave out hits whose entry no longer exists.
+  const [deleted] = await db.delete(expressions).where(eq(expressions.id, Number(c.req.param("id")))).returning({ id: expressions.id });
+  return deleted ? c.body(null, 204) : notFound(c);
 });
 
 // POST /:id/encounters — met again

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/client/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/client/components/ui/dialog";
 import { Input } from "@/client/components/ui/input";
-import { useAnnotate, useExpression, usePatchExpression, useReveal } from "@/client/hooks/useExpressions";
+import { useAnnotate, useDeleteExpression, useExpression, usePatchExpression, useReveal } from "@/client/hooks/useExpressions";
 import { ApiError } from "@/client/lib/api";
 import {
   EXPRESSION_LIMITS, type Cue, type EncounterKind, type EncounterView, type ExpressionDetail, type ExpressionPatch, type IntentBy,
@@ -69,11 +69,13 @@ function TimelineRow({ row, own, first }: { row: EncounterView; own: string | nu
   );
 }
 
-function Detail({ e, glossing, draft, focusCue, unsavedRef }: { e: ExpressionDetail; glossing: boolean; draft: boolean; focusCue: boolean; unsavedRef: RefObject<boolean> }) {
+function Detail({ e, glossing, draft, focusCue, unsavedRef, onDeleted }: { e: ExpressionDetail; glossing: boolean; draft: boolean; focusCue: boolean; unsavedRef: RefObject<boolean>; onDeleted: () => void }) {
   const { t } = useI18n();
   const patch = usePatchExpression();
   const annotate = useAnnotate();
   const reveal = useReveal();
+  const remove = useDeleteExpression();
+  const writing = patch.isPending || remove.isPending;
   // What 看答案 answered with. Held here and nowhere else: the next read is
   // masked again, so leaving the dialog drops the answer, and another look is
   // another request, which writes another row.
@@ -141,10 +143,18 @@ function Detail({ e, glossing, draft, focusCue, unsavedRef }: { e: ExpressionDet
     });
   };
 
+  const deleteEntry = () => {
+    if (!window.confirm(t("永久删除这条表达及其学习记录？删除后无法恢复。", "Permanently delete this expression and its learning history? This cannot be undone."))) return;
+    remove.mutate(e.id, {
+      onSuccess: () => { unsavedRef.current = false; onDeleted(); },
+      onError: (err) => toast.error(t(`删除失败：${errorMessage(err)}`, `Could not delete: ${errorMessage(err)}`)),
+    });
+  };
+
   return (
     <div className="space-y-4 text-sm">
       {full.text === null ? (
-        <Button size="sm" variant="outline" disabled={reveal.isPending} onClick={() => reveal.mutate({ id: e.id, cue: "masked" }, { onSuccess: (answer) => setRevealed(answer), onError: (err) => toast.error(t(`没有看成：${errorMessage(err)}`, `Could not reveal the answer: ${errorMessage(err)}`)) })}>
+        <Button size="sm" variant="outline" disabled={reveal.isPending || remove.isPending} onClick={() => reveal.mutate({ id: e.id, cue: "masked" }, { onSuccess: (answer) => setRevealed(answer), onError: (err) => toast.error(t(`没有看成：${errorMessage(err)}`, `Could not reveal the answer: ${errorMessage(err)}`)) })}>
           {t("看答案", "Show answer")}
         </Button>
       ) : (
@@ -161,10 +171,10 @@ function Detail({ e, glossing, draft, focusCue, unsavedRef }: { e: ExpressionDet
           <Input autoFocus={focusCue && !e.masked} maxLength={EXPRESSION_LIMITS.intent} value={intent} onChange={(ev) => setIntent(ev.target.value)} />
         </label>
         <div className="flex flex-wrap items-center gap-2">
-          {e.status === "seen" && <Button className="min-h-11" disabled={patch.isPending || !intent.trim()} onClick={() => save({ ...newIntent, status: "active" })}>{t("放进想用", "Move to To use")}</Button>}
-          {e.status === "active" && <Button className="min-h-11" variant="outline" disabled={patch.isPending} onClick={() => save({ status: "seen" })}>{t("退回见过", "Move back to Seen")}</Button>}
+          {e.status === "seen" && <Button className="min-h-11" disabled={writing || !intent.trim()} onClick={() => save({ ...newIntent, status: "active" })}>{t("放进想用", "Move to To use")}</Button>}
+          {e.status === "active" && <Button className="min-h-11" variant="outline" disabled={writing} onClick={() => save({ status: "seen" })}>{t("退回见过", "Move back to Seen")}</Button>}
           {/* With the switch off the AI's cue must not leak into the user's own words. */}
-          {draft && !e.masked && <Button className="min-h-11" size="sm" variant="outline" disabled={annotate.isPending || glossing} onClick={drawUp}>{t("帮我起草", "Draft a cue")}</Button>}
+          {draft && !e.masked && <Button className="min-h-11" size="sm" variant="outline" disabled={annotate.isPending || glossing || remove.isPending} onClick={drawUp}>{t("帮我起草", "Draft a cue")}</Button>}
         </div>
         {e.status === "seen" && <p className="text-sm text-muted-foreground">{intent.trim() ? t("放进想用后，隔一天再来试写一句。", "Move it to To use, then return after a day to try a sentence.") : t("放进想用之前，先写一句提示句。", "Write a cue before moving this to To use.")}</p>}
       </div>
@@ -195,7 +205,7 @@ function Detail({ e, glossing, draft, focusCue, unsavedRef }: { e: ExpressionDet
             <p className="text-muted-foreground">{t("补注中…", "Annotating…")}</p>
           ) : (
             !e.annotated && (
-              <Button size="sm" variant="outline" disabled={annotate.isPending} onClick={() => annotate.mutate(e.id, { onError: (err) => toast.error(t(`补注没有成功：${errorMessage(err)}`, `Annotation failed: ${errorMessage(err)}`)) })}>
+              <Button size="sm" variant="outline" disabled={annotate.isPending || remove.isPending} onClick={() => annotate.mutate(e.id, { onError: (err) => toast.error(t(`补注没有成功：${errorMessage(err)}`, `Annotation failed: ${errorMessage(err)}`)) })}>
                 {annotate.isPending && <Loader2 className="animate-spin" />}
                 {t("补注", "Annotate")}
               </Button>
@@ -224,11 +234,14 @@ function Detail({ e, glossing, draft, focusCue, unsavedRef }: { e: ExpressionDet
       </details>
       <div className="flex flex-wrap justify-between gap-2">
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" className="min-h-11" variant="outline" disabled={patch.isPending} onClick={() => save({ status: e.status === "retired" ? "seen" : "retired" })}>
+          <Button size="sm" className="min-h-11" variant="outline" disabled={writing} onClick={() => save({ status: e.status === "retired" ? "seen" : "retired" })}>
             {e.status === "retired" ? t("恢复", "Restore") : t("收起", "Archive")}
           </Button>
+          <Button size="sm" className="min-h-11" variant="destructive" disabled={writing || annotate.isPending || reveal.isPending} onClick={deleteEntry}>
+            {remove.isPending ? t("删除中…", "Deleting…") : t("永久删除", "Delete permanently")}
+          </Button>
         </div>
-        <Button size="sm" className="min-h-11" disabled={patch.isPending || !unsaved} onClick={() => save()}>{t("保存", "Save changes")}</Button>
+        <Button size="sm" className="min-h-11" disabled={writing || !unsaved} onClick={() => save()}>{t("保存", "Save changes")}</Button>
       </div>
     </div>
   );
@@ -245,7 +258,7 @@ export function ExpressionDetailDialog(props: { id: number | null; glossing: boo
         <DialogTitle className="sr-only">{t("表达详情", "Expression details")}</DialogTitle>
         {data ? (
           // Keyed by the layer's side of the mask as well: what was typed into, or revealed for, one side says nothing of the other.
-          <Detail key={`${data.id}:${data.masked}`} e={data} glossing={props.glossing} draft={props.draft} focusCue={!!props.focusCue} unsavedRef={unsavedRef} />
+          <Detail key={`${data.id}:${data.masked}`} e={data} glossing={props.glossing} draft={props.draft} focusCue={!!props.focusCue} unsavedRef={unsavedRef} onDeleted={props.onClose} />
         ) : error ? (
           <p className="text-sm text-destructive">{t("读取失败：", "Could not load: ")}{errorMessage(error)}</p>
         ) : (

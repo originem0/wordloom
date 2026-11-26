@@ -108,6 +108,24 @@ afterEach(() => {
 });
 
 describe("对谈的流式回复", () => {
+  it("keeps a completed reply when its matched expression is deleted during coaching", async () => {
+    const known = await seed("call it a day", false);
+    const coaching = deferred<ReturnType<typeof feedback>>();
+    reply(["A useful answer."]);
+    model.coach.mockReturnValueOnce(coaching.promise);
+    const response = await say();
+    const body = response.text();
+    await vi.waitFor(() => expect(model.coach).toHaveBeenCalledTimes(1));
+    expect((await request(`/${known.id}`, undefined, false, true, "DELETE")).status).toBe(204);
+    coaching.resolve(feedback({ mine: [{ id: known.id, why: "it fitted before deletion" }] }));
+    const all = events(await body);
+    expect(done(all)).toMatchObject({ reply: "A useful answer.", mine: [] });
+    expect(done(all).coachingFailure).toBeUndefined();
+    expect(await turns()).toHaveLength(1);
+    expect((await lookups()).every((row) => row.expressionId === null)).toBe(true);
+    expect(await loadEntry(known.id)).toBeNull();
+  });
+
   it("streams the reply before coaching finishes, writes it first, and ends with one stored turn", async () => {
     const known = await seed("Fair enough.", false);
     const coaching = deferred<ReturnType<typeof feedback>>();

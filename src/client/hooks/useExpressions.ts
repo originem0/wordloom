@@ -12,6 +12,7 @@ import type {
 // whole cache (useLogout), so nothing under it outlives the session.
 export const EXPRESSIONS_KEY = ["expressions"] as const;
 const STATS_KEY = [...EXPRESSIONS_KEY, "stats"] as const;
+const DELETED_KEY = [...EXPRESSIONS_KEY, "deleted"] as const;
 
 // The open page holds the list in the cache, so a missing list means the cache
 // was dropped. What is still on its way then must not put an entry back.
@@ -53,7 +54,7 @@ function useWrite<V>(request: (vars: V) => Promise<ExpressionDetail>) {
     // Every write answers with the entry as it now is: keep that, and reload
     // only the list and the numbers.
     onSuccess: (detail) => {
-      if (signedOut(qc)) return;
+      if (signedOut(qc) || qc.getQueryData<Set<number>>(DELETED_KEY)?.has(detail.id)) return;
       qc.setQueryData([...EXPRESSIONS_KEY, detail.id], detail);
       void qc.invalidateQueries({ queryKey: STATS_KEY });
       return qc.invalidateQueries({ queryKey: EXPRESSIONS_KEY, exact: true });
@@ -67,6 +68,25 @@ export const useMetAgain = () =>
 export const usePatchExpression = () =>
   useWrite(({ id, ...patch }: ExpressionPatch & { id: number }) => send("PATCH", `/${id}`, patch));
 export const useAnnotate = () => useWrite((id: number) => send("POST", `/${id}/annotate`));
+
+export function useDeleteExpression() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => send<void>("DELETE", `/${id}`),
+    gcTime: 0,
+    onSuccess: async (_, id) => {
+      if (signedOut(qc)) return;
+      // A list read or annotation already in flight must not restore the entry
+      // after deletion. The id-only markers are cleared with the private cache.
+      qc.setQueryData<Set<number>>(DELETED_KEY, (ids) => new Set([...(ids ?? []), id]));
+      await qc.cancelQueries({ queryKey: EXPRESSIONS_KEY });
+      if (signedOut(qc)) return;
+      qc.removeQueries({ queryKey: [...EXPRESSIONS_KEY, id] });
+      qc.setQueryData<ExpressionListResponse>(EXPRESSIONS_KEY, (list) => list && ({ ...list, expressions: list.expressions.filter((entry) => entry.id !== id) }));
+      void qc.invalidateQueries({ queryKey: EXPRESSIONS_KEY, predicate: (query) => query.queryKey[1] !== id && query.queryKey[2] !== "scene" });
+    },
+  });
+}
 
 /**
  * A reveal, an attempt, a turn of 对谈. What these answer with is not the

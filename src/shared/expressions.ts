@@ -6,6 +6,7 @@
 //   POST   /                                CaptureRequest   → 201 ExpressionDetail | 409 DuplicateResponse
 //   GET    /:id                             ExpressionDetail
 //   PATCH  /:id                             ExpressionPatch  → ExpressionDetail | 400 { code: "INTENT_REQUIRED" }
+//   DELETE /:id                             → 204; permanently removes the entry and its timeline
 //   POST   /:id/encounters                  EncounterRequest → 201 ExpressionDetail
 //   POST   /:id/annotate                    → ExpressionDetail | 502 { code: "ANNOTATE_FAILED" }
 //   POST   /:id/reveal                      RevealRequest    → ExpressionDetail, unmasked this once

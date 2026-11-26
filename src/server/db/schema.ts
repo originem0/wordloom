@@ -174,7 +174,8 @@ export const expressions = sqliteTable("expressions", {
   index("expressions_status_created_idx").on(table.status, table.createdAt),
 ]);
 
-// The timeline. Rows are never deleted and `text` is never rewritten;
+// The timeline. Individual rows are never deleted and `text` is never rewritten;
+// permanently deleting the parent expression cascades its whole timeline.
 // `outcome` and `feedback` may be filled in later on the same row. Level, due
 // time and "has produced it" are not columns: they are folded from these rows.
 export const encounters = sqliteTable("encounters", {
