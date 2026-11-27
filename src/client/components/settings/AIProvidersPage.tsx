@@ -7,6 +7,7 @@ import { Button } from "@/client/components/ui/button";
 import { Input } from "@/client/components/ui/input";
 import { Badge } from "@/client/components/ui/badge";
 import { useSettings, useUpdateSetting } from "@/client/hooks/useSettings";
+import { RimeVoiceSettings } from "./RimeVoiceSettings";
 import { settingTestError } from "./setting-test-error";
 import {
   StatusDot,
@@ -604,7 +605,7 @@ export function AIProvidersPage() {
 
       <SectionHeader>{t("Rime 朗读", "Rime Speech")}</SectionHeader>
       <SettingRow
-        title={t("API 密钥", "API Key")} subtitle={t("只在对谈里点击听语音时播放。留空保留已保存的密钥。", "Only plays when you click Listen in Conversation. Leave empty to keep the saved key.")}
+        title={t("API 密钥", "API Key")} subtitle={t("用于音色试听和对谈朗读。留空可沿用已保存的密钥。", "Used for voice previews and conversation audio. Leave empty to use the saved key.")}
         right={<Badge variant={hasRimeKey ? "outline" : "destructive"} className="rounded-md text-[10px]">{hasRimeKey ? t("已保存", "Saved") : t("未设置", "Missing")}</Badge>}
         defaultOpen={!hasRimeKey}
       >
@@ -615,27 +616,9 @@ export function AIProvidersPage() {
         />
         <a href="https://app.rime.ai/tokens/" target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-muted-foreground underline">{t("获取 Rime API 密钥", "Rime API Tokens")}</a>
       </SettingRow>
-      <SettingRow title={t("声音", "Voice")} value={`${draftValue("rime_speaker")} · ${draftValue("rime_speed")}×`}>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <label className="space-y-1.5 text-[13px] font-medium text-foreground">
-            <span>{t("模型", "Model")}</span>
-            <select aria-label={t("Rime 模型", "Rime Model")} className={SELECT_CLASS} value={draftValue("rime_model")} onChange={(e) => setDraft("rime_model", e.target.value)}>
-              <option value="coda">Coda</option><option value="mist">Mist v3</option>
-            </select>
-          </label>
-          <label className="space-y-1.5 text-[13px] font-medium text-foreground">
-            <span>{t("声音", "Voice")}</span>
-            <select aria-label={t("Rime 声音", "Rime Voice")} className={SELECT_CLASS} value={draftValue("rime_speaker")} onChange={(e) => setDraft("rime_speaker", e.target.value)}>
-              <option value="astra">Astra</option><option value="luna">Luna</option>
-            </select>
-          </label>
-          <label className="space-y-1.5 text-[13px] font-medium text-foreground">
-            <span>{t("语速", "Speed")}</span>
-            <select aria-label={t("Rime 语速", "Rime Speed")} className={SELECT_CLASS} value={draftValue("rime_speed")} onChange={(e) => setDraft("rime_speed", e.target.value)}>
-              <option value="0.8">0.8×</option><option value="1">1×</option><option value="1.2">1.2×</option>
-            </select>
-          </label>
-        </div>
+      <SettingRow title={t("音色与试听", "Voice & preview")} value={`${draftValue("rime_speaker")} · ${draftValue("rime_speed")}×`} lazy>
+        <RimeVoiceSettings model={draftValue("rime_model")} speaker={draftValue("rime_speaker")} speed={draftValue("rime_speed")}
+          apiKey={draftValue("rime_api_key")} hasSavedKey={hasRimeKey} setDraft={setDraft} />
       </SettingRow>
 
       {/* ── Sticky save bar ── */}

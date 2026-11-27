@@ -102,6 +102,9 @@ describe("what a visitor can reach", () => {
     expect(routes).toEqual(
       expect.arrayContaining([
         "GET /api/settings",
+        "GET /api/settings/conversation-prompts",
+        "GET /api/settings/rime/voices",
+        "POST /api/settings/rime/preview",
         "PUT /api/settings",
         "POST /api/settings/test",
         "GET /api/jobs",

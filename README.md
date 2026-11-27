@@ -164,15 +164,16 @@ Windows（PowerShell）没有 `gunzip` 时可用 7-Zip 解压后改名为 `data/
 - **Test Routes**：每条路由可单独 ⚡ 测试，也可 Test All Routes；Cards / Deep 检查返回的 JSON 结构，Utility 检查能否返回文本，Expressions 没有自己的探测，按 Cards 的方式测它那一行的 provider 和模型
 - **测试状态** 路由显示未测试、可用或失败。已保存配置的版本与探测时一致时，本标签页刷新会恢复结果和延迟。编辑配置后需要重新验证，失败详情在本次探测中显示。
 - **API Key 只写不读** 页面只显示密钥是否已配置。同一服务来源留空可沿用旧密钥，更换协议、主机或端口时需为新来源填写密钥。一次保存的配置变更在同一事务内生效。
-- **Rime 朗读**：设置 API key、Coda / Mist、声音和倍速，只在对谈点击"听语音"时调用
+- **Rime 朗读**按 Coda 或 Mist v3 读取官方英语音色目录。选好音色和语速后，点「测试并试听」可以先听一段英语样音，保存后用于对谈朗读。
 
-### Settings（`/settings`）— 公开，管理员多三项
+### Settings（`/settings`）— 公开，含管理员设置
 
 页面任何人可访问。存在浏览器里的偏好谁都能改；存在服务端的设置只有管理员看得到、改得了。
 
 - **Appearance**：亮色 / 暗色 / 跟随系统
 - **App Refresh & Cache**：强制刷新 PWA、清理本地缓存
 - **Account**：管理员登录 / 退出登录（手机上没有侧边栏，这里是唯一的入口）
+- **对谈提示词**（管理员）可查看对谈回复、学习反馈和非流式对谈各自使用的系统提示词原文。
 - **Interface Language**（所有人）：简体中文 / English，立即更新本浏览器界面并保留偏好
 - **AI Explanation Language**（管理员）：新生成解释性文本的语言（简体中文 / English / Bilingual），不改写已有内容
 - **Network Tolerance**（管理员）：可调 `api_timeout_ms`（默认 60s，deep 路由自动 ×2）和 `api_max_retries`（默认 3）

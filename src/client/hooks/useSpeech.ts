@@ -2,6 +2,7 @@ import { sessionFetch } from "@/client/lib/session";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useI18n } from "@/client/lib/i18n";
+import type { RimePreview } from "@/shared/rime";
 
 type State = "idle" | "loading" | "playing";
 type Problem = { message: string; setup?: boolean };
@@ -31,11 +32,12 @@ class PlaybackError extends Error {
 /** A click activates the audio context before the network wait, so mobile
  * browsers recognize the playback as user initiated. Decoding uses Web Audio
  * without a blob URL, matching the app's existing content security policy. */
-export function useSpeech(turnId: number) {
+export function useSpeech(target: number | RimePreview, onStart?: () => void) {
   const { t } = useI18n();
   const qc = useQueryClient();
   const [state, setState] = useState<State>("idle");
-  const [problem, setProblem] = useState<ProblemCode | null>(null);
+  const [failure, setFailure] = useState<{ target: typeof target; code: ProblemCode } | null>(null);
+  const problem = failure?.target === target ? failure.code : null;
   const playback = useRef<Playback | null>(null);
   const alive = useRef(true);
 
@@ -54,19 +56,21 @@ export function useSpeech(turnId: number) {
   useEffect(() => {
     alive.current = true;
     return () => { alive.current = false; stop(); };
-  }, [stop, turnId]);
+  }, [stop]);
+  useEffect(() => () => stop(), [target, stop]);
 
   const toggle = async () => {
     if (playback.current) { stop(); return; }
     active?.stop();
-    setProblem(null);
+    setFailure(null);
+    const fail = (code: ProblemCode) => setFailure({ target, code });
     const Context = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Context) { setProblem("unsupported"); return; }
+    if (!Context) { fail("unsupported"); return; }
     let current: Playback;
     try {
       current = { controller: new AbortController(), context: new Context(), source: null };
     } catch {
-      setProblem("browser");
+      fail("browser");
       return;
     }
     playback.current = current;
@@ -74,10 +78,12 @@ export function useSpeech(turnId: number) {
     setState("loading");
     try {
       await current.context.resume();
+      if (current.controller.signal.aborted) return;
       for (let part = 0, total = 1; part < total; part++) {
-        const res = await sessionFetch("/api/expressions/speech", {
+        const isTurn = typeof target === "number";
+        const res = await sessionFetch(isTurn ? "/api/expressions/speech" : "/api/settings/rime/preview", {
           method: "POST", credentials: "include", signal: current.controller.signal,
-          headers: { "Content-Type": "application/json" }, body: JSON.stringify({ turn: turnId, part }),
+          headers: { "Content-Type": "application/json" }, body: JSON.stringify(isTurn ? { turn: target, part } : target),
         });
         if (res.status === 401) {
           qc.clear();
@@ -107,13 +113,14 @@ export function useSpeech(turnId: number) {
           source.onended = finish;
           current.controller.signal.addEventListener("abort", finish, { once: true });
           source.start();
+          if (part === 0) onStart?.();
         });
         if (playback.current !== current) return;
         if (part + 1 < total) setState("loading");
       }
     } catch (e) {
       if (playback.current === current && !current.controller.signal.aborted) {
-        setProblem(e instanceof PlaybackError ? e.problem : "playback");
+        fail(e instanceof PlaybackError ? e.problem : "playback");
       }
     } finally {
       if (playback.current === current) stop();

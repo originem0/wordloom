@@ -5,6 +5,7 @@ import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { SpeechButton } from "../SpeechButton";
+import { RimeVoiceSettings } from "../../settings/RimeVoiceSettings";
 import { useAppStore } from "@/client/store";
 
 // Node 26 has no localStorage without --localstorage-file. Persistence is not
@@ -46,6 +47,19 @@ function show(children = <SpeechButton turnId={12} />) {
 const click = () => fireEvent.click(screen.getByRole("button", { name: "听语音" }));
 const started = () => waitFor(() => expect(contexts[0].sources[0]?.start).toHaveBeenCalled());
 const end = (context = contexts[0], part = context.sources.length - 1) => act(() => { context.sources[part].onended?.(); });
+
+it("plays a settings preview using the draft voice, speed and key, and stops it on close", async () => {
+  vi.mocked(fetch).mockImplementation(async (path) => path === "/api/settings/rime/voices"
+    ? Response.json({ coda: ["astra"], mist: ["summit"] }) : audio());
+  const view = show(<RimeVoiceSettings model="mist" speaker="summit" speed="1.2" apiKey="draft-key" hasSavedKey={false} setDraft={vi.fn()} />);
+  await screen.findByRole("option", { name: "Summit" });
+  fireEvent.click(screen.getByRole("button", { name: "测试并试听" }));
+  await started();
+  const preview = vi.mocked(fetch).mock.calls.find(([path]) => path === "/api/settings/rime/preview");
+  expect(JSON.parse(String(preview?.[1]?.body))).toEqual({ model: "mist", speaker: "summit", speed: 1.2, apiKey: "draft-key" });
+  view.unmount();
+  expect(contexts[0].sources[0].stop).toHaveBeenCalled();
+});
 
 describe("a reply's speech button", () => {
   it("changes the labels of active playback without restarting or stopping it", async () => {

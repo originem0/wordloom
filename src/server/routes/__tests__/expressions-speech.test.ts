@@ -10,12 +10,12 @@ vi.mock("../../db/index.js", () => ({
 }));
 vi.mock("../../services/expressions-talk.js", () => ({ speechText: vi.fn(async () => state.text) }));
 
-import { expressionSpeechRoutes } from "../expressions-speech.js";
+import { expressionSpeechRoutes, rimeSettingsRoutes } from "../expressions-speech.js";
 import { SpeechError, splitSpeech, synthesizeSpeech } from "../../services/expressions-speech.js";
 import { speechText } from "../../services/expressions-talk.js";
 
 const audio = () => new Response(new Uint8Array([0xff, 0xfb, 0x90, 0x64]), { headers: { "Content-Type": "audio/mpeg" } });
-const app = new Hono().route("/api/expressions", expressionSpeechRoutes);
+const app = new Hono().route("/api/expressions", expressionSpeechRoutes).route("/api/settings/rime", rimeSettingsRoutes);
 const post = (body: unknown) => app.request("/api/expressions/speech", {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
 });
@@ -27,6 +27,34 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async () => audio()));
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+describe("Rime settings", () => {
+  it("reads the public English voices for each model without sending credentials", async () => {
+    vi.mocked(fetch).mockResolvedValue(Response.json({
+      coda: { eng: ["marlu", "astra", "marlu"], jpn: ["other"] },
+      mistv3: { eng: ["summit", "astra"] }, mistv2: { eng: ["legacy"] },
+    }));
+    const response = await app.request("/api/settings/rime/voices");
+    expect(await response.json()).toEqual({ coda: ["astra", "marlu"], mist: ["astra", "summit"] });
+    expect(vi.mocked(fetch).mock.calls[0][1]?.headers).toBeUndefined();
+  });
+
+  it.each([undefined, "draft-key"])("previews the draft without saving it or reading a conversation", async (apiKey) => {
+    const response = await app.request("/api/settings/rime/preview", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "mist", speaker: "summit", speed: 0.8, apiKey }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("audio/mpeg");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toBe("https://mist.api.rime.ai/");
+    expect(init?.headers).toMatchObject({ Authorization: "Bearer " + (apiKey ?? "test-key") });
+    expect(JSON.parse(String(init?.body))).toMatchObject({ speaker: "summit", modelId: "mistv3", timeScaleFactor: 1.25 });
+    expect(speechText).not.toHaveBeenCalled();
+    expect(state.saved.rime_speaker).toBe("astra");
+  });
+});
 
 describe("click-to-speak", () => {
   it("gets the current masked reply by id and returns private audio", async () => {

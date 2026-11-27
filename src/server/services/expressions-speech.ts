@@ -1,6 +1,7 @@
 import { inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { settings } from "../db/schema.js";
+import { RIME_SPEAKER_ID, type RimePreview } from "../../shared/rime.js";
 
 export type SpeechFailure = "not configured" | "timeout" | "busy" | "failed";
 
@@ -44,17 +45,17 @@ export function splitSpeech(text: string): string[] {
 
 /** Credentials stay on the server. Only the fixed Rime hosts receive them;
  * provider failures never carry their response body into our errors or logs. */
-export async function synthesizeSpeech(text: string, signal?: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
+export async function synthesizeSpeech(text: string, signal?: AbortSignal, preview?: RimePreview): Promise<Uint8Array<ArrayBuffer>> {
   if (!text || text.length > MAX_TEXT) throw new SpeechError("failed");
   const rows = await db.select().from(settings).where(inArray(settings.key, KEYS)).all();
   const saved = Object.fromEntries(rows.map((r) => [r.key, r.value.trim()]));
-  const key = saved.rime_api_key;
-  const model = saved.rime_model || "coda";
-  const speaker = saved.rime_speaker || "astra";
-  if (!key || key === "configured" || !["coda", "mist"].includes(model) || !/^[a-z][a-z0-9_-]{0,59}$/.test(speaker)) {
+  const key = preview?.apiKey ?? saved.rime_api_key;
+  const model = preview?.model ?? (saved.rime_model || "coda");
+  const speaker = preview?.speaker ?? (saved.rime_speaker || "astra");
+  if (!key || key === "configured" || !["coda", "mist"].includes(model) || !RIME_SPEAKER_ID.test(speaker)) {
     throw new SpeechError("not configured");
   }
-  const speed = Math.min(2, Math.max(0.5, Number(saved.rime_speed) || 1));
+  const speed = preview?.speed ?? Math.min(2, Math.max(0.5, Number(saved.rime_speed) || 1));
   const timeout = AbortSignal.timeout(30_000);
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   try {

@@ -7,6 +7,8 @@ import { settings } from "../db/schema.js";
 import { updateSettingsSchema } from "../../shared/validation.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { settingTestRoutes } from "./settingsTest.js";
+import { rimeSettingsRoutes } from "./expressions-speech.js";
+import { conversationPrompts } from "../services/conversation-prompts.js";
 
 export const settingRoutes = new Hono();
 
@@ -60,3 +62,5 @@ settingRoutes.put("/", authMiddleware, async (c) => {
 
 // POST /test — connectivity and model-capability probes (see settingsTest.ts)
 settingRoutes.route("/", settingTestRoutes);
+settingRoutes.route("/rime", rimeSettingsRoutes);
+settingRoutes.get("/conversation-prompts", (c) => c.json(conversationPrompts));

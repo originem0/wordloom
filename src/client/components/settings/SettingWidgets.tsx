@@ -1,4 +1,5 @@
 import type React from "react";
+import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useI18n } from "@/client/lib/i18n";
 import { settingTestError, type SettingTestResponse } from "./setting-test-error";
@@ -39,6 +40,7 @@ export function SettingRow({
   value,
   right,
   defaultOpen = false,
+  lazy = false,
   stackOnMobile = false,
   children,
 }: {
@@ -47,11 +49,13 @@ export function SettingRow({
   value?: React.ReactNode;
   right?: React.ReactNode;
   defaultOpen?: boolean;
+  lazy?: boolean;
   stackOnMobile?: boolean;
   children: React.ReactNode;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
-    <details open={defaultOpen} className="group">
+    <details open={defaultOpen} className="group" onToggle={lazy ? (event) => setOpen(event.currentTarget.open) : undefined}>
       <summary className="min-h-11 list-none cursor-pointer rounded-md py-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
         <div className={stackOnMobile ? "flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4" : "flex items-center justify-between gap-4"}>
           <div className="flex items-center gap-2 min-w-0">
@@ -67,7 +71,7 @@ export function SettingRow({
           </div>
         </div>
       </summary>
-      <div className="pt-2 pb-4 ml-[22px]">{children}</div>
+      {(!lazy || open) && <div className="pt-2 pb-4 ml-[22px]">{children}</div>}
     </details>
   );
 }

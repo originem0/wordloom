@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAppStore } from "@/client/store";
 
@@ -41,11 +42,23 @@ const switchToEnglish = () => fireEvent.change(screen.getByRole("combobox", { na
 const setLanguage = (language: "zh-CN" | "en") => act(() => { useAppStore.getState().setUiLanguage(language); });
 
 describe("interface language and AI explanation language", () => {
+  it("shows the server's original prompts for the selected conversation step", async () => {
+    vi.mocked(fetch).mockResolvedValue(Response.json({ reply: "Exact reply prompt", coach: "Exact coach prompt", combined: "Exact combined prompt" }));
+    render(<MemoryRouter><QueryClientProvider client={new QueryClient()}><SettingsPage /></QueryClientProvider></MemoryRouter>);
+    expect(fetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("对谈提示词"));
+    await screen.findByText("Exact reply prompt");
+    fireEvent.change(screen.getByRole("combobox", { name: "生成步骤" }), { target: { value: "coach" } });
+    expect(screen.getByText("Exact coach prompt")).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("lets visitors switch immediately without reading or writing private settings", async () => {
     isAdmin = false;
     showSettings();
     expect(screen.getByRole("heading", { name: "设置" })).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "AI 解释语言" })).not.toBeInTheDocument();
+    expect(screen.queryByText("对谈提示词")).not.toBeInTheDocument();
     switchToEnglish();
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Interface Language" })).toHaveValue("en");
@@ -95,12 +108,22 @@ describe("interface language and AI explanation language", () => {
 describe("AI provider labels and callbacks", () => {
   it("updates provider and Rime controls without replacing the unsaved draft", async () => {
     saved = { gemini_base_url: "https://old.example", rime_api_key: "configured" };
-    render(<AIProvidersPage />);
+    vi.mocked(fetch).mockResolvedValue(Response.json({ coda: ["astra", "marlu"], mist: ["astra", "summit"] }));
+    render(<QueryClientProvider client={new QueryClient()}><AIProvidersPage /></QueryClientProvider>);
     expect(screen.getByRole("heading", { name: "AI 配置" })).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Gemini 基础地址" }), { target: { value: "https://typing.example" } });
     setLanguage("en");
     expect(screen.getByRole("heading", { name: "AI Providers" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Rime Voice" })).toHaveValue("astra");
+    fireEvent.click(screen.getByText("Voice & preview"));
+    const voice = await screen.findByRole("combobox", { name: "Rime Voice" });
+    await screen.findByRole("option", { name: "Marlu" });
+    expect(voice).toHaveValue("astra");
+    fireEvent.change(voice, { target: { value: "marlu" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Rime Model" }), { target: { value: "mist" } });
+    expect(voice).toHaveValue("astra");
+    expect(screen.queryByRole("option", { name: "Marlu" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Summit" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Rime Model" }), { target: { value: "coda" } });
     expect(screen.getByRole("textbox", { name: "Gemini Base URL" })).toHaveValue("https://typing.example");
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("AI provider settings saved"));

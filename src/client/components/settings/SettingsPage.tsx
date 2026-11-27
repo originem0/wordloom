@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   Loader2,
   LogIn,
@@ -17,6 +18,7 @@ import { useSettings, useUpdateSetting } from "@/client/hooks/useSettings";
 import { useAppStore } from "@/client/store";
 import { applyTheme } from "@/client/lib/theme";
 import { errorMessage, useI18n } from "@/client/lib/i18n";
+import { apiFetch } from "@/client/lib/api";
 import {
   SectionHeader,
   SettingRow,
@@ -36,6 +38,40 @@ const DEFAULTS: Record<string, string> = {
   api_max_retries: String(DEFAULT_API_MAX_RETRIES),
   [DRAFT_SETTING_KEY]: "",
 };
+
+const promptStages = {
+  reply: ["对谈回复", "Conversation reply"],
+  coach: ["学习反馈", "Learning feedback"],
+  combined: ["非流式对谈（一次生成回复与反馈）", "Non-streaming conversation (reply and feedback together)"],
+} as const;
+type PromptStage = keyof typeof promptStages;
+
+function ConversationPrompts() {
+  const { t } = useI18n();
+  const [stage, setStage] = useState<PromptStage>("reply");
+  const prompts = useQuery({
+    queryKey: ["settings", "conversation-prompts"],
+    queryFn: ({ signal }) => apiFetch<Record<PromptStage, string>>("/api/settings/conversation-prompts", { signal }),
+  });
+  if (prompts.isPending) return <p role="status" className="text-sm text-muted-foreground">{t("正在读取提示词…", "Loading prompts…")}</p>;
+  if (prompts.isError) return (
+    <div role="alert" className="flex items-center gap-2 text-sm">
+      {t("提示词加载失败。", "Could not load the prompts.")}
+      <Button size="sm" variant="outline" onClick={() => void prompts.refetch()}>{t("重试", "Retry")}</Button>
+    </div>
+  );
+  return (
+    <div className="space-y-3">
+      <label className="block space-y-1.5 text-sm">
+        <span>{t("生成步骤", "Generation step")}</span>
+        <select className={SELECT_CLASS} value={stage} onChange={(e) => setStage(e.target.value as PromptStage)}>
+          {Object.entries(promptStages).map(([key, label]) => <option key={key} value={key}>{t(label[0], label[1])}</option>)}
+        </select>
+      </label>
+      <pre lang="en" className="whitespace-pre-wrap break-words rounded-lg border bg-muted/30 p-3 text-[13px] leading-relaxed">{prompts.data[stage]}</pre>
+    </div>
+  );
+}
 
 async function activateUpdate() {
   if (!("serviceWorker" in navigator)) return;
@@ -275,7 +311,15 @@ export function SettingsPage() {
         </SettingRow>
       )}
 
-      {/* 帮我起草 on the 表达 page opens by itself under the rule below. Checked, it is on whatever the rule says; "" leaves it to the rule. */}
+      {isAdmin && (
+        <>
+          <SectionHeader>{t("表达与对谈", "Expressions & Conversation")}</SectionHeader>
+          <SettingRow title={t("对谈提示词", "Conversation prompts")}
+            subtitle={t("对谈先生成英语回复，再整理学习反馈。展开查看每一步发给模型的系统提示词。", "Conversation generates an English reply, then prepares learning feedback. View the system prompt used for each step.")} lazy>
+            <ConversationPrompts />
+          </SettingRow>
+        </>
+      )}
       {serverSettings === "ready" && (
         <SettingRow
           title={t("表达：帮我起草", "Expressions: Draft for me")}
@@ -324,14 +368,10 @@ export function SettingsPage() {
       <div className="space-y-2 py-3 text-[13px] leading-6 text-muted-foreground/80">
         <p>
           <span className="font-medium text-foreground">WordLoom</span>{" "}
-          {t("是一座公开可读的英语词卡库。", "is a public library of English word cards.")}
+          {t("的英语词库向所有人开放。查一张词卡，就能看到词义、词源，以及这个词在句子里怎么用。", "has a public English card library. Look up a word to explore its meaning, its origins and how people use it in a sentence.")}
         </p>
         <p>
-          <span className="font-medium text-foreground">Word Forge</span>{" "}
-          {t("查词与造卡合一，包含音标、词源、认知意象和边界测试。", "combines search and card creation, with pronunciation, etymology, mental imagery and boundary tests.")}
-        </p>
-        <p className="text-muted-foreground/60">
-          {t("搜索和浏览对所有人开放；生成新卡、从文本抽词需要管理员登录。", "Search and browsing are open to everyone. Generating cards and extracting words require administrator access.")}
+          {t("管理员可以把阅读时遇到的句子收进私人表达库，在新情境里练习。英语对谈里可以听回复、看用词反馈，把想再用的说法存回表达库。", "Admins can save sentences from their reading to a private expression library and practise them in new situations. In an English conversation, they can listen to replies, read feedback on their wording and save expressions to use again.")}
         </p>
       </div>
 
