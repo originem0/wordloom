@@ -51,11 +51,8 @@ backups/
 .codex
 .claude/settings.local.json
 .claude/worktrees/
-tmp/batch-progress.json
-tmp/batch-failed.json
-tmp/cefr_cache.json
-tmp/word.xml
+/tmp/
 
-# Python tooling caches (tools/*.py)
+# Python tooling caches
 __pycache__/
 *.pyc

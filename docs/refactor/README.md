@@ -11,12 +11,12 @@
 | [06-talk.md](06-talk.md) | 当前对谈、流式、朗读、回顾协议与服务端规则 |
 | [04-progress.md](04-progress.md) | 阶段提交、验收、预算偏差与仍未完成的工作；最新见第 17 节 |
 | [05-p2-decisions.md](05-p2-decisions.md) | P2 的判定、提示、揭晓与日志规则；旧 find 接口已由对谈替代 |
-| [03-implementation-guide.md](03-implementation-guide.md) | 原始实施依据，正文是 2026-11-24 的施工指南 |
-| [02-current-state.md](02-current-state.md) | `75f7caf` 重构前调研，不是当前路由/权限/行数 |
 | [01-plan-v3.2.md](01-plan-v3.2.md) | 历史三方定稿，正文保留原稿；后续用户决定高于原提案 |
 | [旧整合规划](../plans/wordloom-expression-library-plan.md) | 更早的提案与参考，原始来源链接固定到历史基线 |
 
 当前使用与部署说明在根目录 [README](../../README.md)。
+
+2026-11-24 的调研和施工指南可在 Git 历史中查阅。[重构前调研](https://github.com/originem0/wordloom/blob/588465e31f321224bc1e3fe9e0bdf8bd00c7a5ba/docs/refactor/02-current-state.md) · [原始施工指南](https://github.com/originem0/wordloom/blob/588465e31f321224bc1e3fe9e0bdf8bd00c7a5ba/docs/refactor/03-implementation-guide.md)
 
 ## 后续用户决定
 

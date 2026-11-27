@@ -2,29 +2,29 @@
 /**
  * Batch word card generator for WordLoom.
  *
- * Reads words from tmp/words_by_cefr.md, filters inflected forms,
- * and generates cards one at a time via the local API with a 2-minute
- * pause between requests.
+ * Uses a local import from tmp/words_by_cefr.md when present, otherwise
+ * the bundled list. Generates up to five cards per request to the local API.
  *
- * Usage:  npx tsx tmp/batch-cards.ts
+ * Usage:  pnpm exec tsx tools/vocabulary/batch-cards.ts
  * Resume: just re-run — progress is saved to tmp/batch-progress.json
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..");
+const ROOT = resolve(__dirname, "../..");
+const WORK_DIR = resolve(ROOT, "tmp");
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
 const API_BASE = "http://localhost:3001";
-const WORDS_FILE = resolve(__dirname, "words_by_cefr.md");
-const PROGRESS_FILE = resolve(__dirname, "batch-progress.json");
-const FAILED_FILE = resolve(__dirname, "batch-failed.json");
+const LOCAL_WORDS_FILE = resolve(WORK_DIR, "words_by_cefr.md");
+const PROGRESS_FILE = resolve(WORK_DIR, "batch-progress.json");
+const FAILED_FILE = resolve(WORK_DIR, "batch-failed.json");
 const INTERVAL_MS = 15 * 1000; // 15 seconds between batches
 const BATCH_SIZE = 5; // words per request
 
@@ -256,7 +256,7 @@ async function main() {
   console.log("\n[WordLoom Batch Card Generator]\n");
 
   // Parse words
-  const allWords = parseWordsFile(WORDS_FILE);
+  const allWords = parseWordsFile(existsSync(LOCAL_WORDS_FILE) ? LOCAL_WORDS_FILE : resolve(__dirname, "words_by_cefr.md"));
   console.log(`  Raw words from file: ${allWords.length}`);
 
   // Filter
@@ -300,7 +300,7 @@ async function main() {
   );
   console.log(`  To generate: ${queue.length}`);
   console.log(`  Already done (progress file): ${done.size}`);
-  console.log(`  Interval: ${INTERVAL_MS / 1000}s between words`);
+  console.log(`  Interval: ${INTERVAL_MS / 1000}s between batches`);
   console.log("");
 
   if (queue.length === 0) {
@@ -309,6 +309,7 @@ async function main() {
   }
 
   // Process in batches
+  mkdirSync(WORK_DIR, { recursive: true });
   let successCount = 0;
   let failCount = 0;
   let consecutiveBusy = 0;

@@ -6,6 +6,9 @@ data
 .codex
 backups
 tmp
+tools/vocabulary
+docs
+seed
 .env
 .env.*
 !.env.example

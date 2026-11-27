@@ -9,13 +9,13 @@ Output: tmp/words_by_cefr.md
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import json
-import urllib.request
 
 # ---------------------------------------------------------------------------
 # 1. Parse XML
 # ---------------------------------------------------------------------------
 
-xml_path = Path(__file__).parent / "word.xml"
+work_dir = Path(__file__).resolve().parents[2] / "tmp"
+xml_path = work_dir / "word.xml"
 tree = ET.parse(xml_path)
 root = tree.getroot()
 
@@ -43,7 +43,7 @@ CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
 CEFR_MAP: dict[str, str] = {}
 
 # Try to load from a local cache first
-cache_path = Path(__file__).parent / "cefr_cache.json"
+cache_path = work_dir / "cefr_cache.json"
 if cache_path.exists():
     with open(cache_path, "r", encoding="utf-8") as f:
         CEFR_MAP = json.load(f)
@@ -527,7 +527,7 @@ for word in words:
 # 4. Write Markdown
 # ---------------------------------------------------------------------------
 
-out_path = Path(__file__).parent / "words_by_cefr.md"
+out_path = work_dir / "words_by_cefr.md"
 with open(out_path, "w", encoding="utf-8") as f:
     f.write("# 单词 CEFR 分级\n\n")
 

@@ -273,12 +273,15 @@ src/
 │   └── db/                 # Drizzle schema + 连接；保留旧表，表达与对谈使用 expressions / encounters / talk_turns
 └── shared/                 # 共享类型、校验、默认值与 SSE 解析（expressions.ts / sse.ts 等）
 
-drizzle/                    # SQL 迁移（0011 建表达库；0012 建 talk_turns；旧表保留）
-tools/                      # 运维脚本（backup-db.sh 备份、export-chunks.mjs 导出语块）
-deploy/                     # systemd 单元文件、nginx 的 Cloudflare 真实 IP 片段
+drizzle/                    # SQL 迁移与生成下一次迁移所需的快照
+tools/                      # 备份、语块导出、模型评测
+└── vocabulary/             # 提取词表、批量造卡及随仓库发布的 CEFR 词表
+deploy/                     # systemd 单元、nginx 反代示例与 Cloudflare 真实 IP 配置
 seed/                       # 可选的词库快照
-tmp/                        # 批量造卡脚本 batch-cards.ts 和它读的 CEFR 词表
+tmp/                        # 本机词典原件、提取结果和批量任务进度，按需创建
 ```
+
+在仓库根目录运行 `pnpm exec tsx tools/vocabulary/batch-cards.ts`，会向本机服务提交词卡生成请求。默认使用随仓库发布的词表。要用自己的词典，先把 XML 放到 `tmp/word.xml`，运行 `python tools/vocabulary/extract_words.py`。批量生成会优先读取提取出的 `tmp/words_by_cefr.md`，并从 `tmp/batch-progress.json` 续跑。
 
 ## 搜索与列表性能
 
@@ -369,7 +372,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-适合你明确想把运行时和宿主机隔离开时使用（CI 会用临时库验证镜像启动和登录）。根目录的 `nginx.conf` 是配合它的反代示例。注意 Docker 默认会把 SQLite 放进 named volume，不会直接使用仓库里的 `data/` 目录。
+Compose 将 SQLite 存在 Docker 命名卷中，宿主机 nginx 把请求转发到已发布的回环端口。CI 使用临时库验证镜像启动和登录。[宿主机 nginx 示例](deploy/nginx/wordloom.conf)
 
 ### 手动部署
 

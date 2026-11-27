@@ -11,7 +11,7 @@
 | 05、06、10、16、23、24、32、38 | 作答保留当时的练习焦点和激活时间，揭晓与翻案使用各自的发生时间。重复捕获和草稿保存校验数据库状态。单条详情按 ID 使用只读快照，四周统计保留当日记录，选区按原文位置区分。[读快照](../src/server/db/index.ts#L42) · [编辑基线](../src/server/routes/expressions.ts#L145) · [四周统计](../src/server/services/expressions-try.ts#L181) |
 | 07、14、25、26、37 | 对谈的两种返回方式共用持久化路径，重发按消息 ID 去重，删除会话后迟到回复无法重建它。两种提供方都校验回复结束状态。候选按本轮文本筛选，评测走流式回复与批注，调用失败计入全样本分母。[候选筛选](../src/server/services/expressions-talk.ts#L97) · [保存](../src/server/services/expressions-talk.ts#L393) · [评测](../tools/eval-expressions.ts#L116) |
 | 17–19、21、22、34、36 | 保存中输入的下一句得以保留，关闭和返回检查未保存草稿，删除末页记录会回到有效页码。退出跨标签清理私人页面。词卡列表只取摘要，已读详情可离线重开。损坏的 JSON 会报错，PWA 更新由用户主动触发。[草稿保护](../src/client/components/expressions/ExpressionDetail.tsx#L341) · [会话清理](../src/client/hooks/useAuth.ts#L26) · [列表字段](../src/server/routes/cards.ts#L391) · [离线缓存](../tools/pwa-cache.ts#L3) |
-| 09、27、30、31、39 | 语块导出只写新文件，备份通过完整性与压缩检查后发布。宿主机 nginx 代理本机已发布端口，词卡提示遵循解释语言，交付分支纳入 CI 和容器登录冒烟。[导出](../tools/export-chunks.mjs#L75) · [备份](../tools/backup-db.sh#L28) · [提示词](../src/server/services/ai-prompts.ts#L15) · [CI](../.github/workflows/ci.yml#L42) |
+| 09、27、30、31、39 | 语块导出只写新文件，备份通过完整性与压缩检查后发布。宿主机 nginx 代理本机已发布端口，词卡提示遵循解释语言，交付分支纳入 CI 和容器登录冒烟。[导出](../tools/export-chunks.mjs#L75) · [备份](../tools/backup-db.sh#L28) · [nginx 示例](../deploy/nginx/wordloom.conf#L8) · [提示词](../src/server/services/ai-prompts.ts#L15) · [CI](../.github/workflows/ci.yml#L42) |
 
 **本地验收。** Windows 上的 Node 22.23.5 和 26.13.0 均通过 TypeScript、ESLint、生产构建和全量 Vitest，共 52 个文件、948 项测试。Node 26 一次中间运行有一个测试子进程提前退出，默认并发复跑通过。npm 官方注册表的生产依赖审计返回零项已知通告。
 
@@ -115,7 +115,7 @@ Chrome 中用 21 张卡复现。删除后还有 20 张，页面显示第 2 / 1 �
 
 **20　默认的同源检查只比较主机名，忽略协议和端口**
 
-空白名单是文档支持的部署方式。这时服务端按 hostname 批准写请求，相同主机名下的其他端口被视为同一个来源。不同应用共享主机名时，这个信任范围大于浏览器的同源边界。配置公开站点的完整 origin，并比较规范化后的协议、主机和端口。代理应传递或配置外部端口。 [app.ts L58](../src/server/app.ts#L58) · [app.ts L88](../src/server/app.ts#L88) · [nginx.conf L35](../nginx.conf#L35)
+空白名单是文档支持的部署方式。这时服务端按 hostname 批准写请求，相同主机名下的其他端口被视为同一个来源。不同应用共享主机名时，这个信任范围大于浏览器的同源边界。配置公开站点的完整 origin，并比较规范化后的协议、主机和端口。代理应传递或配置外部端口。 [app.ts L58](../src/server/app.ts#L58) · [app.ts L88](../src/server/app.ts#L88) · [nginx.conf L35](https://github.com/originem0/wordloom/blob/588465e31f321224bc1e3fe9e0bdf8bd00c7a5ba/nginx.conf#L35)
 
 **21　退出登录只清当前标签页，其他已打开的私人页面会继续展示旧内容**
 
@@ -155,7 +155,7 @@ page 和 limit 直接经 Number、Math.min 和 Math.max 计算。非有限值和
 
 **30　仓库给 Docker 的 nginx 示例无法直接用于说明中的宿主机拓扑**
 
-Compose 只有 app 服务，把端口发布在宿主机回环地址上。nginx 示例却把上游写成 Docker 服务名，并在 nginx 自己的文件系统中读取 /app/dist/client。照抄到宿主机时，上游名称和静态目录都没有由 Compose 提供。给宿主机示例指向已发布端口，并把静态请求一并交给现有应用，或交付完整的容器网络与静态文件挂载。 [docker-compose.yml L2](../docker-compose.yml#L2) · [nginx.conf L20](../nginx.conf#L20) · [nginx.conf L34](../nginx.conf#L34) · [README.md L367](../README.md#L367)
+Compose 只有 app 服务，把端口发布在宿主机回环地址上。nginx 示例却把上游写成 Docker 服务名，并在 nginx 自己的文件系统中读取 /app/dist/client。照抄到宿主机时，上游名称和静态目录都没有由 Compose 提供。给宿主机示例指向已发布端口，并把静态请求一并交给现有应用，或交付完整的容器网络与静态文件挂载。 [docker-compose.yml L2](../docker-compose.yml#L2) · [nginx.conf L20](https://github.com/originem0/wordloom/blob/588465e31f321224bc1e3fe9e0bdf8bd00c7a5ba/nginx.conf#L20) · [nginx.conf L34](https://github.com/originem0/wordloom/blob/588465e31f321224bc1e3fe9e0bdf8bd00c7a5ba/nginx.conf#L34) · [README.md L367](../README.md#L367)
 
 **31　设置英语解释后，生成指令仍要求核心释义和词源使用中文**
 

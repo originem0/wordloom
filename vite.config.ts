@@ -1,5 +1,4 @@
-/// <reference types="vitest" />
-import { defineConfig } from "vitest/config"
+import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { VitePWA } from "vite-plugin-pwa"
@@ -15,6 +14,9 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: "prompt",
+      // index.html links the install manifest in public/ for both dev and production.
+      manifest: false,
+      includeAssets: ["manifest.json"],
       workbox: {
         cacheId: "wordloom",
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
@@ -46,10 +48,5 @@ export default defineConfig({
       // opens the expression library to this machine alone goes by it.
       "/api": { target: "http://localhost:3001", xfwd: true },
     },
-  },
-  test: {
-    environment: "jsdom",
-    setupFiles: ["./vitest.setup.ts"],
-    globals: true,
   },
 })
