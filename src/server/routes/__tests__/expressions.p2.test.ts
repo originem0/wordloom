@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { format } from "node:util";
+import { format, stripVTControlCharacters } from "node:util";
 
 // The same harness as expressions.test.ts: the real app, SQLite in memory, the
 // model replaced at generateJson, and everything the server prints captured.
@@ -1663,6 +1663,8 @@ describe("what the routes of 对谈 and 试一条 print", () => {
     ]);
 
     const log = printed();
+    // Hono colors HTTP status codes when the terminal allows it.
+    const plainLog = stripVTControlCharacters(log);
     for (const line of [
       `--> GET /api/expressions/try?exclude=${e.id + 1}`, `--> GET /api/expressions/${e.id}/scene`,
       `--> POST /api/expressions/${e.id}/reveal`, `--> POST /api/expressions/${e.id}/attempts`,
@@ -1672,7 +1674,7 @@ describe("what the routes of 对谈 and 试一条 print", () => {
       `[expressions] judge #${id} failed: failed`, "[expressions] talk failed: failed", "[expressions] pick failed: failed",
       "Unhandled error: DrizzleQueryError in POST /api/expressions/talk",
     ]) {
-      expect(log).toContain(line);
+      expect(plainLog).toContain(line);
     }
     expect(log).not.toContain(MARKER);
     // Nor was any of it kept where private text must not be: no job, no setting.

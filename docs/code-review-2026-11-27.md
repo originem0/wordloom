@@ -19,7 +19,7 @@
 
 **并发与浏览器。** 在文件型 SQLite 上，两次同时捕获同一句分别返回 201、409，同时请求同卡深度分析复用一个任务，另一个连接持有写锁时仍能读取表达详情。生产构建接受配置的 HTTPS 来源登录，后续会话查询成功。Chrome 验证了公开词卡详情、在关闭和浏览器返回时取消丢弃草稿、双标签退出，以及停服后在独立离线标签页重开已读词卡。
 
-**外部验收。** Compose 配置校验通过。本机从 Docker Hub 拉取 `node:22-slim` 超时，容器实际启动待验证。真实模型的人工标注样本、线上 nginx 和 Cloudflare 验收按本轮范围跳过，模型召回率与判定准确率仍待实测。
+**外部验收。** 初次本地复核通过了 Compose 配置校验，拉取 `node:22-slim` 时 Docker Hub 超时。分支推送后的 CI 独立构建容器并验证正式来源登录，结果按提交保留。真实模型的人工标注样本、线上 nginx 和 Cloudflare 验收按本轮范围跳过，模型召回率与判定准确率仍待实测。[分支 CI 记录](https://github.com/originem0/wordloom/actions/workflows/ci.yml?query=branch%3Arefactor%2Fv3.2)
 
 ## 初审基线
 
