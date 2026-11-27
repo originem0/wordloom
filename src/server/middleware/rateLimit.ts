@@ -1,3 +1,4 @@
+import { isTrustedProxy, peerAddress } from "./peer.js";
 import type { Context } from "hono";
 
 type RateLimitOptions = {
@@ -15,13 +16,8 @@ const buckets = new Map<string, Bucket>();
 let lastCleanupAt = 0;
 const CLEANUP_INTERVAL_MS = 60_000;
 
-// Only X-Real-IP is trusted: nginx overwrites it with $remote_addr (which the
-// realip module resolves from CF-Connecting-IP for Cloudflare peers only).
-// X-Forwarded-For and CF-Connecting-IP arrive as the client sent them — the
-// first XFF hop used to be the bucket key, so one forged header per request
-// bypassed every limit, including the login throttle.
 function getClientKey(c: Context): string {
-  return c.req.header("x-real-ip")?.trim() || "unknown";
+  return (isTrustedProxy(c) && c.req.header("x-real-ip")?.trim()) || peerAddress(c) || "unknown";
 }
 
 function cleanupExpired(now: number) {

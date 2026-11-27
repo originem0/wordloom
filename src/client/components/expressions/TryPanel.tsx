@@ -62,7 +62,7 @@ function TryCard({ item, onGone }: { item: TryItem; onGone: () => void }) {
 
   const submit = () =>
     // The question goes as it was shown, whatever hints were added: the server knows a fresh scene by it.
-    attempt.mutate({ id: item.id, text: text.trim(), cue: answer ? "revealed" : level, prompt: item.prompt }, {
+    attempt.mutate({ id: item.id, targetVersion: item.targetVersion, text: text.trim(), cue: answer ? "revealed" : level, prompt: item.prompt }, {
       onSuccess: (next, sent) => {
         setResult(next);
         setSaid(sent.text);

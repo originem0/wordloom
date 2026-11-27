@@ -89,8 +89,8 @@ describe("a timed-out provider call is cancelled, not abandoned", () => {
     const rejection = expect(call).rejects.toThrow(/timeout/);
     await vi.waitFor(() => expect(hangingFetch).toHaveBeenCalledTimes(1));
     await vi.advanceTimersByTimeAsync(5000); // first attempt times out
-    await vi.advanceTimersByTimeAsync(2000); // back-off
-    await vi.waitFor(() => expect(hangingFetch).toHaveBeenCalledTimes(2));
+    // Backoff uses node:timers/promises, which these fake browser timers do not replace.
+    await vi.waitFor(() => expect(hangingFetch).toHaveBeenCalledTimes(2), { timeout: 4000 });
     expect(hangingFetch.mock.calls[0][1]?.signal?.aborted).toBe(true);
     expect(hangingFetch.mock.calls[1][1]?.signal?.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(5000);

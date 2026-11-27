@@ -3,26 +3,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // --- Mocks ---
 
 // Mock db — return a fake API key so getClient() doesn't throw
-vi.mock("../../db/index.js", () => ({
-  db: {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          get: vi.fn(() => ({ value: "fake-api-key" })),
-        })),
-      })),
-    })),
-  },
-}));
+import { db } from "../../db/index.js";
+import { settings } from "../../db/schema.js";
+beforeEach(async () => {
+  await db.delete(settings);
+  await db.insert(settings).values({ key: "gemini_api_key", value: "fake-api-key" });
+});
 
 // Mock @google/genai — control generateContent responses
 const mockGenerateContent = vi.fn();
-vi.mock("@google/genai", () => {
-  class FakeGenAI {
-    models = { generateContent: mockGenerateContent };
-  }
-  return { GoogleGenAI: FakeGenAI };
-});
+vi.mock("../gemini-transport.js", async (original) => ({
+  ...await original<typeof import("../gemini-transport.js")>(),
+  geminiTransport: () => ({ generateContent: mockGenerateContent }),
+}));
 
 // Import after mocks
 import { geminiGenerateCards as generateCards } from "../gemini.js";

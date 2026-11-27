@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, refactor/v3.2]
   pull_request:
 
 permissions:
@@ -39,3 +39,17 @@ jobs:
         run: pnpm build
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level high
+      - name: Smoke test the production container and login
+        shell: bash
+        run: |
+          docker build -t wordloom-ci .
+          export AUTH_TOKEN="$(openssl rand -hex 32)" AUTH_SECRET="$(openssl rand -hex 32)"
+          origin=https://wordloom.example
+          container=$(docker run --rm -d -p 127.0.0.1::3001 --tmpfs /app/data -e AUTH_TOKEN -e AUTH_SECRET -e ALLOWED_ORIGINS="$origin" wordloom-ci)
+          trap 'docker stop "$container" >/dev/null' EXIT
+          base="http://$(docker port "$container" 3001/tcp)"
+          curl -fsS --retry 20 --retry-connrefused --retry-delay 1 "$base/api/health"
+          login=$(curl -fsS -D - -o /dev/null -H "Origin: $origin" --json "$(jq -nc '{token: env.AUTH_TOKEN}')" "$base/api/auth/login")
+          cookie=$(printf '%s\n' "$login" | sed -nE 's/^[Ss]et-[Cc]ookie: (session=[^;]+);.*/\1/p')
+          test -n "$cookie"
+          curl -fsS -H "Cookie: $cookie" "$base/api/auth/me" | jq -e '.authenticated == true'

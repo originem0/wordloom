@@ -80,6 +80,13 @@ describe("conversation recall selection", () => {
   });
 });
 
+it("cannot judge an old scene against a replacement focus", async () => {
+  const entry = await seed({ targetVersion: 2 });
+  expect(await answerReview({ id: entry.id, scene: SCENE, version: 1 }, "my reply", 42)).toBeNull();
+  expect(await attempts()).toEqual([]);
+  expect(model).not.toHaveBeenCalled();
+});
+
 describe("answering a conversation recall scene", () => {
   it("records and judges the actual English message with no answer hint", async () => {
     const entry = await seed();

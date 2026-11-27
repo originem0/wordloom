@@ -8,9 +8,9 @@ import { useAppStore } from "@/client/store";
 
 let saved: Record<string, string>;
 let isAdmin: boolean;
-const mutateAsync = vi.fn(async (change: { key: string; value: string }) => {
+const mutateAsync = vi.fn(async (change: { changes: { key: string; value: string }[]; expectedRevision: string }) => {
   void change;
-  return { ok: true };
+  return { ok: true, revision: "next" };
 });
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -24,7 +24,7 @@ import { SettingsPage } from "../SettingsPage";
 
 const renderSettings = () => render(<SettingsPage />, { wrapper: MemoryRouter });
 const draftSwitch = () => screen.getByRole("checkbox", { name: /帮我起草/ });
-const written = () => mutateAsync.mock.calls.map(([change]) => change).filter((change) => change.key === DRAFT_SETTING_KEY);
+const written = () => mutateAsync.mock.calls.flatMap(([batch]) => batch.changes).filter((change) => change.key === DRAFT_SETTING_KEY);
 
 beforeEach(() => {
   useAppStore.setState({ uiLanguage: "zh-CN" });

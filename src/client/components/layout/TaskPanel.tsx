@@ -50,6 +50,7 @@ function TaskItem({ task }: { task: Task }) {
           variant="ghost"
           size="icon-xs"
           className="shrink-0"
+          disabled={task.cancelRequested}
           onClick={() => cancelTask(task.id)}
           title={t("取消", "Cancel")}
           aria-label={t("取消任务", "Cancel task")}

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, memo } from "react";
+import { useEffect, useState, useRef, useCallback, memo } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Trash2, Loader2, Flame } from "lucide-react";
 import { toast } from "sonner";
@@ -18,7 +18,7 @@ import { apiPost } from "@/client/lib/api";
 import { errorMessage, useI18n } from "@/client/lib/i18n";
 import { queryClient } from "@/client/lib/query-client";
 import { PrototypeWordCard } from "./PrototypeWordCard";
-import type { Card } from "@/shared/types";
+import type { Card, CardSummary } from "@/shared/types";
 import { AdminOnly } from "@/client/components/auth/AdminOnly";
 
 const CEFR_LEVELS = ["All", "A1", "A2", "B1", "B2", "C1", "C2"] as const;
@@ -36,7 +36,7 @@ export function CardCollection({ searchInput }: CardCollectionProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const [lastCard, setLastCard] = useState<Card | null>(null);
+  const [lastCard, setLastCard] = useState<CardSummary | null>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
   const listStart = useRef<HTMLDivElement>(null);
   const candidate = Number(searchParams.get("card"));
@@ -64,15 +64,17 @@ export function CardCollection({ searchInput }: CardCollectionProps) {
     page,
     limit,
   });
+  const lastPage = Math.max(1, Math.ceil((data?.total ?? 0) / limit));
+  useEffect(() => { if (data && !isPlaceholderData && page > lastPage) savePage(filterKey, lastPage); }, [data, isPlaceholderData, page, lastPage, filterKey, savePage]);
   const changing = isLoading || isPlaceholderData;
   useReadingPosition("cards", !!data && !changing);
   const knownCard = data?.cards.find((card) => card.id === selectedId)
     ?? (lastCard?.id === selectedId ? lastCard : undefined);
-  const detail = useCard(selectedId, knownCard);
-  const selectedCard = knownCard ?? detail.data;
-  const dialogCard = selectedId === null ? lastCard : selectedCard;
+  const legacyCard = knownCard && "familyComparison" in knownCard ? knownCard as Card : undefined;
+  const detail = useCard(selectedId, legacyCard);
+  const dialogCard = detail.data ?? legacyCard;
 
-  const openCard = useCallback((card: Card, button: HTMLButtonElement) => {
+  const openCard = useCallback((card: CardSummary, button: HTMLButtonElement) => {
     opener.current = button;
     setLastCard(card);
     rememberReadingPosition("cards", window.scrollY);
@@ -96,32 +98,21 @@ export function CardCollection({ searchInput }: CardCollectionProps) {
   const { mutate: deleteCardMutate, isPending: deletePending } = deleteCard;
   const isAdmin = useIsAdmin();
   const missingDeep = useMissingDeep(isAdmin);
-  const [retryingDeep, setRetryingDeep] = useState(false);
-  const [retryProgress, setRetryProgress] = useState({ done: 0, total: 0, ok: 0, fail: 0 });
-
-  const retryAllDeep = useCallback(async () => {
-    const list = missingDeep.data?.cards;
-    if (!list?.length) return;
-    setRetryingDeep(true);
-    setRetryProgress({ done: 0, total: list.length, ok: 0, fail: 0 });
-    let ok = 0;
-    let fail = 0;
-    for (let i = 0; i < list.length; i++) {
-      try {
-        await apiPost(`/api/cards/${list[i].id}/deep`, {});
-        ok++;
-      } catch {
-        fail++;
-      }
-      setRetryProgress({ done: i + 1, total: list.length, ok, fail });
-    }
-    setRetryingDeep(false);
-    // The list rows carry the deep layer, and nothing generates it on open any
-    // more: without a refetch the cards just analysed would still open empty.
-    // The prefix covers the missing-deep count as well.
-    queryClient.invalidateQueries({ queryKey: ["cards"] });
-    toast.success(t(`深度分析完成，成功 ${ok}，失败 ${fail}。`, `Deep retry done: ${ok} ok, ${fail} failed`));
-  }, [missingDeep.data, t]);
+  const batch = missingDeep.data?.batch;
+  const [starting, setStarting] = useState(false);
+  const retryingDeep = starting || batch?.status === "queued" || batch?.status === "running";
+  const retryProgress = batch?.progress ?? { done: 0, total: missingDeep.data?.total ?? 0, fail: 0 };
+  const retryAllDeep = async () => {
+    setStarting(true);
+    try {
+      await apiPost("/api/cards/deep-batch", {});
+      await queryClient.invalidateQueries({ queryKey: ["cards", "missing-deep"] });
+    } catch (err) { toast.error(errorMessage(err)); }
+    finally { setStarting(false); }
+  };
+  useEffect(() => {
+    if (batch?.status === "done") void queryClient.invalidateQueries({ queryKey: ["cards", "detail"] });
+  }, [batch?.id, batch?.status]);
 
   // Only a deletion of the currently open card closes its detail.
   const handleDelete = useCallback(
@@ -162,7 +153,7 @@ export function CardCollection({ searchInput }: CardCollectionProps) {
 
         {/* Batch retry deep. isAdmin is checked as well as the data: a count
             cached before sign-out is still in memory after it. */}
-        {isAdmin && (missingDeep.data?.total ?? 0) > 0 && (
+        {isAdmin && (retryingDeep || (missingDeep.data?.total ?? 0) > 0) && (
           <div className="flex items-center gap-2">
             <Button
               size="sm"
@@ -245,8 +236,8 @@ export function CardCollection({ searchInput }: CardCollectionProps) {
 // The open button and the admin's delete button are siblings: no nested
 // buttons, and a keyboard reader can open a card without visiting Delete.
 interface CardListItemProps {
-  card: Card;
-  onSelect: (card: Card, button: HTMLButtonElement) => void;
+  card: CardSummary;
+  onSelect: (card: CardSummary, button: HTMLButtonElement) => void;
   onDelete: (e: React.MouseEvent, cardId: number) => void;
   deletePending: boolean;
   disabled: boolean;

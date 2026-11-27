@@ -1,3 +1,4 @@
+import { hasDeepData } from "@/shared/card-deep";
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useGenerateDeep } from "@/client/hooks/useCards";
@@ -51,17 +52,6 @@ function normalizeBoundaryTests(tests: BoundaryTest[]): NormalizedBoundaryTest[]
       ],
     };
   });
-}
-
-function hasDeepData(card: Card): boolean {
-  const fam = card.familyComparison;
-  const tests = card.boundaryTests;
-  const schema = card.schemaAnalysis;
-  return (
-    !!schema ||
-    (Array.isArray(fam) && fam.length > 0) ||
-    (Array.isArray(tests) && tests.length > 0)
-  );
 }
 
 function BoundaryTestItem({ test, seed, onReveal, children }: { test: NormalizedBoundaryTest; seed: number; onReveal: (verdict: Verdict) => void; children?: ReactNode }) {
@@ -209,11 +199,7 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
     : [];
 
   const schema = deepCard.schemaAnalysis;
-  const schemaType = schema?.coreSchema?.toLowerCase();
   const wordType = WORD_TYPES[schema?.wordType?.toLowerCase() ?? ""];
-  // "none" is the model saying no schema fits: neither a drawing nor a caption.
-  const coreImageText = schema?.coreImageText || (schemaType !== "none" ? schema?.coreSchema : undefined);
-  const hasCoreImage = !!schema && (schemaType !== "none" || !!schema.coreSvg || !!coreImageText);
 
   const evolutionChain = schema?.etymologyChain;
 
@@ -275,14 +261,7 @@ export function PrototypeWordCard({ card, onClose }: { card: Card; onClose?: () 
           </AdminOnly>
         </header>
 
-        {/* 2. Core image — custom SVG or fallback template */}
-        {hasCoreImage && (
-          <section className="core-image">
-            <h2>{t("核心意象", "Core image")}</h2>
-
-            <CoreImageVisual word={deepCard.word} type={schemaType ?? ""} raw={schema.coreSvg} caption={coreImageText} />
-          </section>
-        )}
+        <CoreImageVisual card={deepCard} />
 
         {/* Deep layer: missing / loading / error — top-level so it's always visible */}
         {missingDeep && !generateDeep.isPending && (

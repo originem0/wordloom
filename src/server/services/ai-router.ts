@@ -32,17 +32,17 @@ async function getProvider(route: string, borrow?: string): Promise<ProviderType
 // ---------------------------------------------------------------------------
 
 export async function generateCards(
-  words: string[],
+  words: string[], signal?: AbortSignal,
 ): Promise<{ success: ParsedCard[]; failed: { word: string; error: string }[] }> {
   const provider = await getProvider("cards");
   if (provider === "openai") {
-    return openaiGenerateCards(words);
+    return openaiGenerateCards(words, signal);
   }
-  return geminiGenerateCards(words);
+  return geminiGenerateCards(words, signal);
 }
 
 export async function generateDeepLayer(
-  word: string,
+  word: string, signal?: AbortSignal,
 ): Promise<{
   familyComparison: unknown[];
   familyBoundaryNote?: string;
@@ -53,9 +53,9 @@ export async function generateDeepLayer(
 }> {
   const provider = await getProvider("deep");
   if (provider === "openai") {
-    return openaiGenerateDeepLayer(word);
+    return openaiGenerateDeepLayer(word, signal);
   }
-  return geminiGenerateDeepLayer(word);
+  return geminiGenerateDeepLayer(word, signal);
 }
 
 export async function extractWords(text: string): Promise<string[]> {

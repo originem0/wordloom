@@ -1,10 +1,9 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const gemini = vi.hoisted(() => vi.fn());
-vi.mock("@google/genai", () => ({
-  GoogleGenAI: class {
-    models = { generateContentStream: gemini };
-  },
+vi.mock("../gemini-transport.js", async (original) => ({
+  ...await original<typeof import("../gemini-transport.js")>(),
+  geminiTransport: () => ({ generateContentStream: gemini }),
 }));
 
 import { db } from "../../db/index.js";
@@ -34,7 +33,7 @@ function response(text: string, splits: number[] = []) {
     },
   }), { headers: { "content-type": "text/event-stream" } });
 }
-const jsonReply = (text: string) => new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), {
+const jsonReply = (text: string, finishReason: string | null = "stop") => new Response(JSON.stringify({ choices: [{ message: { content: text }, finish_reason: finishReason }] }), {
   headers: { "content-type": "application/json" },
 });
 const hang = (_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
@@ -100,6 +99,12 @@ describe("a conversation on the real streaming channel", () => {
     expect(received).toHaveBeenCalledExactlyOnceWith("A complete reply.");
   });
 
+  it.each(["length", null])("rejects incomplete ordinary JSON (%s)", async (reason) => {
+    await configure();
+    gateway.mockResolvedValueOnce(jsonReply("partial", reason));
+    await expect(generateTextStream("expressions", { ...CALL, onDelta: onDelta() })).rejects.toThrow("Incomplete");
+  });
+
   it.each(["stream", "JSON envelope"])("refuses an overlong reply from a %s", async (format) => {
     await configure();
     const long = "a".repeat(8001);
@@ -107,7 +112,7 @@ describe("a conversation on the real streaming channel", () => {
     await expect(generateTextStream("expressions", { ...CALL, onDelta: onDelta() })).rejects.toThrow();
   });
 
-  it.each(["MAX_TOKENS", "SAFETY", "RECITATION"])("does not mistake Gemini's %s partial text for a complete reply", async (finishReason) => {
+  it.each(["MAX_TOKENS", "SAFETY", "RECITATION", ""])("does not mistake Gemini's %s partial text for a complete reply", async (finishReason) => {
     await configure({ gemini_api_key: "dummy-gemini-key" });
     gemini.mockResolvedValueOnce(parts([{ text: "A partial reply.", candidates: [{ finishReason }] }]));
     await expect(generateTextStream("expressions", { ...CALL, onDelta: onDelta() })).rejects.toThrow();

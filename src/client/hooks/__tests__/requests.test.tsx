@@ -135,7 +135,7 @@ describe("generating a deep layer", () => {
     const { result } = renderHook(() => useGenerateDeep(), { wrapper });
     result.current.mutate(7);
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(requested()).toEqual(["/api/cards/7/deep"]);
+    expect(requested()).toEqual(["/api/cards/7/deep?async=1"]);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["cards"] });
   });
 });

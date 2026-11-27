@@ -68,7 +68,7 @@ describe("the batch deep retry", () => {
     expect(useMissingDeepMock).toHaveBeenLastCalledWith(true);
 
     fireEvent.click(screen.getByRole("button", { name: "Retry Deep (2)" }));
-    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["cards"] }));
-    expect(posted).toEqual(["/api/cards/7/deep", "/api/cards/9/deep"]);
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["cards", "missing-deep"] }));
+    expect(posted).toEqual(["/api/cards/deep-batch"]);
   });
 });

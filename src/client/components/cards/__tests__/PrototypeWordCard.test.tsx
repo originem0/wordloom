@@ -335,12 +335,77 @@ describe("what the card shows beyond the deep layer", () => {
     render(<PrototypeWordCard card={makeCard({ schemaAnalysis: { coreSchema: "none" } })} />);
     expect(screen.queryByText("核心意象")).toBeNull();
     expect(screen.queryByText("none")).toBeNull();
-    expect(screen.queryByText("这张词卡还没有深度分析。")).toBeNull();
+    expect(screen.getByText("这张词卡还没有深度分析。")).toBeInTheDocument();
   });
 
   it("keeps the written image when there is no drawing", () => {
     const { container } = render(<PrototypeWordCard card={makeCard({ schemaAnalysis: { coreSchema: "none", coreImageText: "泉水自己涌出来。" } })} />);
     expect(screen.getByText("泉水自己涌出来。")).toBeInTheDocument();
-    expect(container.querySelector(".core-visual")!.childElementCount).toBe(0);
+    expect(container.querySelector(".core-visual")).toBeNull();
+  });
+});
+
+const oldScene = {
+  coreSchema: "container",
+  coreSvg: '<svg viewBox="0 0 60 30"><rect width="60" height="30" fill="#eee8d5"/></svg>',
+  coreImageText: "旧图里有一堵石墙。",
+};
+
+describe("the scene, explanation and example on a word card", () => {
+  it.each([
+    ["grim", "adjective", "读着报告", "眉头", "Her expression was grim as she read the report.", "grim"],
+    ["resume", "verb", "同一个预算问题", "同一个预算", "After lunch, they resumed their discussion.", "resumed"],
+    ["spontaneous", "adj", "听众就鼓起掌来", null, "The audience broke into spontaneous applause as the speech ended.", "spontaneous"],
+  ] as const)("replaces the entire old scene for %s", (word, pos, caption, alt, sentence, form) => {
+    const { container } = render(<PrototypeWordCard card={makeCard({ word, pos, schemaAnalysis: oldScene })} />);
+    const scene = container.querySelector(".core-image")!;
+    expect(scene.querySelector(".core-caption")).toHaveTextContent(caption);
+    expect(scene).not.toHaveTextContent(oldScene.coreImageText);
+    expect(scene.querySelector("img")).toBeNull();
+    if (alt) expect(screen.getByRole("img", { name: new RegExp(alt) })).toBeInTheDocument();
+    else expect(scene.querySelector(".core-visual")).toBeNull();
+    expect(scene.querySelector(".core-example")).toHaveTextContent(sentence);
+    expect(scene.querySelector(".core-example strong")).toHaveTextContent(form);
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it("can show a reviewed scene before the rest of the deep layer exists", () => {
+    const { container } = render(<PrototypeWordCard card={makeCard({ word: "grim", schemaAnalysis: null })} />);
+    act(() => useAppStore.getState().setUiLanguage("en"));
+    expect(screen.getByRole("img", { name: /report with a furrowed brow/ })).toBeInTheDocument();
+    expect(container.querySelector(".core-caption")).toHaveTextContent("the news may be bad");
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it.each([["resume", "noun"], ["drift", "verb"]])("keeps the saved %s scene and its isolated image", (word, pos) => {
+    const { container } = render(<PrototypeWordCard card={makeCard({ word, pos, schemaAnalysis: oldScene })} />);
+    const scene = container.querySelector(".core-image")!;
+    expect(scene).toHaveTextContent(oldScene.coreImageText);
+    expect(scene.querySelector("img")?.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
+    expect(scene.querySelector("svg, .core-example")).toBeNull();
+  });
+
+  it("keeps a newly generated pair together, even on a word with reviewed artwork", () => {
+    const card = makeCard({ word: "grim", schemaAnalysis: {
+      coreSchema: "none", coreImageText: "医生表情凝重。", coreImageExample: "The doctor's expression was **grim**.",
+    } });
+    const { container } = render(<PrototypeWordCard card={card} />);
+    act(() => useAppStore.getState().setUiLanguage("en"));
+    const scene = container.querySelector(".core-image")!;
+    expect(scene).toHaveTextContent("医生表情凝重。");
+    expect(scene.querySelector(".core-example")).toHaveTextContent("The doctor's expression was grim.");
+    expect(scene.querySelector(".core-visual")).toBeNull();
+  });
+
+  it("retains the new caption and example if the paired image fails to load", () => {
+    const { container } = render(<PrototypeWordCard card={makeCard({ word: "assume", schemaAnalysis: {
+      coreSchema: "link", coreSvg: oldScene.coreSvg, coreImageText: "她接手了这个团队。",
+      coreImageExample: "She **assumed** responsibility for the team.",
+    } })} />);
+    const scene = container.querySelector(".core-image")!;
+    fireEvent.error(scene.querySelector("img")!);
+    expect(scene.querySelector(".core-visual")).toBeNull();
+    expect(scene).toHaveTextContent("她接手了这个团队。");
+    expect(scene.querySelector(".core-example")).toHaveTextContent("She assumed responsibility for the team.");
   });
 });

@@ -1,3 +1,4 @@
+import { sessionFetch } from "@/client/lib/session";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useI18n } from "@/client/lib/i18n";
@@ -74,7 +75,7 @@ export function useSpeech(turnId: number) {
     try {
       await current.context.resume();
       for (let part = 0, total = 1; part < total; part++) {
-        const res = await fetch("/api/expressions/speech", {
+        const res = await sessionFetch("/api/expressions/speech", {
           method: "POST", credentials: "include", signal: current.controller.signal,
           headers: { "Content-Type": "application/json" }, body: JSON.stringify({ turn: turnId, part }),
         });

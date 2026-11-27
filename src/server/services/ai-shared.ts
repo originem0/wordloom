@@ -1,6 +1,7 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { db } from "../db/index.js";
 import { settings } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { Semaphore } from "./semaphore.js";
 import { parseJsonLenient } from "./ai-normalize.js";
 import { DEFAULT_API_MAX_RETRIES, DEFAULT_API_TIMEOUT_MS } from "../../shared/defaults.js";
@@ -25,6 +26,22 @@ export async function getSetting(key: string): Promise<string> {
     .where(eq(settings.key, key))
     .get();
   return row?.value ?? "";
+}
+
+export async function getProviderCredentials(provider: "gemini" | "openai") {
+  const key = provider + "_api_key";
+  const url = provider + "_base_url";
+  const rows = await db.select().from(settings).where(inArray(settings.key, [key, url])).all();
+  const values = Object.fromEntries(rows.map((row) => [row.key, row.value.trim()]));
+  return { apiKey: values[key] ?? "", baseUrl: values[url] ?? "" };
+}
+
+export function providerOrigin(provider: string, base: string): string | null {
+  if (!base.trim()) return provider === "gemini" ? "https://generativelanguage.googleapis.com" : "";
+  try {
+    const url = new URL(base);
+    return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password ? url.origin : null;
+  } catch { return null; }
 }
 
 export async function getFirstSetting(keys: string[]): Promise<string> {
@@ -59,9 +76,11 @@ export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   maxRetries = 3,
   initialDelay = 2000,
+  signal?: AbortSignal,
 ): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    signal?.throwIfAborted();
     try {
       return await fn();
     } catch (error: unknown) {
@@ -79,7 +98,7 @@ export async function retryWithBackoff<T>(
       if (!shouldRetry || noRetry || attempt === maxRetries - 1) throw error;
       const delayMs = initialDelay * Math.pow(2, attempt);
       console.log(`Retry ${attempt + 1}/${maxRetries} in ${delayMs}ms — ${msg.slice(0, 200)}`);
-      await new Promise((r) => setTimeout(r, delayMs));
+      await delay(delayMs, undefined, { signal });
     }
   }
   throw lastError;
@@ -128,12 +147,13 @@ export async function withTimeout<T>(
 export async function runWithRetries<T>(
   fn: (signal: AbortSignal) => Promise<T>,
   timeoutMultiplier = 1,
+  signal?: AbortSignal,
 ): Promise<T> {
   const { timeoutMs, maxRetries } = await getRuntimeSettings();
   const effectiveTimeout = Math.round(timeoutMs * timeoutMultiplier);
   return await retryWithBackoff(
-    () => withTimeout(fn, effectiveTimeout),
-    maxRetries,
+    () => withTimeout(fn, effectiveTimeout, signal),
+    maxRetries, 2000, signal,
   );
 }
 
@@ -162,6 +182,7 @@ export async function runWithModelFallback<T>(opts: {
   /** `signal` aborts when this attempt times out — pass it to the HTTP call. */
   run: (model: string, signal: AbortSignal) => Promise<T>;
   timeoutMultiplier?: number;
+  signal?: AbortSignal;
 }): Promise<T> {
   const pref = await getModelPreference(opts.primaryKeys, opts.primaryFallback, opts.fallbackKeys);
   const mult = opts.timeoutMultiplier ?? 1;
@@ -171,13 +192,14 @@ export async function runWithModelFallback<T>(opts: {
   }
 
   try {
-    return await runWithRetries((signal) => opts.run(pref.primary, signal), mult);
+    return await runWithRetries((signal) => opts.run(pref.primary, signal), mult, opts.signal);
   } catch (primaryError) {
+    opts.signal?.throwIfAborted();
     if (!pref.fallback) throw primaryError;
     const pMsg = primaryError instanceof Error ? primaryError.message : String(primaryError);
     console.warn(`${opts.label}: primary model ${pref.primary} failed (${pMsg.slice(0, 150)}), trying fallback ${pref.fallback}`);
     try {
-      return await runWithRetries((signal) => opts.run(pref.fallback!, signal), mult);
+      return await runWithRetries((signal) => opts.run(pref.fallback!, signal), mult, opts.signal);
     } catch (fallbackError) {
       const p = primaryError instanceof Error ? primaryError.message : String(primaryError);
       const f = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);

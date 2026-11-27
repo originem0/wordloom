@@ -35,6 +35,14 @@ function climbed(n: number): { rows: TimelineRow[]; last: number } {
 }
 
 describe("foldTimeline", () => {
+  it("keeps a promotion earned before an earlier pending attempt revealed its answer", () => {
+    const pending = attempt(T0 + 2 * DAY, "need", null);
+    const pass = attempt(T0 + 6 * DAY, "need", "pass");
+    expect(foldTimeline([met(), pending, pass], T0).promotions).toBe(1);
+    expect(foldTimeline([met(), { ...pending, outcome: "fail", judgedAt: T0 + 9 * DAY }, pass], T0))
+      .toMatchObject({ promotions: 1, answerSeenAt: T0 + 9 * DAY });
+  });
+
   it("a: a fresh 想用 entry can be tested only after 24 hours", () => {
     const rows = [met()];
     expect(foldTimeline(rows, T0)).toMatchObject({ level: 0, promotions: 0, dueAt: T0 + DAY });

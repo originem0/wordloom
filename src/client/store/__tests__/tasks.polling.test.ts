@@ -90,6 +90,38 @@ describe("job polling", () => {
   });
 });
 
+it("waits for a job id and an acknowledged cancellation before showing cancelled", async () => {
+  let accept!: (response: Response) => void;
+  let cancelled!: (response: Response) => void;
+  const network = vi.fn((url: string) => new Promise<Response>((resolve) => {
+    if (url.includes("/generate")) accept = resolve;
+    if (url.endsWith("/cancel")) cancelled = resolve;
+  }));
+  vi.stubGlobal("fetch", network);
+  const { submitCards, cancelTask } = useTaskStore.getState();
+  const id = submitCards(["anchor"]);
+  await cancelTask(id);
+  expect(task(id)).toMatchObject({ status: "running", cancelRequested: true });
+  accept(json({ jobId: "delayed" }, 202));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(network.mock.calls.at(-1)?.[0]).toBe("/api/jobs/delayed/cancel");
+  expect(task(id).status).toBe("running");
+  cancelled(json({ id: "delayed", status: "cancelled" }));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(task(id).status).toBe("cancelled");
+});
+
+it("continues polling when the server cannot confirm cancellation", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/generate") ? json({ jobId: "in-flight" }, 202)
+    : url.endsWith("/cancel") ? json({}, 503) : json({ status: "done", result: { success: [7], existing: [], failed: [] } })));
+  const id = useTaskStore.getState().submitCards(["anchor"]);
+  await vi.advanceTimersByTimeAsync(0);
+  await useTaskStore.getState().cancelTask(id);
+  expect(task(id).status).toBe("running");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(task(id)).toMatchObject({ status: "done", result: { success: [7] } });
+});
+
 it("uses the current language for submission failures and retranslates the stored error", async () => {
   useAppStore.getState().setUiLanguage("en");
   vi.stubGlobal("fetch", vi.fn(async () => json({ error: "Unauthorized", code: "AUTH_REQUIRED" }, 401)));

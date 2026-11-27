@@ -3,7 +3,7 @@ import { errorMessage, useI18n } from "@/client/lib/i18n";
 
 // A function child subscribes even when the class boundary has stopped
 // rendering its normal subtree after an error.
-function FailureView({ error, retry, module = false }: { error: Error | null; retry: () => void; module?: boolean }) {
+export function FailureView({ error, retry, module = false }: { error: Error | null; retry: () => void; module?: boolean }) {
   const { t } = useI18n();
   return (
     <div className={module ? "flex flex-col items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-4" : "flex min-h-screen flex-col items-center justify-center gap-4 p-6"}>

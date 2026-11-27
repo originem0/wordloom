@@ -1,5 +1,5 @@
 # Build stage
-FROM node:20-slim AS build
+FROM node:22-slim AS build
 WORKDIR /app
 
 # Enable pnpm
@@ -14,7 +14,7 @@ COPY . .
 RUN pnpm build
 
 # Production stage
-FROM node:20-slim
+FROM node:22-slim
 WORKDIR /app
 
 RUN corepack enable pnpm
@@ -36,6 +36,7 @@ EXPOSE 3001
 
 ENV NODE_ENV=production
 ENV PORT=3001
+ENV HOST=0.0.0.0
 
 # Start server (migrations are applied at startup)
 CMD ["node", "dist/server/index.js"]

@@ -11,6 +11,9 @@ services:
       - AUTH_SECRET=${AUTH_SECRET}
       - NODE_ENV=production
       - PORT=3001
+      - HOST=0.0.0.0
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-}
     restart: unless-stopped
 
 volumes:

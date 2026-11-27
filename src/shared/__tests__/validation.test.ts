@@ -93,11 +93,11 @@ describe("Scenario 1: AI Data Schema Validation Resilience", () => {
       familyBoundaryNote: "block vs hinder：…\nblock vs clog：…",
       familyChoiceRule: "完全不通 → block",
       // no drawing, no schema, and none of the retired fields
-      schemaAnalysis: { wordType: "abstract", coreSchema: "none", coreImageText: "…" },
+      schemaAnalysis: { wordType: "abstract", coreSchema: "none", coreImageText: "掌声自发响起。", coreImageExample: "There was **spontaneous** applause." },
     });
     expect(parsed.familyAxes).toBe("程度 / 语域");
     expect(parsed.familyChoiceRule).toBe("完全不通 → block");
-    expect(parsed.schemaAnalysis).toEqual({ wordType: "abstract", coreSchema: "none", coreImageText: "…" });
+    expect(parsed.schemaAnalysis).toEqual({ wordType: "abstract", coreSchema: "none", coreImageText: "掌声自发响起。", coreImageExample: "There was **spontaneous** applause." });
   });
 
   // The notes decorate the family table; their shape must never cost the layer.
@@ -106,12 +106,13 @@ describe("Scenario 1: AI Data Schema Validation Resilience", () => {
       familyAxes: ["程度", " 语域 ", 3],
       familyBoundaryNote: ["block vs hinder：…", "block vs clog：…"],
       familyChoiceRule: { rule: "not a line" },
-      schemaAnalysis: { coreSchema: "path", wordType: 7, registerVariation: ["formal"] },
+      schemaAnalysis: { coreSchema: "path", wordType: 7, registerVariation: ["formal"], coreSvg: null },
     });
     expect(parsed.familyAxes).toBe("程度 / 语域");
     expect(parsed.familyBoundaryNote).toBe("block vs hinder：…\nblock vs clog：…");
     expect(parsed.familyChoiceRule).toBeUndefined();
     expect(parsed.schemaAnalysis?.wordType).toBeUndefined();
+    expect(parsed.schemaAnalysis?.coreSvg).toBeUndefined();
     expect(parsed.schemaAnalysis?.registerVariation).toBeUndefined();
   });
 });

@@ -6,6 +6,7 @@
 //   POST   /                                CaptureRequest   → 201 ExpressionDetail | 409 DuplicateResponse
 //   GET    /:id                             ExpressionDetail
 //   PATCH  /:id                             ExpressionPatch  → ExpressionDetail | 400 { code: "INTENT_REQUIRED" }
+//   PATCH  /:id/passage-notes               PassageNoteChange → ExpressionDetail
 //   DELETE /:id                             → 204; permanently removes the entry and its timeline
 //   POST   /:id/encounters                  EncounterRequest → 201 ExpressionDetail
 //   POST   /:id/annotate                    → ExpressionDetail | 502 { code: "ANNOTATE_FAILED" }
@@ -60,6 +61,7 @@ export const DRAFT_SETTING_KEY = "expressions_draft";
 
 /** One entry as the list shows it. */
 export interface ExpressionSummary {
+  targetVersion?: number;
   id: number;
   status: ExpressionStatus;
   /** The server withheld the English: `text` and `focus` are null here, and in
@@ -101,9 +103,12 @@ export interface AttemptFeedback {
   used?: boolean;
   conveyed?: boolean;
   rewrites?: Rewrite[];
-  /** When the judgement that stands was made: the model's, or the user's when
-   *  they overturned it. */
+  /** Activation that was in effect at submission. Older rows may lack it. */
+  activeSince?: number | null;
+  /** Time of the original judgement. Later decisions are appended to judgments. */
   judgedAt?: number;
+  judgments?: { at: number; outcome: Outcome }[];
+  shownAt?: number[];
   /** The outcome that stands is not the model's. */
   overturned?: boolean;
   /** What the model had said; set the first time the user overturns it. */
@@ -111,6 +116,7 @@ export interface AttemptFeedback {
 }
 
 export interface EncounterView {
+  previousFocus?: string | null;
   id: number;
   kind: EncounterKind;
   createdAt: number;
@@ -129,8 +135,41 @@ export interface EncounterView {
   feedback: AttemptFeedback | null;
 }
 
+export interface PassageNoteContent {
+  body: string;
+  examples: [string, string] | null;
+}
+
+/** Half-open UTF-16 offsets into the immutable, verbatim original. Equal words
+ *  at different positions can have independent notes. */
+export interface PassageRange {
+  start: number;
+  end: number;
+}
+
+export interface PassageNote extends PassageRange, PassageNoteContent {}
+
+/** Compare only this passage, so edits to other passages never collide. */
+export interface PassageNoteChange extends PassageRange {
+  before: PassageNoteContent | null;
+  after: PassageNoteContent | null;
+}
+
+export interface LearningState {
+  estimated?: boolean;
+  at: number;
+  status: ExpressionStatus;
+  activeSince: number | null;
+  version: number;
+  focus: string | null;
+}
+
 export interface ExpressionDetail extends ExpressionSummary {
+  focusRange?: PassageRange | null;
+  legacyHistory?: boolean;
   note: string | null;
+  /** Empty for legacy entries and for every masked read, including the count. */
+  passageNotes: PassageNote[];
   gloss: string | null;
   aiIntent: string | null;
   /** The annotate call has run; readable even while the gloss is withheld. */
@@ -158,6 +197,7 @@ export interface EncounterSource {
 }
 
 export interface CaptureRequest extends EncounterSource {
+  focusRange?: PassageRange;
   /** Verbatim, the only required field. */
   text: string;
   focus?: string;
@@ -179,6 +219,8 @@ export interface EncounterRequest extends EncounterSource {
  *  refused, and so is clearing it there. A change of layer is not an event
  *  and writes nothing to the timeline. */
 export interface ExpressionPatch {
+  expectedUpdatedAt?: number;
+  focusRange?: PassageRange | null;
   note?: string | null;
   focus?: string | null;
   intent?: string | null;
@@ -208,6 +250,7 @@ export interface RevealRequest {
 // --- 试一条 ---
 
 export interface TryItem {
+  targetVersion?: number;
   id: number;
   /** The question: a stored fresh scene when there is one, else the intent. */
   prompt: string;
@@ -231,6 +274,7 @@ export interface SceneResponse {
 }
 
 export interface AttemptRequest {
+  targetVersion?: number;
   text: string;
   /** The highest hint level seen before answering. */
   cue: "none" | "need" | "scene" | "revealed";
@@ -268,6 +312,7 @@ export interface OverturnRequest {
 
 /** One message to the partner. Without `thread` it opens a new conversation. */
 export interface TalkRequest {
+  messageId?: string;
   said: string;
   /** The conversation it continues: the `thread` of its turns. */
   thread?: number;

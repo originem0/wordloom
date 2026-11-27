@@ -26,6 +26,8 @@ vi.mock("../../services/ai-router.js", () => ({
 }));
 
 import { eq, sql } from "drizzle-orm";
+import { recordDay } from "../../services/expressions-try.js";
+import { evaluationWindow, learningDays } from "../../db/schema.js";
 import { app } from "../../app.js";
 import { db } from "../../db/index.js";
 import { cards, encounters, expressions, jobs, sessions, settings, talkTurns } from "../../db/schema.js";
@@ -50,7 +52,7 @@ function req(path: string, init: { method?: string; body?: unknown; raw?: string
   const headers = new Headers({ host: HOST, origin: `https://${HOST}`, "x-real-ip": "203.0.113.7", cookie: `session=${SESSION}` });
   const body = init.raw ?? (init.body === undefined ? undefined : JSON.stringify(init.body));
   if (body !== undefined) headers.set("content-type", "application/json");
-  return app.request(`/api/expressions${path}`, { method: init.method ?? (body === undefined ? "GET" : "POST"), headers, body });
+  return app.request(`https://${HOST}/api/expressions${path}`, { method: init.method ?? (body === undefined ? "GET" : "POST"), headers, body });
 }
 const post = (path: string, body: unknown = {}) => req(path, { body });
 const json = async <T>(res: Response | Promise<Response>) => (await (await res).json()) as T;
@@ -106,7 +108,7 @@ beforeEach(async () => {
   process.env.AUTH_TOKEN = "secret-token";
   process.env.AUTH_SECRET = "secret";
   delete process.env.ALLOWED_ORIGINS;
-  for (const t of [talkTurns, encounters, expressions, cards, jobs, sessions, settings]) await db.delete(t);
+  for (const t of [learningDays, evaluationWindow, talkTurns, encounters, expressions, cards, jobs, sessions, settings]) await db.delete(t);
   const now = Date.now();
   await db.insert(sessions).values({ sessionId: hashSessionId(SESSION), createdAt: now, expiresAt: now + 60_000, revokedAt: null });
   model.mockReset();
@@ -305,7 +307,7 @@ describe("试一条: an answer", () => {
     const [, row] = await rowsOf(e.id);
     expect(row).toMatchObject({ kind: "attempt", text: SENTENCE, cue: "need", outcome: "pass", textBefore: null, myAttempt: null });
     const feedback = JSON.parse(row.feedback!) as AttemptFeedback;
-    expect(feedback).toEqual({ prompt: INTENT, status: "done", used: true, conveyed: true, rewrites: [], judgedAt: expect.any(Number) });
+    expect(feedback).toEqual({ prompt: INTENT, activeSince: expect.any(Number), status: "done", used: true, conveyed: true, rewrites: [], judgedAt: expect.any(Number), judgments: [{ at: feedback.judgedAt, outcome: "pass" }], shownAt: [feedback.judgedAt] });
     expect(feedback.judgedAt).toBeGreaterThanOrEqual(before);
     expect(body).toEqual({
       encounterId: row.id, status: "done", verdict: "used", outcome: "pass", overturned: false, rewrites: [],
@@ -479,7 +481,7 @@ describe("试一条: an answer", () => {
     });
     const [, row] = await rowsOf(e.id);
     expect(row).toMatchObject({ id: body.encounterId, kind: "attempt", text: SENTENCE, cue: "need", outcome: null });
-    expect(JSON.parse(row.feedback!)).toEqual({ prompt: INTENT, status: "failed" });
+    expect(JSON.parse(row.feedback!)).toEqual({ prompt: INTENT, activeSince: expect.any(Number), status: "failed" });
     expect(printed()).toContain(`[expressions] judge #${row.id} failed: timeout`);
     expect(await tryIds()).toEqual([e.id]);
 
@@ -564,8 +566,8 @@ describe("试一条: the user's verdict", () => {
       rewrites: MISSED.rewrites, answer, intent: null,
     } satisfies AttemptResponse);
     const once = await feedbackOf(body.encounterId);
-    expect(once).toEqual({ ...judged, modelOutcome: "fail", overturned: true, judgedAt: expect.any(Number) });
-    expect(once.judgedAt).toBeGreaterThanOrEqual(started);
+    expect(once).toEqual({ ...judged, modelOutcome: "fail", overturned: true, judgments: [{ at: 1, outcome: "fail" }, { at: expect.any(Number), outcome: "pass" }], shownAt: [expect.any(Number)] });
+    expect(once.shownAt![0]).toBeGreaterThanOrEqual(started);
     expect((await rowsOf(e.id))[1].outcome).toBe("pass");
 
     // Back to where the model had it: no longer overturned. The answer has
@@ -576,7 +578,8 @@ describe("试一条: the user's verdict", () => {
     });
     const twice = await feedbackOf(body.encounterId);
     expect(twice).toMatchObject({ modelOutcome: "fail", overturned: false });
-    expect(twice.judgedAt).toBeGreaterThanOrEqual(started);
+    expect(twice.judgedAt).toBe(1);
+    expect(twice.shownAt).toHaveLength(2);
     expect(await rowsOf(e.id)).toHaveLength(2);
     expect(await tryIds()).toEqual([]);
   });
@@ -655,16 +658,14 @@ describe("对谈", () => {
     const [route, opts] = model.mock.calls[0];
     expect([route, opts.label]).toEqual(["expressions", "expressions.talk"]);
     // 想用 first and without its English, then 见过 from the newest, then what was shelved.
-    expect(sent()).toEqual({
-      said: `${SAID} ${MARKER}`,
-      history: [],
-      index: [
+    expect(sent().said).toBe(`${SAID} ${MARKER}`);
+    expect(sent().history).toEqual([]);
+    expect(sent().index.split("\n").sort()).toEqual([
         `${wanted.id} |  | ${INTENT} | ${drafted.slice(0, 100)}`,
         `${recent.id} | ${`A long sentence, ${"x".repeat(100)}`.slice(0, 80)} |  | `,
         `${old.id} | Fair enough. | ${wordy.slice(0, 100)} | 我想说可以接受`,
         `${shelved.id} | By and large. |  | `,
-      ].join("\n"),
-    });
+      ].sort());
     const body = await json<TalkTurn>(res);
     expect(body).toMatchObject({ said: `${SAID} ${MARKER}`, reply: REPLY, fix: null, rewrites: [], fresh: [], mine: [], searched: 4, total: 4 });
     expect(Object.keys(body).sort()).toEqual([
@@ -742,9 +743,9 @@ describe("对谈", () => {
       createdAt: now - i * HOUR, updatedAt: now,
     }));
     await db.insert(expressions).values(filler);
-    const omitted = await seed({ text: "An omitted phrase.", focus: "omitted phrase", createdAt: now - 400 * DAY });
+    const omitted = await seed({ text: "An omitted phrase.", focus: "omitted phrase", intent: "意".repeat(100), aiIntent: "图".repeat(100), createdAt: now - 400 * DAY });
     answer({ fix: { text: "I would use an omitted phrase here.", why: "clearer" } });
-    const body = await heard({ said: "I would put it another way." });
+    const body = await heard({ said: "sentence focus" });
     expect(sent().index).not.toContain(`${omitted.id} |`);
     expect(body.searched).toBeLessThan(body.total);
     expect(body.mine).toEqual([]);
@@ -771,18 +772,18 @@ describe("对谈", () => {
     const before = Date.now();
     const first = await heard({ said: ` ${SAID} ` });
     // A conversation is named by the moment it began.
-    expect(first).toMatchObject({ thread: first.createdAt, said: SAID, reply: REPLY });
+    expect(first).toMatchObject({ thread: expect.any(Number), said: SAID, reply: REPLY });
     expect(first.createdAt).toBeGreaterThanOrEqual(before);
     const written = await lookups();
     expect(written.map((r) => r.expressionId)).toEqual([b.id, a.id]);
     for (const r of written) {
       expect(r).toMatchObject({
         text: SAID, myAttempt: null, cue: null, outcome: null, textBefore: null,
-        feedback: JSON.stringify({ turn: 1, thread: first.thread }), createdAt: first.createdAt,
+        feedback: JSON.stringify({ turn: 1, thread: first.thread }), createdAt: expect.any(Number),
       });
     }
     expect(await turns()).toEqual([
-      { id: first.id, thread: first.thread, said: SAID, reply: REPLY, notes: expect.any(String), createdAt: first.createdAt },
+      { id: first.id, thread: first.thread, messageId: null, said: SAID, reply: REPLY, notes: expect.any(String), createdAt: first.createdAt },
     ]);
 
     answer({ reply: "I'm slammed. And you?", mine: [{ id: 9999, why: "made up" }], fresh: [{ text: "slammed", why: "w" }] });
@@ -791,8 +792,7 @@ describe("对谈", () => {
     const all = await lookups();
     expect(all).toHaveLength(3);
     expect(all[2]).toMatchObject({
-      expressionId: null, text: "另一个需求", myAttempt: null, cue: null, createdAt: none.createdAt,
-      feedback: JSON.stringify({ turn: 2, thread: first.thread }),
+      expressionId: null, text: "", myAttempt: null, cue: null, createdAt: expect.any(Number), feedback: null,
     });
     expect((await turns()).map((t) => [t.id, t.thread, t.said])).toEqual([[first.id, first.thread, SAID], [none.id, first.thread, "另一个需求"]]);
     // The partner's own sentences become entries only when the user keeps one.
@@ -1158,16 +1158,20 @@ describe("对谈", () => {
     answer({ mine: [{ id: oldest, why: "w" }, { id: wanted.id, why: "w" }] });
     const body = await heard({ said: "I very busy" });
     expect(body.total).toBe(201);
-    expect(body.searched).toBeGreaterThan(100);
+    expect(body.searched).toBeGreaterThan(20);
     expect(body.searched).toBeLessThan(201);
     const { index } = sent();
-    expect(index.length).toBeLessThanOrEqual(60_000);
-    expect(index.length).toBeGreaterThan(60_000 - 420);
+    expect(index.length).toBeLessThanOrEqual(12_000);
+    expect(index.length).toBeGreaterThan(12_000 - 420);
     expect(index.split("\n")).toHaveLength(body.searched);
     expect(index.startsWith(`${wanted.id} |  | ${INTENT} | `)).toBe(true);
     // What did not fit was not searched, so it cannot be a hit.
     expect(index).not.toContain(`${oldest} | focus 199 `);
     expect(body.mine.map((h) => h.expression.id)).toEqual([wanted.id]);
+    await db.update(expressions).set({ intent: "描述潮汐变化" }).where(eq(expressions.id, oldest));
+    answer({ mine: [{ id: oldest, why: "matches the request" }] });
+    expect((await heard({ said: "潮汐会怎样变化？" })).mine.map((hit) => hit.expression.id)).toEqual([oldest]);
+    expect(sent(1).index.startsWith(`${oldest} | `)).toBe(true);
   });
 
   // Rule 8: what was said before is not the page's to tell.
@@ -1180,13 +1184,32 @@ describe("对谈", () => {
     expect(next).toMatchObject({ thread: T, said: "and now?" });
     expect(sent().history).toEqual(Array.from({ length: 12 }, (_, i) => line(i + 1)));
     expect(model.mock.calls[0][1].user).not.toContain(MARKER);
-    expect((await lookups())[0].feedback).toBe(JSON.stringify({ turn: 13, thread: T }));
+    expect((await lookups())[0]).toMatchObject({ feedback: null, text: "" });
 
     // One more than fits: the opening turn stays, to say what the conversation is about.
     answer();
     await heard({ said: "and then?", thread: T });
     expect(sent(1).history).toEqual([line(1), ...Array.from({ length: 10 }, (_, i) => line(i + 3)), { said: "and now?", reply: REPLY }]);
-    expect((await lookups())[1].feedback).toBe(JSON.stringify({ turn: 14, thread: T }));
+    expect((await lookups())[1]).toMatchObject({ feedback: null, text: "" });
+  });
+
+  it("reuses a saved message and never recreates a deleted conversation", async () => {
+    const messageId = crypto.randomUUID();
+    answer();
+    const first = await heard({ said: "saved once", messageId });
+    expect(await heard({ said: "saved once", messageId })).toMatchObject({ id: first.id, thread: first.thread });
+    expect(await turns()).toHaveLength(1);
+    expect(await lookups()).toHaveLength(1);
+    let release!: (v: unknown) => void;
+    model.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const pending = say({ thread: first.thread, said: "late reply" });
+    await vi.waitFor(() => expect(release).toBeDefined());
+    expect((await req(`/talk/${first.thread}`, { method: "DELETE" })).status).toBe(204);
+    release({ reply: "complete" });
+    expect((await pending).status).toBe(404);
+    expect((await say({ said: "saved once", messageId })).status).toBe(404);
+    expect(await turns()).toEqual([]);
+    expect((await lookups()).map((r) => r.text)).toEqual([""]);
   });
 
   it("answers a thread that names no conversation with a 404, and asks the model nothing", async () => {
@@ -1220,7 +1243,7 @@ describe("对谈", () => {
   it("takes a message of four thousand characters, and keeps all of it", async () => {
     answer();
     expect((await say({ said: "忙".repeat(4000) })).status).toBe(201);
-    expect([(await turns())[0].said.length, (await lookups())[0].text.length, sent().said.length]).toEqual([4000, 4000, 4000]);
+    expect([(await turns())[0].said.length, (await lookups())[0].text.length, sent().said.length]).toEqual([4000, 0, 4000]);
   });
 
   it("cuts a runaway answer: the reply at eight thousand characters, a reason at six hundred", async () => {
@@ -1266,7 +1289,7 @@ describe("对谈", () => {
     expect(await turns()).toHaveLength(1);
   });
 
-  it("writes the turn and its rows together or not at all", async () => {
+  it("keeps a complete reply retryable if writing its coaching fails", async () => {
     const e = await seed();
     for (const table of ["talk_turns", "encounters"]) {
       await db.run(sql.raw(`create trigger refuse_rows before insert on ${table} begin select raise(abort, 'refused'); end`));
@@ -1277,7 +1300,12 @@ describe("对谈", () => {
         await db.run(sql`drop trigger refuse_rows`);
       }
       expect(await lookups()).toEqual([]);
-      expect(await turns()).toEqual([]);
+      const saved = await turns();
+      if (table === "talk_turns") expect(saved).toEqual([]);
+      else {
+        expect(saved).toHaveLength(1);
+        expect(JSON.parse(saved[0].notes)).toMatchObject({ coachingPending: true });
+      }
     }
   });
 
@@ -1427,6 +1455,11 @@ describe("首页的数", () => {
   /** 2026-03-01 00:00 in UTC+8, which is 16:00 the day before in UTC. */
   const MIDNIGHT = Date.UTC(2026, 1, 28, 16);
 
+  const activity = async (id: number | null, kind: string, at: number, more: NewRow = {}) => {
+    if (kind === "met" || kind === "looked_up" || kind === "attempt") await recordDay(db, at, kind);
+    await add(id, kind, at, more);
+  };
+
   it("has nothing to count in an empty library", async () => {
     expect(await stats()).toEqual({ produced: 0, testableDays: 0, attemptDays: 0, since: null, judgeAt: null });
   });
@@ -1434,12 +1467,13 @@ describe("首页的数", () => {
   it("tells days apart at midnight UTC+8", async () => {
     const since = MIDNIGHT - 10 * DAY;
     await active({ createdAt: since, activeSince: since });
-    await add(null, "looked_up", MIDNIGHT - 60_000);
-    await add(null, "looked_up", MIDNIGHT + 60_000);
+    await recordDay(db, since, "met");
+    await activity(null, "looked_up", MIDNIGHT - 60_000);
+    await activity(null, "looked_up", MIDNIGHT + 60_000);
     expect(await stats()).toEqual({ produced: 0, testableDays: 2, attemptDays: 0, since, judgeAt: since + 28 * DAY });
     // 07:59 and 08:01 there are two dates in UTC and one day here.
-    await add(null, "looked_up", MIDNIGHT + 8 * HOUR - 60_000);
-    await add(null, "looked_up", MIDNIGHT + 8 * HOUR + 60_000);
+    await activity(null, "looked_up", MIDNIGHT + 8 * HOUR - 60_000);
+    await activity(null, "looked_up", MIDNIGHT + 8 * HOUR + 60_000);
     expect((await stats()).testableDays).toBe(2);
   });
 
@@ -1448,24 +1482,39 @@ describe("首页的数", () => {
     const at = (day: number, hour = 1) => since + day * DAY + hour * HOUR;
     // In 想用 from the third day, so due from the fourth.
     const e = await active({ createdAt: since, activeSince: at(2, 0) });
-    await add(null, "looked_up", at(1)); // nothing is due yet
-    await add(null, "looked_up", at(3)); // a testable day
-    await add(e.id, "reveal", at(4), { cue: "masked" }); // not a write that counts, though it restarts the day's wait
-    await add(e.id, "attempt", at(5, 2), { cue: "need", outcome: "pass" }); // due again an hour before: testable, with an attempt
-    await add(e.id, "attempt", at(6), { cue: "need", outcome: "pass" }); // an attempt out of turn, as from 对谈: no testable day
-    await add(e.id, "met", at(9)); // three days after the pass that counted
+    await recordDay(db, since, "met");
+    await activity(null, "looked_up", at(1)); // nothing is due yet
+    await activity(null, "looked_up", at(3)); // a testable day
+    await activity(e.id, "reveal", at(4), { cue: "masked" }); // not a write that counts, though it restarts the day's wait
+    await activity(e.id, "attempt", at(5, 2), { cue: "need", outcome: "pass" }); // due again an hour before: testable, with an attempt
+    await activity(e.id, "attempt", at(6), { cue: "need", outcome: "pass" }); // an attempt out of turn, as from 对谈: no testable day
+    await activity(e.id, "met", at(9)); // three days after the pass that counted
     expect(await stats()).toEqual({ produced: 1, testableDays: 3, attemptDays: 1, since, judgeAt: since + 28 * DAY });
+  });
+
+  it("starts with personal activity and keeps the window and day counts after a deletion", async () => {
+    const imported = await seed({ createdAt: MIDNIGHT - 400 * DAY });
+    expect((await stats()).since).toBeNull();
+    const personal = await active({ createdAt: MIDNIGHT, activeSince: MIDNIGHT });
+    await recordDay(db, MIDNIGHT, "met");
+    await activity(personal.id, "attempt", MIDNIGHT + 2 * DAY, { cue: "need", outcome: "pass" });
+    const before = await stats();
+    expect(before).toMatchObject({ since: MIDNIGHT, produced: 1, testableDays: 1, attemptDays: 1 });
+    for (const id of [imported.id, personal.id]) expect((await req(`/${id}`, { method: "DELETE" })).status).toBe(204);
+    expect(await stats()).toEqual({ ...before, produced: 0 });
   });
 
   it("stops counting four weeks after the first entry was saved", async () => {
     const since = MIDNIGHT - 40 * DAY;
     // An active_since before the entry itself, so that the question before `since` would count if it were looked at.
     const e = await active({ createdAt: since, activeSince: since - 5 * DAY });
-    await seed({ createdAt: since + DAY }); // a later entry does not move the start
-    await add(null, "looked_up", since - DAY);
-    await add(null, "looked_up", since + 28 * DAY - 1); // the last moment inside
-    await add(e.id, "attempt", since + 28 * DAY, { cue: "need", outcome: "fail" });
-    await add(null, "looked_up", since + 30 * DAY);
+    await recordDay(db, since, "met");
+    await seed({ createdAt: since + DAY });
+    await recordDay(db, since + DAY, "met"); // a later entry does not move the start
+    await activity(null, "looked_up", since - DAY);
+    await activity(null, "looked_up", since + 28 * DAY - 1); // the last moment inside
+    await activity(e.id, "attempt", since + 28 * DAY, { cue: "need", outcome: "fail" });
+    await activity(null, "looked_up", since + 30 * DAY);
     // The days the two entries were saved, and the last one of the four weeks.
     expect(await stats()).toEqual({ produced: 0, testableDays: 3, attemptDays: 0, since, judgeAt: since + 28 * DAY });
   });

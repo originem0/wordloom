@@ -11,6 +11,9 @@ WorkingDirectory=/home/ubuntu/wordloom
 EnvironmentFile=/home/ubuntu/wordloom/.env
 Environment=NODE_ENV=production
 Environment=PORT=3001
+Environment=HOST=127.0.0.1
+Environment=TRUSTED_PROXY_IPS=127.0.0.1,::1
+UMask=0077
 ExecStart=/usr/bin/node /home/ubuntu/wordloom/dist/server/index.js
 Restart=always
 RestartSec=3

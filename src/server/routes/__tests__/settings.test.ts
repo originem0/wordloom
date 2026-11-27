@@ -2,23 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
 
 // Avoid touching the real sqlite file in tests.
-vi.mock("../../db/index.js", () => ({
-  db: {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          get: vi.fn(() => ({ value: "" })),
-        })),
-        all: vi.fn(() => []),
-      })),
-    })),
-    insert: vi.fn(() => ({
-      values: vi.fn(() => ({
-        onConflictDoUpdate: vi.fn(() => ({})),
-      })),
-    })),
-  },
-}));
 
 import { settingRoutes } from "../settings.js";
 

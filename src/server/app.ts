@@ -4,6 +4,7 @@ import { logger } from "hono/logger";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { HTTPException } from "hono/http-exception";
+import { isTrustedProxy } from "./middleware/peer.js";
 import { requireAuth, requirePrivate } from "./middleware/guard.js";
 import { authRoutes } from "./routes/auth.js";
 import { cardRoutes } from "./routes/cards.js";
@@ -55,18 +56,7 @@ function getAllowedOrigins(): string[] {
     .filter(Boolean);
 }
 
-// Without an explicit allowlist the only acceptable Origin is our own site.
-// Compared by hostname, not host: nginx forwards $host (no port) while the
-// browser's Origin carries one when the site is reached on :8443.
-function isSameSite(origin: string, hostHeader: string | undefined): boolean {
-  if (!hostHeader) return false;
-  try {
-    return new URL(origin).hostname === new URL(`http://${hostHeader}`).hostname;
-  } catch {
-    return false;
-  }
-}
-
+// Trust the external scheme only from the configured reverse proxy.
 app.use(
   "/api/*",
   cors({
@@ -85,7 +75,11 @@ app.use("/api/*", async (c, next) => {
   const origin = c.req.header("origin");
   if (!origin) return c.json({ error: "Missing Origin", code: "CSRF_BLOCKED" }, 403);
   const allowed = getAllowedOrigins();
-  const ok = allowed.length > 0 ? allowed.includes(origin) : isSameSite(origin, c.req.header("host"));
+  const request = new URL(c.req.url);
+  const scheme = isTrustedProxy(c) ? c.req.header("x-forwarded-proto") : undefined;
+  if (scheme === "http" || scheme === "https") request.protocol = scheme + ":";
+  if (c.req.header("host")) request.host = c.req.header("host")!;
+  const ok = allowed.length > 0 ? allowed.includes(origin) : origin === request.origin;
   if (!ok) {
     return c.json({ error: "Origin not allowed", code: "CSRF_BLOCKED" }, 403);
   }
@@ -177,7 +171,7 @@ app.onError((err, c) => {
   }
   // Under a private route not even the journal gets the message: a failed
   // query's carries its bound values, there the user's text.
-  if (c.req.path.startsWith("/api/expressions")) {
+  if (c.req.path.startsWith("/api/expressions") || c.req.path.startsWith("/api/settings")) {
     console.error(`Unhandled error: ${err.constructor.name} in ${c.req.method} ${c.req.path}\n${framesOf(err)}`);
   } else {
     console.error("Unhandled error:", err);

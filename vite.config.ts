@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { VitePWA } from "vite-plugin-pwa"
+import { runtimeCaching } from "./tools/pwa-cache.ts"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -13,21 +14,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: "prompt",
       workbox: {
+        cacheId: "wordloom",
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
-        runtimeCaching: [
-          {
-            // Cache card API responses for offline viewing
-            urlPattern: /\/api\/cards(\?.*)?$/,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "cards-cache",
-              expiration: { maxEntries: 100, maxAgeSeconds: 7 * 24 * 60 * 60 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-        ],
+        runtimeCaching,
       },
     }),
   ],

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
+import { buildRequestRoot, GEMINI_API_VERSION } from "../services/gemini-transport.js";
 import { z } from "zod";
-import { getSetting } from "../services/ai-shared.js";
+import { getSetting, getProviderCredentials, providerOrigin } from "../services/ai-shared.js";
 import { extractJsonCandidate } from "../services/ai-normalize.js";
 import { authMiddleware } from "../middleware/auth.js";
 
@@ -11,37 +12,6 @@ import { authMiddleware } from "../middleware/auth.js";
 // Mounted by settings.ts, so the URL stays POST /api/settings/test.
 export const settingTestRoutes = new Hono();
 
-const GEMINI_API_VERSION = "v1beta";
-
-function buildRequestRoot(baseUrlRaw: string): { requestRoot: string; warnings: string[] } {
-  const warnings: string[] = [];
-  const trimmed = baseUrlRaw.trim();
-
-  const base = trimmed || "https://generativelanguage.googleapis.com";
-
-  let url: URL;
-  try {
-    url = new URL(base);
-  } catch {
-    throw new Error(
-      `Invalid Base URL: "${baseUrlRaw}" (expected something like https://x666.me or leave empty)`
-    );
-  }
-
-  // Mirror @google/genai behavior: baseUrl + /{apiVersion}
-  const normalizedBase = url.toString().replace(/\/+$/, "");
-  if (/\/v1(beta)?\/?$/i.test(normalizedBase)) {
-    warnings.push(
-      `Base URL already ends with /v1 or /v1beta. In WordLoom, Base URL should NOT include the version (otherwise it becomes /v1beta/v1beta).`
-    );
-  }
-
-  return {
-    requestRoot: `${normalizedBase}/${GEMINI_API_VERSION}`,
-    warnings,
-  };
-}
-
 async function fetchJson(
   url: string,
   init: RequestInit & { timeoutMs?: number } = {},
@@ -50,7 +20,7 @@ async function fetchJson(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...rest, signal: controller.signal });
+    const res = await fetch(url, { ...rest, redirect: "error", signal: controller.signal });
     const text = await res.text();
     let json: unknown = {};
     try {
@@ -273,6 +243,17 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
   }
 
   const { target } = parsed.data;
+  const modelTestTargets = ["cardsModel", "deepModel", "utilityModel", "generalModel"];
+  const provider = target.startsWith("openai") || (modelTestTargets.includes(target) && parsed.data.provider === "openai") ? "openai" : "gemini";
+  const stored = await getProviderCredentials(provider);
+  const base = (parsed.data.baseUrl ?? stored.baseUrl).trim();
+  const origin = providerOrigin(provider, base);
+  if (origin === null) return c.json({ ok: false, target, error: { message: "Invalid service URL" } });
+  const reachability = target === "baseUrl" || target === "openaiBaseUrl";
+  if (!reachability && stored.apiKey && !parsed.data.apiKey?.trim() && origin !== providerOrigin(provider, stored.baseUrl)) {
+    return c.json({ ok: false, target, error: { code: "NEW_ORIGIN_KEY_REQUIRED", message: "Enter a new API key for this service origin." } });
+  }
+  const credential = (parsed.data.apiKey ?? stored.apiKey).trim();
 
   // The request's apiKey and baseUrl are those of the provider the target
   // talks to. The OpenAI-compatible probes are answered here, ahead of the
@@ -281,10 +262,9 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
 
   // --- OpenAI-compatible model tests ---
   // When provider=openai, handle cardsModel/deepModel/utilityModel via chat completions
-  const modelTestTargets = ["cardsModel", "deepModel", "utilityModel", "generalModel"];
   if (parsed.data.provider === "openai" && modelTestTargets.includes(target)) {
-    const openaiKey = (parsed.data.apiKey ?? (await getSetting("openai_api_key"))).trim();
-    const openaiBase = (parsed.data.baseUrl ?? (await getSetting("openai_base_url"))).trim().replace(/\/+$/, "");
+    const openaiKey = credential;
+    const openaiBase = base.replace(/\/+$/, "");
     const model = (parsed.data.model ?? "").trim();
 
     if (!openaiKey) return c.json({ ok: false, target, latencyMs: Date.now() - started, error: { message: "OpenAI API Key not configured." } });
@@ -399,8 +379,8 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
   // --- OpenAI-compatible test targets ---
 
   if (target === "openaiBaseUrl" || target === "openaiListModels") {
-    const openaiApiKey = (parsed.data.apiKey ?? (await getSetting("openai_api_key"))).trim();
-    const openaiBaseUrlRaw = (parsed.data.baseUrl ?? (await getSetting("openai_base_url"))).trim();
+    const openaiApiKey = credential;
+    const openaiBaseUrlRaw = base;
 
     if (!openaiBaseUrlRaw) {
       return c.json({
@@ -477,7 +457,7 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
       if (shouldVerify && finalModels.length > 0) {
         const chatPath = /\/v1\/?$/i.test(normalizedBase) ? "chat/completions" : "v1/chat/completions";
         const chatUrl = `${normalizedBase}/${chatPath}`;
-        finalModels = await verifyOpenaiModels(finalModels, chatUrl, openaiApiKey);
+        finalModels = await verifyOpenaiModels(finalModels.slice(0, 10), chatUrl, openaiApiKey);
       }
 
       return c.json({
@@ -485,7 +465,7 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
         target,
         latencyMs: Date.now() - started,
         requestUrl: modelsUrl,
-        result: { modelCount: finalModels.length, models: finalModels, truncated: false, totalListed: models.length, verified: shouldVerify },
+        result: { modelCount: finalModels.length, models: finalModels, truncated: shouldVerify && models.length > 10, totalListed: models.length, verified: shouldVerify },
       });
     } catch (e) {
       return c.json({
@@ -497,8 +477,8 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
 
   // --- Gemini: every target left is one of its probes ---
 
-  const apiKey = (parsed.data.apiKey ?? (await getSetting("gemini_api_key"))).trim();
-  const baseUrlRaw = (parsed.data.baseUrl ?? (await getSetting("gemini_base_url"))).trim();
+  const apiKey = credential;
+  const baseUrlRaw = base;
 
   // Build requestRoot in the same way @google/genai does for Gemini API
   let requestRoot = "";
@@ -645,7 +625,7 @@ settingTestRoutes.post("/test", authMiddleware, async (c) => {
       // When verify=true, ping each model and filter to usable ones
       const shouldVerify = parsed.data.verify === true && target === "listModels";
       const finalModels = shouldVerify
-        ? await verifyGeminiModels(list, requestRoot, headers)
+        ? await verifyGeminiModels(list.slice(0, 10), requestRoot, headers)
         : list;
 
       const isProd = process.env.NODE_ENV === "production";

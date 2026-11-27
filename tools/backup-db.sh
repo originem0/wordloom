@@ -9,6 +9,7 @@
 # Install (crontab -e):
 #   17 4 * * * /home/ubuntu/wordloom/tools/backup-db.sh >> /home/ubuntu/wordloom/backups/backup.log 2>&1
 set -euo pipefail
+umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DB="${WORDLOOM_DB:-$ROOT/data/app.db}"
@@ -19,9 +20,10 @@ KEEP_DAYS="${WORDLOOM_BACKUP_KEEP_DAYS:-14}"
 mkdir -p "$DEST"
 
 stamp="$(date +%Y%m%d-%H%M%S)"
-tmp="$DEST/.app.db.$stamp.tmp"
+tmp="$(mktemp "$DEST/.app.db.XXXXXX")"
+archive="$(mktemp "$DEST/.app.gz.XXXXXX")"
 out="$DEST/app.db.$stamp.gz"
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -f "$tmp" "$archive"' EXIT
 
 sqlite3 "$DB" ".timeout 10000" ".backup '$tmp'"
 
@@ -31,7 +33,10 @@ if [ "$check" != "ok" ]; then
   exit 1
 fi
 
-gzip -c "$tmp" > "$out"
+gzip -c "$tmp" > "$archive"
+gzip -t "$archive"
+# A hard link publishes the complete archive without replacing a concurrent backup.
+ln "$archive" "$out"
 echo "$(date -Is) OK $out ($(du -h "$out" | cut -f1))"
 
 # Prune only this script's own rotating files; hand-made snapshots are left alone.

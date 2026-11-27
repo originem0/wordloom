@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -29,6 +29,7 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
   const [held, setHeld] = useState<Held | null>(null);
   const { source } = useLastSource();
   const [title, setTitle] = useState("");
+  const draftVersion = useRef(0);
   const capture = useCapture();
   const metAgain = useMetAgain();
   const busy = capture.isPending || metAgain.isPending;
@@ -54,6 +55,7 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
   // The selection is kept as state so that what 收下 will make of it (the
   // focus, or the 上文 field) is on screen before the click.
   const track = (el: HTMLTextAreaElement) => {
+    if (sel[0] !== el.selectionStart || sel[1] !== el.selectionEnd) draftVersion.current++;
     setSel([el.selectionStart, el.selectionEnd]);
     setBefore(null);
   };
@@ -68,37 +70,43 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
   const failed = (e: Error) => toast.error(t(`没有存上：${errorMessage(e)}`, `Could not save: ${errorMessage(e)}`));
   // One click chooses a tag, a second one clears it. Its title goes with it.
   const pick = (s: SourceType) => {
+    draftVersion.current++;
     useLastSource.setState({ source: source === s ? null : s });
     setTitle("");
   };
 
-  const save = (met: EncounterRequest, withFocus: string | undefined, force?: true) =>
-    capture.mutate({ ...met, focus: withFocus, force }, {
+  const save = (met: EncounterRequest, withFocus: string | undefined, force?: true) => {
+    const version = draftVersion.current;
+    const focusRange = withFocus && draft.focus === withFocus && met.text === box ? { start: sel[0], end: sel[1] } : undefined;
+    capture.mutate({ ...met, focus: withFocus, ...(focusRange && { focusRange }), force }, {
       onSuccess: (saved) => {
-        clear();
+        if (version === draftVersion.current) clear();
         onSaved(saved.id);
       },
       // A 409 is a question, not a refusal: nothing was saved, and the text
       // stays in the box until the user says which of the two it is.
       onError: (e) =>
         e instanceof ApiError && e.code === "DUPLICATE"
-          ? setHeld({ met, focus: withFocus, existing: (e.body as DuplicateResponse).existing ?? [] })
+          ? version === draftVersion.current && setHeld({ met, focus: withFocus, existing: (e.body as DuplicateResponse).existing ?? [] })
           : failed(e),
     });
+  };
   const submit = () =>
     save({
       text: draft.text,
-      textBefore: (draft.before === undefined ? "" : (before ?? draft.before)).trim() || undefined,
+      textBefore: (draft.before === undefined ? "" : (before ?? draft.before)) || undefined,
       ...from,
     }, focus);
-  const again = (id: number, met: EncounterRequest) =>
+  const again = (id: number, met: EncounterRequest) => {
+    const version = draftVersion.current;
     metAgain.mutate({ id, ...met }, {
       onSuccess: () => {
-        clear();
+        if (version === draftVersion.current) clear();
         toast.success(t("记下了：又一次遇到", "Saved: met it again"));
       },
       onError: failed,
     });
+  };
 
   // Sent as it is, not trimmed: a pick has to be found in the box word for word.
   const choose = () => {
@@ -119,6 +127,7 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
         value={box}
         readOnly={waiting}
         onChange={(e) => {
+          draftVersion.current++;
           setBox(e.target.value);
           track(e.target);
           setHeld(null);
@@ -129,7 +138,7 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
       {draft.before !== undefined && (
         <label className="block space-y-1 text-xs text-muted-foreground">
           {t("上文（选中的那一段是原文，这是它前面的一段，可改）", "Context before the selected passage (you can edit it)")}
-          <textarea className={AREA_CLASS} rows={2} maxLength={EXPRESSION_LIMITS.text} value={before ?? draft.before} onChange={(e) => setBefore(e.target.value)} />
+          <textarea className={AREA_CLASS} rows={2} maxLength={EXPRESSION_LIMITS.text} value={before ?? draft.before} onChange={(e) => { draftVersion.current++; setBefore(e.target.value); }} />
         </label>
       )}
       {tooLong && <p className="text-xs text-destructive">{t(`原文超过 ${EXPRESSION_LIMITS.text} 字。选中要收的那一段再收下。`, `The text exceeds ${EXPRESSION_LIMITS.text} characters. Select the passage you want to save.`)}</p>}
@@ -141,12 +150,12 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
           </Button>
         ))}
         {source ? (
-          <Input aria-label={t("出处", "Source")} className="h-8 w-40" placeholder={t("书名、片名…（可不填）", "Book, film, etc. (optional)")} maxLength={EXPRESSION_LIMITS.sourceTitle} value={title} onChange={(e) => setTitle(e.target.value)} />
+          <Input aria-label={t("出处", "Source")} className="h-8 w-40" placeholder={t("书名、片名…（可不填）", "Book, film, etc. (optional)")} maxLength={EXPRESSION_LIMITS.sourceTitle} value={title} onChange={(e) => { draftVersion.current++; setTitle(e.target.value); }} />
         ) : (
           <span className="text-xs text-muted-foreground">{sourceLabel(null)}</span>
         )}
         {focus && (
-          <Button size="sm" variant="secondary" className="max-w-full" title={t("清掉焦点", "Clear focus")} onClick={() => { setGiven(""); setSel([0, 0]); }}>
+          <Button size="sm" variant="secondary" className="max-w-full" title={t("清掉焦点", "Clear focus")} onClick={() => { draftVersion.current++; setGiven(""); setSel([0, 0]); }}>
             <span className="truncate">{t("焦点：", "Focus: ")}{focus}</span>
             <X />
           </Button>
@@ -158,7 +167,7 @@ export function CaptureBox({ onSaved }: { onSaved: (id: number) => void }) {
               {t("帮我挑", "Pick for me")}
             </Button>
           )}
-          <Button disabled={!draft.text || tooLong || busy || waiting} onClick={submit}>
+          <Button disabled={!draft.text.trim() || tooLong || busy || waiting} onClick={submit}>
             {busy && <Loader2 className="animate-spin" />}
             {t("收下", "Save")}
           </Button>

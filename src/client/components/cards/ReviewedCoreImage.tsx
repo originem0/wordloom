@@ -1,9 +1,8 @@
 import { useId } from "react";
 import { useI18n } from "@/client/lib/i18n";
 
-/** These four images were reviewed by hand; deployments must not depend on
- * replacing one local database's generated SVG. Meanings were checked against
- * dictionary.cambridge.org/dictionary/english/{account,grim,compromise,assume}. */
+/** Older cards with these three words already use reviewed illustrations.
+ * Their saved explanations are kept when displaying the legacy deep layer. */
 export function ReviewedCoreImage({ word }: { word: string }) {
   const { t } = useI18n();
   const id = useId();
@@ -25,17 +24,6 @@ export function ReviewedCoreImage({ word }: { word: string }) {
       <path d="M238 79H315M238 100H315M238 121H293" stroke={ink} strokeWidth="2" />
       <text x="90" y="204" textAnchor="middle" fill={ink}>{t("记下账目或事件", "Keep a record")}</text>
       <text x="277" y="204" textAnchor="middle" fill={ink}>{t("讲清来龙去脉", "Give an account")}</text>
-    </svg>
-  );
-
-  if (word === "grim") return (
-    <svg role="img" className="reviewed-schema-svg" viewBox="0 0 360 230" aria-label={t("紧皱的眉头与下沉的嘴角，表示严肃、忧虑的神情", "A serious, worried face with drawn brows and a downturned mouth")}>
-      <circle cx="180" cy="95" r="65" fill={surface} stroke={ink} strokeWidth="2" />
-      <path d="M141 67L165 77M195 77L219 67" stroke={ink} strokeWidth="5" strokeLinecap="round" />
-      <circle cx="157" cy="90" r="5" fill={ink} /><circle cx="203" cy="90" r="5" fill={ink} />
-      <path d="M152 132Q180 110 208 132" stroke={ink} strokeWidth="4" fill="none" strokeLinecap="round" />
-      <path d="M137 170H223" stroke={accent} strokeWidth="2" />
-      <text x="180" y="206" textAnchor="middle" fill={ink}>{t("严肃而忧虑的神情", "A grim expression")}</text>
     </svg>
   );
 

@@ -1,3 +1,4 @@
+import { pageNumber } from "../../shared/validation.js";
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { jobs } from "../db/schema.js";
@@ -34,7 +35,8 @@ jobRoutes.post("/:id/cancel", async (c) => {
 });
 
 jobRoutes.get("/", async (c) => {
-  const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") || "20")));
-  const rows = await db.select().from(jobs).orderBy(desc(jobs.createdAt)).limit(limit).all();
-  return c.json({ jobs: rows.map(parseJob) });
+  const limit = pageNumber(c.req.query("limit"), 20, 100);
+  if (!limit) return c.json({ error: "Invalid limit", code: "VALIDATION_ERROR" }, 400);
+  const rows = await db.select({ id: jobs.id, type: jobs.type, status: jobs.status, createdAt: jobs.createdAt, updatedAt: jobs.updatedAt, completedAt: jobs.completedAt }).from(jobs).orderBy(desc(jobs.createdAt), desc(jobs.id)).limit(limit).all();
+  return c.json({ jobs: rows });
 });

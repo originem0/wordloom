@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -8,11 +8,48 @@ import { useTaskStore } from "@/client/store/tasks";
 import { translate } from "@/client/lib/i18n";
 import { useReadingStore } from "@/client/store/reading";
 
+import { useOpenThread, useLastSource } from "../components/expressions/shared";
+import { broadcastLogout, expireSession, SESSION_ENDED } from "@/client/lib/session";
+
+function clearPrivateData() {
+  try {
+    for (const key of Object.keys(sessionStorage)) if (key.startsWith("wordloom:ai-")) sessionStorage.removeItem(key);
+  } catch { /* Storage may be disabled. */ }
+  useTaskStore.getState().reset();
+  useReadingStore.getState().reset();
+  useOpenThread.setState({ thread: undefined, visit: 0 });
+  useLastSource.setState({ source: null });
+  queryClient.clear();
+  queryClient.setQueryData(AUTH_QUERY_KEY, { authenticated: false });
+}
+
+export function useSessionEvents() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const leave = () => {
+      clearPrivateData();
+      void navigate("/login", { replace: true });
+    };
+    const storage = (event: StorageEvent) => { if (event.key === SESSION_ENDED) leave(); };
+    window.addEventListener(SESSION_ENDED, leave);
+    window.addEventListener("storage", storage);
+    return () => {
+      window.removeEventListener(SESSION_ENDED, leave);
+      window.removeEventListener("storage", storage);
+    };
+  }, [navigate]);
+}
+
 export const AUTH_QUERY_KEY = ["auth", "me"] as const;
 
 const authQuery = {
   queryKey: AUTH_QUERY_KEY,
-  queryFn: () => apiFetch<{ authenticated: boolean }>("/api/auth/me"),
+  refetchOnWindowFocus: "always" as const,
+  queryFn: async () => {
+    const me = await apiFetch<{ authenticated: boolean }>("/api/auth/me");
+    if (!me.authenticated && queryClient.getQueryData<{ authenticated: boolean }>(AUTH_QUERY_KEY)?.authenticated) expireSession();
+    return me;
+  },
 };
 
 /**
@@ -52,9 +89,8 @@ export function useLogout() {
       toast.error(translate("退出登录失败，请重试。", "Sign-out failed. Please try again."));
       return;
     }
-    useTaskStore.getState().reset();
-    useReadingStore.getState().reset();
-    queryClient.clear();
+    clearPrivateData();
+    broadcastLogout();
     navigate("/login", { replace: true });
   }, [navigate]);
 }

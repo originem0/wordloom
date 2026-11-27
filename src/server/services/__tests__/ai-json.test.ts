@@ -20,12 +20,10 @@ const printed = () => consoleCalls.map((args) => format(...args)).join("\n");
 // the real app on top. Replaced: the network (fetch, which the
 // OpenAI-compatible path uses) and Google's SDK.
 const gemini = vi.fn();
-vi.mock("@google/genai", () => {
-  class FakeGenAI {
-    models = { generateContent: gemini };
-  }
-  return { GoogleGenAI: FakeGenAI };
-});
+vi.mock("../gemini-transport.js", async (original) => ({
+  ...await original<typeof import("../gemini-transport.js")>(),
+  geminiTransport: () => ({ generateContent: gemini }),
+}));
 
 import { app } from "../../app.js";
 import { db } from "../../db/index.js";
@@ -212,7 +210,7 @@ describe("the expression library on the real channel", () => {
   const originalEnv = { ...process.env };
 
   function post(path: string, body?: unknown) {
-    return app.request(path, {
+    return app.request(`https://wordloom.test${path}`, {
       method: "POST",
       headers: {
         host: "wordloom.test",

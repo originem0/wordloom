@@ -92,6 +92,7 @@ function Conversation({ thread, onGone }: { thread: number | null; onGone: () =>
     if (answered) list.current?.lastElementChild?.scrollIntoView?.({ block: "start" });
   }, [answered]);
 
+  const delivery = useRef<{ said: string; thread?: number; messageId: string } | null>(null);
   const send = () => {
     const said = box.trim();
     if (!said || talk.isPending || !loaded) return;
@@ -99,8 +100,11 @@ function Conversation({ thread, onGone }: { thread: number | null; onGone: () =>
     setDraft("");
     setBox("");
     setFailure(null);
-    talk.mutate({ said, thread: id ?? undefined }, {
+    const thread = id ?? undefined;
+    if (!delivery.current || delivery.current.said !== said || delivery.current.thread !== thread) delivery.current = { said, thread, messageId: crypto.randomUUID() };
+    talk.mutate(delivery.current, {
       onSuccess: (turn) => {
+        delivery.current = null;
         setTurns((earlier) => [...(earlier ?? []), turn]);
         setSent(null);
         setDraft("");

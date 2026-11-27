@@ -4,7 +4,7 @@ import { ApiError, apiFetch, apiResponse } from "@/client/lib/api";
 import { readSSE } from "@/shared/sse";
 import type {
   AttemptRequest, AttemptResponse, CaptureRequest, EncounterRequest, ExpressionDetail, ExpressionListResponse, ExpressionPatch,
-  OverturnRequest, PickResponse, RevealRequest, SceneResponse, StatsResponse, TalkListResponse, TalkRequest, TalkThreadResponse, TalkTurn,
+  OverturnRequest, PassageNoteChange, PickResponse, RevealRequest, SceneResponse, StatsResponse, TalkListResponse, TalkRequest, TalkThreadResponse, TalkTurn,
   TryResponse,
 } from "@/shared/expressions";
 
@@ -53,9 +53,13 @@ function useWrite<V>(request: (vars: V) => Promise<ExpressionDetail>) {
     mutationFn: request,
     // Every write answers with the entry as it now is: keep that, and reload
     // only the list and the numbers.
-    onSuccess: (detail) => {
+    onSuccess: async (detail) => {
+      const key = [...EXPRESSIONS_KEY, detail.id];
+      // A read started before the save (including a gloss poll) may still
+      // contain the old annotations or the English of a now-masked entry.
+      await qc.cancelQueries({ queryKey: key, exact: true });
       if (signedOut(qc) || qc.getQueryData<Set<number>>(DELETED_KEY)?.has(detail.id)) return;
-      qc.setQueryData([...EXPRESSIONS_KEY, detail.id], detail);
+      qc.setQueryData<ExpressionDetail>(key, (current) => current && current.updatedAt > detail.updatedAt ? current : detail);
       void qc.invalidateQueries({ queryKey: STATS_KEY });
       return qc.invalidateQueries({ queryKey: EXPRESSIONS_KEY, exact: true });
     },
@@ -67,6 +71,8 @@ export const useMetAgain = () =>
   useWrite(({ id, ...body }: EncounterRequest & { id: number }) => send("POST", `/${id}/encounters`, body));
 export const usePatchExpression = () =>
   useWrite(({ id, ...patch }: ExpressionPatch & { id: number }) => send("PATCH", `/${id}`, patch));
+export const useWritePassageNote = () =>
+  useWrite(({ id, ...change }: PassageNoteChange & { id: number }) => send("PATCH", `/${id}/passage-notes`, change));
 export const useAnnotate = () => useWrite((id: number) => send("POST", `/${id}/annotate`));
 
 export function useDeleteExpression() {

@@ -1,10 +1,10 @@
-import { and, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { encounters, expressions } from "../db/schema.js";
+import { encounters, evaluationWindow, expressions, learningDays } from "../db/schema.js";
 import { failureReason } from "./ai-shared.js";
 import { judge } from "./expressions-ai.js";
 import { phrasePattern } from "./expressions-talk.js";
-import { attemptFeedback, loadLibrary, testableAt, type EncounterRow, type Entry } from "./expressions-view.js";
+import { attemptFeedback, hasPassed, loadEntry, loadLibrary, testableAt, type EncounterRow, type Entry } from "./expressions-view.js";
 import type {
   AttemptFeedback, AttemptRequest, AttemptResponse, Outcome, SceneResponse, StatsResponse, TryItem,
 } from "../../shared/expressions.js";
@@ -37,7 +37,7 @@ export function tryItems(library: Entry[], now: number, exclude: Set<number>): T
     const intent = e.row.intent ?? "";
     // A stored scene is the harder question and is asked first, once.
     const scene = e.row.nextScene || null;
-    return { id: e.row.id, prompt: scene ?? intent, cue: scene ? "none" : "need", intent, hasScene: sceneOf(e) != null };
+    return { id: e.row.id, ...(e.row.targetVersion && { targetVersion: e.row.targetVersion }), prompt: scene ?? intent, cue: scene ? "none" : "need", intent, hasScene: sceneOf(e) != null };
   });
 }
 
@@ -48,15 +48,20 @@ export interface Attempt {
 
 /** An attempt row and the entry it answers, as stored now. */
 export async function loadAttempt(encounterId: number): Promise<Attempt | null> {
-  for (const entry of await loadLibrary()) {
-    const row = entry.timeline.find((r) => r.id === encounterId && r.kind === "attempt");
-    if (row) return { entry, row };
-  }
-  return null;
+  const row = await db.select().from(encounters).where(and(eq(encounters.id, encounterId), eq(encounters.kind, "attempt"))).get();
+  if (!row?.expressionId) return null;
+  const entry = await loadEntry(row.expressionId);
+  return entry ? { entry, row } : null;
+}
+
+function attemptTarget({ entry, row }: Attempt) {
+  if (row.targetVersion === entry.row.targetVersion) return entry.row;
+  const previous = entry.row.learningHistory?.find((state) => state.version === row.targetVersion);
+  return { ...entry.row, focus: previous?.focus ?? null, gloss: null, intent: null };
 }
 
 /** Stores the sentence, not yet judged, and returns its row. */
-export function recordAttempt(expressionId: number, { text, cue, prompt }: AttemptRequest, talkTurnId?: number): Promise<EncounterRow> {
+export function recordAttempt(expressionId: number, { text, cue, prompt }: AttemptRequest, talkTurnId?: number, version?: number): Promise<EncounterRow | null> {
   return db.transaction(async (tx) => {
     // One conversation turn answers at most one review. Keep its link in the
     // source columns: judging and overturning deliberately replace feedback.
@@ -67,10 +72,15 @@ export function recordAttempt(expressionId: number, { text, cue, prompt }: Attem
       )).get();
       if (existing) return existing;
     }
-    const feedback: AttemptFeedback = { prompt, status: "pending" };
+    const current = await tx.select().from(expressions).where(eq(expressions.id, expressionId)).get();
+    if (!current || current.status !== "active" || (version != null && current.targetVersion !== version)) return null;
+    if (talkTurnId == null && cue === "none" && prompt !== current.nextScene) return null;
+    const now = Date.now();
+    await recordDay(tx, now, "attempt");
+    const feedback: AttemptFeedback = { prompt, status: "pending", activeSince: current.activeSince };
     const [row] = await tx
       .insert(encounters)
-      .values({ expressionId, kind: "attempt", text, cue, feedback: JSON.stringify(feedback), createdAt: Date.now(),
+      .values({ expressionId, kind: "attempt", text, cue, targetVersion: current.targetVersion, feedback: JSON.stringify(feedback), createdAt: now,
         ...(sourceLocator ? { sourceType: "chat", sourceLocator } : {}),
       })
       .returning();
@@ -87,7 +97,9 @@ export function recordAttempt(expressionId: number, { text, cue, prompt }: Attem
  *  model failure is noted on the row, not thrown: the sentence is saved, it
  *  counts for nothing, and the same call can be made again. */
 export async function judgeAttempt({ entry, row }: Attempt, signal?: AbortSignal): Promise<void> {
-  const prompt = attemptFeedback(row)?.prompt ?? "";
+  const savedFeedback = attemptFeedback(row);
+  const prompt = savedFeedback?.prompt ?? "";
+  const basis = { prompt, activeSince: savedFeedback?.activeSince };
   // Only while there is no outcome: of two judgements, the first to land stands.
   const fill = (outcome: Outcome | null, feedback: AttemptFeedback) =>
     db
@@ -97,37 +109,50 @@ export async function judgeAttempt({ entry, row }: Attempt, signal?: AbortSignal
       .returning({ id: encounters.id });
   let out;
   try {
-    out = await judge({ text: entry.row.text, focus: entry.row.focus, prompt, answer: row.text }, { signal });
+    const target = attemptTarget({ entry, row });
+    out = await judge({ text: target.text, focus: target.focus, prompt, answer: row.text }, { signal });
   } catch (err) {
     console.warn(`[expressions] judge #${row.id} failed: ${failureReason(err)}`);
-    await fill(null, { prompt, status: "failed" });
+    await fill(null, { ...basis, status: "failed" });
     return;
   }
   const { nextScene, ...verdict } = out;
-  const [first] = await fill(out.used ? "pass" : "fail", { prompt, status: "done", ...verdict, judgedAt: Date.now() });
+  const judgedAt = Date.now();
+  const outcome = out.used ? "pass" : "fail";
+  const [first] = await fill(outcome, { ...basis, status: "done", ...verdict, judgedAt, judgments: [{ at: judgedAt, outcome }], shownAt: row.cue !== "none" || out.used ? [judgedAt] : [] });
   // The scene for next time; one that is already waiting stays.
   if (first && nextScene) {
     await db
       .update(expressions)
       .set({ nextScene: sql`coalesce(${expressions.nextScene}, ${nextScene})` })
-      .where(eq(expressions.id, entry.row.id));
+      .where(and(eq(expressions.id, entry.row.id), eq(expressions.targetVersion, row.targetVersion)));
   }
 }
 
 /** The user's word against the model's, on a row that has an outcome. */
 export async function overturn(row: EncounterRow, outcome: Outcome): Promise<void> {
-  if (row.outcome === outcome) return;
-  const was: AttemptFeedback = attemptFeedback(row) ?? { prompt: "", status: "done" };
-  // What the model said is written the first time only, so a second change of
-  // mind lands back on it and the row no longer counts as overturned.
-  const modelOutcome = was.modelOutcome ?? (row.outcome as Outcome);
-  const feedback: AttemptFeedback = { ...was, modelOutcome, overturned: outcome !== modelOutcome, judgedAt: Date.now() };
-  await db.update(encounters).set({ outcome, feedback: JSON.stringify(feedback) }).where(eq(encounters.id, row.id));
+  await db.transaction(async (tx) => {
+    // Compare and append to the latest history while holding the write lock.
+    const current = await tx.select().from(encounters).where(eq(encounters.id, row.id)).get();
+    if (!current || current.outcome == null) return;
+    if (current.outcome === outcome) return;
+    const was: AttemptFeedback = attemptFeedback(current) ?? { prompt: "", status: "done" };
+    // What the model said is written the first time only, so a second change of
+    // mind lands back on it and the row no longer counts as overturned.
+    const modelOutcome = was.modelOutcome ?? (current.outcome as Outcome);
+    const at = Date.now();
+    const first = was.judgedAt ?? current.createdAt;
+    const shown = was.shownAt ?? (current.cue !== "none" || modelOutcome === "pass" ? [first] : []);
+    const feedback: AttemptFeedback = { ...was, modelOutcome, overturned: outcome !== modelOutcome, judgedAt: first,
+      judgments: [...(was.judgments ?? [{ at: first, outcome: modelOutcome }]), { at, outcome }], shownAt: [...shown, at] };
+    await tx.update(encounters).set({ outcome, feedback: JSON.stringify(feedback) }).where(eq(encounters.id, current.id));
+  });
 }
 
 /** What the three attempt routes answer with. */
 export function attemptResponse({ entry, row }: Attempt): AttemptResponse {
   const feedback = attemptFeedback(row);
+  const target = attemptTarget({ entry, row });
   const outcome = row.outcome as Outcome | null;
   // The English stays back while there is no judgement, and after the one
   // miss that shows nothing: only the fresh scene had been seen, and the user
@@ -140,8 +165,8 @@ export function attemptResponse({ entry, row }: Attempt): AttemptResponse {
     outcome,
     overturned: feedback?.overturned ?? false,
     rewrites: withheld ? [] : (feedback?.rewrites ?? []),
-    answer: withheld ? null : { text: entry.row.text, focus: entry.row.focus, gloss: entry.row.gloss },
-    intent: withheld && outcome != null ? entry.row.intent : null,
+    answer: withheld ? null : { text: target.text, focus: target.focus, gloss: target.gloss },
+    intent: withheld && outcome != null ? target.intent : null,
   };
 }
 
@@ -149,33 +174,26 @@ export function attemptResponse({ entry, row }: Attempt): AttemptResponse {
 const UTC8 = 8 * 3_600_000;
 const JUDGE_AFTER = 28 * DAY;
 
-/** The one number the home page shows, and the two day counts the four weeks
- *  after launch are read by. Computed from the timeline on every call. */
+type DayWriter = Pick<typeof db, "insert" | "select">;
+
+// Record the two daily flags at the time of the action. Later edits, deletes
+// and overdue judgements cannot rewrite the four-week evaluation.
+export async function recordDay(tx: DayWriter, at: number, kind: "met" | "looked_up" | "attempt") {
+  await tx.insert(evaluationWindow).values({ id: 1, startedAt: at }).onConflictDoNothing();
+  const window = await tx.select().from(evaluationWindow).where(eq(evaluationWindow.id, 1)).get();
+  if (!window || at < window.startedAt || at >= window.startedAt + JUDGE_AFTER) return;
+  const day = Math.floor((at + UTC8) / DAY);
+  const previous = await tx.select().from(learningDays).where(eq(learningDays.day, day)).get();
+  const attempted = Number(kind === "attempt") || previous?.attempted || 0;
+  const testable = previous?.testable || Number(testableAt(await loadLibrary(tx, true), at).length > 0);
+  await tx.insert(learningDays).values({ day, attempted, testable }).onConflictDoUpdate({ target: learningDays.day, set: { attempted, testable } });
+}
+
 export async function stats(): Promise<StatsResponse> {
-  const library = await loadLibrary();
-  const produced = library.filter((e) => e.folded.promotions > 0).length;
-  if (library.length === 0) return { produced, testableDays: 0, attemptDays: 0, since: null, judgeAt: null };
-  // No launch date is on record: the first entry saved stands in for it.
-  const since = library[library.length - 1].row.createdAt;
-  const judgeAt = since + JUDGE_AFTER;
-  // What the page wrote in those four weeks; a reveal is not counted. Past
-  // judgeAt both numbers stand still.
-  const writes = await db
-    .select({ kind: encounters.kind, createdAt: encounters.createdAt })
-    .from(encounters)
-    .where(and(
-      inArray(encounters.kind, ["met", "looked_up", "attempt"]),
-      gte(encounters.createdAt, since),
-      lt(encounters.createdAt, judgeAt),
-    ))
-    .all();
-  const testable = new Set<number>();
-  const attempted = new Set<number>();
-  for (const w of writes) {
-    const day = Math.floor((w.createdAt + UTC8) / DAY);
-    if (w.kind === "attempt") attempted.add(day);
-    // A day counts once something could have been asked at one of its writes.
-    if (!testable.has(day) && testableAt(library, w.createdAt).length > 0) testable.add(day);
-  }
-  return { produced, testableDays: testable.size, attemptDays: [...testable].filter((d) => attempted.has(d)).length, since, judgeAt };
+  const produced = (await loadLibrary(db, false, hasPassed)).filter((e) => e.folded.promotions > 0).length;
+  const window = await db.select().from(evaluationWindow).where(eq(evaluationWindow.id, 1)).get();
+  const days = await db.select().from(learningDays).all();
+  const since = window?.startedAt ?? null;
+  return { produced, since, judgeAt: since == null ? null : since + JUDGE_AFTER, testableDays: days.filter((d) => d.testable).length,
+    attemptDays: days.filter((d) => d.testable && d.attempted).length };
 }

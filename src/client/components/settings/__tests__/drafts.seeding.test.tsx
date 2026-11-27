@@ -153,8 +153,8 @@ describe("AIProvidersPage drafts", () => {
   });
 
   it("restores the detected model lists cached for this browser session", () => {
-    sessionStorage.setItem("wordloom:ai-gemini-models", JSON.stringify({ models: ["gemini-x", "gemini-y"], ts: 1 }));
-    sessionStorage.setItem("wordloom:ai-openai-models", JSON.stringify({ models: ["gpt-z"], ts: 1 }));
+    sessionStorage.setItem("wordloom:ai-gemini-models", JSON.stringify({ models: ["gemini-x", "gemini-y"], baseUrl: saved.gemini_base_url, revision: "" }));
+    sessionStorage.setItem("wordloom:ai-openai-models", JSON.stringify({ models: ["gpt-z"], baseUrl: saved.openai_base_url, revision: "" }));
     current = { data: saved, isLoading: false, error: null };
     render(<AIProvidersPage />);
     expect(screen.getByText("2 detected")).toBeInTheDocument();

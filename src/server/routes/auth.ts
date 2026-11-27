@@ -6,6 +6,7 @@ import { sessions } from "../db/schema.js";
 import { eq, lt } from "drizzle-orm";
 import { hashSessionId, verifySession } from "../middleware/auth.js";
 import { rateLimit } from "../middleware/rateLimit.js";
+import { localCaller } from "../middleware/peer.js";
 
 export const authRoutes = new Hono();
 
@@ -20,8 +21,9 @@ authRoutes.post("/login", async (c) => {
   const body = await c.req.json<{ token: string }>();
   const expected = process.env.AUTH_TOKEN;
 
-  // Dev mode: no AUTH_TOKEN set, accept anything
+  // Development without a password grants access only to this machine.
   if (!expected) {
+    if (!localCaller(c)) return c.json({ error: "Local access or authentication required", code: "AUTH_NOT_CONFIGURED" }, 503);
     return c.json({ ok: true, message: "Dev mode — no auth required" });
   }
 
@@ -59,9 +61,8 @@ authRoutes.post("/login", async (c) => {
 });
 
 authRoutes.get("/me", async (c) => {
-  // Dev mode (no AUTH_TOKEN) guards nothing, so report admin: the UI keys
-  // admin-only controls off this answer and must agree with the API guard.
-  if (!process.env.AUTH_TOKEN) return c.json({ authenticated: true });
+  c.header("Cache-Control", "no-store");
+  if (!process.env.AUTH_TOKEN) return c.json({ authenticated: localCaller(c) });
   const session = getCookie(c, "session");
   const authenticated = session ? await verifySession(session) : false;
   return c.json({ authenticated });

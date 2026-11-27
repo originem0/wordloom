@@ -1,0 +1,123 @@
+.expression-dialog {
+  /* One scrolling document, including on phones. A fixed-height grid would
+     distribute spare height between sections and squeeze expanded notes. */
+  display: block;
+  width: min(880px, calc(100vw - 64px));
+  max-width: none;
+  max-height: 90dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+}
+
+.expression-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 24px 8px 36px;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+
+.expression-reading {
+  padding: 28px 36px 32px;
+  font-size: 16px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.expression-reading > * + * { margin-top: 28px; }
+.expression-reading h3 { font-size: 26px; font-weight: 600; line-height: 1.3; }
+.expression-reading h4 { font-size: 14px; font-weight: 600; line-height: 1.6; }
+.expression-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.expression-source { margin-top: 8px; font-size: 12px; line-height: 1.7; color: var(--muted-foreground); }
+.expression-context { padding-bottom: 8px; white-space: pre-line; font-size: 14px; color: var(--muted-foreground); }
+.expression-original { max-width: 65ch; white-space: pre-wrap; font-size: 24px; line-height: 1.65; }
+.passage-reader, .passage-picker { margin-top: 16px; }
+.passage-reader.has-margin { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); grid-template-rows: auto 1fr; grid-template-areas: "source note" "add note"; align-items: start; column-gap: 28px; }
+.passage-source { min-width: 0; grid-area: source; }
+.passage-add { grid-area: add; justify-self: start; min-height: 44px; margin-top: 8px; color: var(--muted-foreground); }
+.passage-margin { grid-area: note; min-width: 0; padding: 0 0 0 20px; border-inline-start: 2px solid var(--primary); }
+.passage-mark {
+  display: inline; padding: 2px 0; border-radius: 3px; font: inherit; color: inherit;
+  text-align: inherit; white-space: inherit; overflow-wrap: anywhere; cursor: pointer; user-select: text;
+  text-decoration: underline dotted var(--primary); text-underline-offset: .19em;
+}
+.passage-mark[aria-pressed="true"] { text-decoration-style: solid; text-decoration-thickness: 2px; }
+.expression-dialog .expression-original mark {
+  background: var(--accent); color: var(--primary); border-radius: 3px; font-weight: 600;
+  text-decoration: underline; text-decoration-thickness: .08em; text-underline-offset: .19em;
+}
+.passage-mark:focus-visible, .passage-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.expression-reading .passage-quote { font-size: 17px; font-weight: 600; line-height: 1.45; white-space: pre-wrap; }
+.passage-body, .passage-examples p { margin-top: 8px; white-space: pre-wrap; }
+.passage-body:first-child { margin-top: 0; }
+.passage-examples { margin-top: 16px; }
+.passage-examples figcaption { color: var(--muted-foreground); font-size: 13px; }
+.passage-examples p { padding-inline-start: 12px; border-inline-start: 2px solid var(--border); }
+.passage-link { min-height: 44px; color: var(--muted-foreground); font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
+.passage-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.passage-actions button { min-height: 44px; }
+.passage-editor { min-width: 0; }
+.passage-editor legend { padding-bottom: 8px; }
+.passage-select { display: block; width: 100%; min-height: 44px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--background); color: var(--foreground); font-size: 16px; }
+.passage-select + div { margin-top: 8px; }
+.expression-note-body > * + * { margin-top: 16px; }
+.expression-note-body p { max-width: 75ch; white-space: pre-line; }
+.expression-note-body h5 { font-size: 16px; font-weight: 600; line-height: 1.6; }
+.expression-note-body ul, .expression-note-body ol { padding-left: 24px; }
+.expression-note-body ul { list-style: disc; }
+.expression-note-body ol { list-style: decimal; }
+.expression-note-body li + li { margin-top: 8px; }
+.expression-note-body code { padding: 2px 4px; border-radius: 4px; background: var(--muted); font-size: 0.9em; }
+.expression-note-body mark { border-radius: 2px; background: var(--accent); color: var(--accent-foreground); }
+.expression-note-body .reading-help { margin-top: 20px; }
+.expression-note-body .reading-help > summary { font-size: 14px; font-weight: 500; }
+.expression-note-body .reading-help[open] > summary { margin-bottom: 8px; }
+.expression-note-comparison table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
+.expression-note-comparison th, .expression-note-comparison td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.expression-note-comparison thead th { background: var(--muted); font-weight: 500; }
+.expression-note-comparison tbody th { font-weight: 500; }
+.expression-note-cards { display: none; }
+.expression-note-cards > div { padding: 16px 0; border-bottom: 1px solid var(--border); }
+.expression-note-card-title { font-weight: 600; }
+.expression-note-cards dl > div { margin-top: 12px; }
+.expression-note-cards dt { font-size: 12px; color: var(--muted-foreground); }
+.expression-note-cards dd { margin-top: 4px; }
+.expression-editor { margin-top: 8px; }
+.expression-editor textarea { min-height: 220px; resize: vertical; line-height: 1.75; }
+.expression-annotation > p { white-space: pre-line; font-size: 14px; line-height: 1.75; }
+.expression-cue { padding-top: 12px; }
+.expression-cue > h4 { margin-bottom: 12px; }
+.expression-cue label { font-size: 14px; }
+.expression-meta { font-size: 14px; }
+.expression-meta .reading-details + .reading-details { margin-top: 8px; }
+.expression-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding-top: 20px; border-top: 1px solid var(--border); }
+
+@media (max-width: 768px) {
+  .expression-dialog {
+    top: 0;
+    left: 0;
+    translate: 0 0;
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+  .expression-toolbar { padding: max(8px, env(safe-area-inset-top)) 12px 8px 20px; }
+  .expression-reading { padding: 24px 20px max(28px, env(safe-area-inset-bottom)); }
+  .expression-reading h3 { font-size: 24px; }
+  .expression-original { font-size: 21px; }
+  .passage-reader.has-margin { display: block; }
+  .passage-margin { margin-top: 12px; padding-inline-start: 14px; }
+  .expression-note-comparison table { display: none; }
+  .expression-note-cards { display: block; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .expression-dialog { animation: none; }
+}

@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { randomUUID } from "node:crypto";
+import { providerOrigin } from "../services/ai-shared.js";
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { settings } from "../db/schema.js";
@@ -31,34 +34,28 @@ settingRoutes.get("/", async (c) => {
 // writes credentials, so it keeps a check of its own as well.
 settingRoutes.put("/", authMiddleware, async (c) => {
   const body = await c.req.json();
-  const parsed = updateSettingsSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: "Invalid request", code: "VALIDATION_ERROR" }, 400);
-  }
-
-  const { key, value } = parsed.data;
-
-  // The GET handler above answers "configured" in place of an api key, and
-  // used to do the same for base URLs when the reader was anonymous. A client
-  // that echoes a masked read back through save silently destroys the real
-  // value (this actually happened to gemini_base_url and image_base_url), so
-  // refuse the mask literal at the write boundary.
-  if (value.trim() === "configured" && (isBaseUrl(key) || isApiKey(key))) {
-    return c.json({
-      error: 'Refusing to save the masked placeholder "configured" — reload the page while logged in and re-enter the real value',
-      code: "MASKED_LITERAL",
-    }, 400);
-  }
-
-  await db
-    .insert(settings)
-    .values({ key, value })
-    .onConflictDoUpdate({
-      target: settings.key,
-      set: { value },
-    });
-
-  return c.json({ ok: true });
+  const batch = z.object({ changes: z.array(updateSettingsSchema).min(1).max(80), expectedRevision: z.string().optional() });
+  const parsed = z.union([batch, updateSettingsSchema]).safeParse(body);
+  if (!parsed.success) return c.json({ error: "Invalid request", code: "VALIDATION_ERROR" }, 400);
+  const changes = "changes" in parsed.data ? parsed.data.changes : [parsed.data];
+  const expected = "changes" in parsed.data ? parsed.data.expectedRevision : undefined;
+  if (changes.some(({ key }) => key === "_revision") || new Set(changes.map((p) => p.key)).size !== changes.length) return c.json({ error: "Invalid setting", code: "VALIDATION_ERROR" }, 400);
+  if (changes.some(({ key, value }) => (isBaseUrl(key) || isApiKey(key)) && value.trim() === "configured")) return c.json({ error: "Masked placeholder", code: "MASKED_LITERAL" }, 400);
+  return db.transaction(async (tx) => {
+    const stored = Object.fromEntries((await tx.select().from(settings)).map(({ key, value }) => [key, value]));
+    if (expected !== undefined && expected !== (stored._revision ?? "")) return c.json({ error: "Settings changed. Reload before saving.", code: "SETTINGS_CONFLICT" }, 409);
+    const edits = Object.fromEntries(changes.map(({ key, value }) => [key, value]));
+    for (const provider of ["gemini", "openai"]) {
+      const url = provider + "_base_url", key = provider + "_api_key";
+      if (!(url in edits)) continue;
+      const next = providerOrigin(provider, edits[url]);
+      if (next === null) return c.json({ error: "Invalid service URL", code: "INVALID_URL" }, 400);
+      if (stored[key] && next !== providerOrigin(provider, stored[url] ?? "") && !(key in edits)) return c.json({ error: "Enter a key for the new service origin", code: "NEW_ORIGIN_KEY_REQUIRED" }, 400);
+    }
+    const revision = randomUUID();
+    for (const { key, value } of [...changes, { key: "_revision", value: revision }]) await tx.insert(settings).values({ key, value }).onConflictDoUpdate({ target: settings.key, set: { value } });
+    return c.json({ ok: true, revision });
+  });
 });
 
 // POST /test — connectivity and model-capability probes (see settingsTest.ts)

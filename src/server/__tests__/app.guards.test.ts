@@ -19,19 +19,19 @@ import { app } from "../app.js";
 import { db } from "../db/index.js";
 import { cards, jobs, sessions, settings } from "../db/schema.js";
 import { hashSessionId } from "../middleware/auth.js";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 const HOST = "wordloom.test";
 const ORIGIN = `https://${HOST}`;
 
 /** Same-origin browser-like request (Host + matching Origin + nginx X-Real-IP). */
-function req(path: string, init: RequestInit & { ip?: string; origin?: string | null } = {}) {
-  const { ip = "203.0.113.7", origin = ORIGIN, headers, ...rest } = init;
+function req(path: string, init: RequestInit & { ip?: string; origin?: string | null; serverOrigin?: string } = {}) {
+  const { ip = "203.0.113.7", origin = ORIGIN, serverOrigin = ORIGIN, headers, ...rest } = init;
   const h = new Headers(headers);
-  h.set("host", HOST);
+  h.set("host", new URL(serverOrigin).host);
   h.set("x-real-ip", ip);
   if (origin) h.set("origin", origin);
-  return app.request(path, { ...rest, headers: h });
+  return app.request(serverOrigin + path, { ...rest, headers: h }, { incoming: { socket: { remoteAddress: "127.0.0.1" } } });
 }
 
 async function seedCard(word = "anchor") {
@@ -80,6 +80,7 @@ beforeEach(async () => {
   process.env.AUTH_TOKEN = "secret-token";
   process.env.AUTH_SECRET = "secret";
   delete process.env.ALLOWED_ORIGINS;
+  process.env.TRUSTED_PROXY_IPS = "127.0.0.1";
   for (const t of [cards, jobs, sessions, settings]) {
     await db.delete(t);
   }
@@ -288,9 +289,11 @@ describe("cross-site requests", () => {
   it("accepts the same site on a non-default port (nginx also listens on 8443)", async () => {
     const card = await seedCard();
     const cookie = await adminCookie();
+    const otherPort = `https://${HOST}:8443`;
+    expect((await req(`/api/cards/${card.id}`, { method: "DELETE", origin: otherPort, headers: { cookie } })).status).toBe(403);
     const res = await req(`/api/cards/${card.id}`, {
-      method: "DELETE",
-      origin: `https://${HOST}:8443`,
+      method: "DELETE", serverOrigin: otherPort,
+      origin: otherPort,
       headers: { cookie },
     });
     expect(res.status).toBe(200);
@@ -390,6 +393,22 @@ describe("response hardening", () => {
 });
 
 describe("reading settings", () => {
+  it("rolls a failed batch back and keeps bound secrets out of the log", async () => {
+    const cookie = await adminCookie();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const key = "fictional-regression-marker-771";
+    await db.run(sql`create trigger reject_key before insert on settings when new.key = 'gemini_api_key' begin select raise(abort, 'test write failure'); end`);
+    try {
+      const response = await req("/api/settings", { method: "PUT", headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ changes: [{ key: "cards_model", value: "new" }, { key: "gemini_api_key", value: key }], expectedRevision: "" }) });
+      expect(response.status).toBe(500);
+      expect(await db.select().from(settings)).toEqual([]);
+      expect(log).toHaveBeenCalled();
+      expect(log.mock.calls.flat().map(String).join(" ")).not.toContain(key);
+      expect(await response.text()).not.toContain(key);
+    } finally { log.mockRestore(); await db.run(sql`drop trigger reject_key`); }
+  });
+
   // The image_* rows stand for a feature that is gone: nothing reads them any
   // more, but they are still in the table.
   async function seedSettings() {
@@ -452,8 +471,26 @@ describe("async generation, end to end", () => {
     const cookie = await adminCookie();
     const jobId = await submit(cookie);
     await vi.waitFor(async () => expect((await poll(jobId, cookie)).status).toBe("done"));
-    expect((await poll(jobId, cookie)).result).toMatchObject({ success: [{ word: "alpha" }], failed: [] });
-    expect(await db.select().from(cards).where(eq(cards.word, "alpha")).get()).toBeTruthy();
+    const card = await db.select().from(cards).where(eq(cards.word, "alpha")).get();
+    expect(card).toBeDefined();
+    expect((await poll(jobId, cookie)).result).toEqual({ success: [card!.id], existing: [], failed: [] });
+  });
+
+  it("a model reply arriving after cancellation cannot commit cards", async () => {
+    let release!: () => void;
+    mockCards.mockImplementationOnce(async (words) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return writeCards(words);
+    });
+    const cookie = await adminCookie();
+    const id = await submit(cookie);
+    await vi.waitFor(() => expect(release).toBeDefined());
+    const cancelled = await req(`/api/jobs/${id}/cancel`, { method: "POST", headers: { cookie } });
+    expect(await cancelled.json()).toMatchObject({ status: "cancelled" });
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await db.select().from(cards)).toEqual([]);
+    expect((await poll(id, cookie)).status).toBe("cancelled");
   });
 
   it("a generator failure surfaces to the poller as a failed job, not a hung one", async () => {

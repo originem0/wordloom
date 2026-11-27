@@ -66,7 +66,7 @@ function Masked({ e, said }: { e: ExpressionSummary; said: string }) {
     reveal.mutate({ id: e.id, cue: "masked" }, { onSuccess: setShown, onError: (err) => toast.error(t(`没有看成：${errorMessage(err)}`, `Could not reveal the answer: ${errorMessage(err)}`)) });
   // The question the user is answering is their own message, so that is the hint level and the prompt.
   const submit = () =>
-    attempt.mutate({ id: e.id, text: own.trim(), cue: "need", prompt: said }, {
+    attempt.mutate({ id: e.id, targetVersion: e.targetVersion, text: own.trim(), cue: "need", prompt: said }, {
       onSuccess: setResult,
       onError: (err) => toast.error(t(`没有交上：${errorMessage(err)}`, `Could not submit: ${errorMessage(err)}`)),
     });

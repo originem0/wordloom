@@ -37,6 +37,29 @@ const DEFAULTS: Record<string, string> = {
   [DRAFT_SETTING_KEY]: "",
 };
 
+async function activateUpdate() {
+  if (!("serviceWorker" in navigator)) return;
+  const registration = await navigator.serviceWorker.getRegistration();
+  const script = new URL(`${import.meta.env.BASE_URL}sw.js`, window.location.origin).href;
+  if (registration?.active?.scriptURL !== script) return;
+  await registration.update();
+  const worker = registration.waiting ?? registration.installing;
+  if (!worker) return;
+  // Only the tab whose reader requested an update reloads after activation.
+  await new Promise<void>((resolve, reject) => {
+    const changed = () => {
+      if (worker.state === "installed") worker.postMessage({ type: "SKIP_WAITING" });
+      if (worker.state === "activated" || worker.state === "redundant") {
+        worker.removeEventListener("statechange", changed);
+        if (worker.state === "activated") resolve();
+        else reject(new Error("Update failed"));
+      }
+    };
+    worker.addEventListener("statechange", changed);
+    changed();
+  });
+}
+
 export function SettingsPage() {
   const { language, t } = useI18n();
   // The page is public: the theme and the cache controls live in the browser.
@@ -53,6 +76,8 @@ export function SettingsPage() {
   const setUiLanguage = useAppStore((s) => s.setUiLanguage);
 
   const [drafts, setDrafts] = useState<Record<string, string>>({ ...DEFAULTS });
+  const [baseDraft, setBaseDraft] = useState<Record<string, string>>({});
+  const [revision, setRevision] = useState("");
   const [initialized, setInitialized] = useState(false);
   const [saving, setSaving] = useState(false);
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
@@ -67,43 +92,39 @@ export function SettingsPage() {
       d[k] = settings[k] ?? v;
     }
     setDrafts(d);
+    setBaseDraft(d);
+    setRevision(settings._revision ?? "");
     setInitialized(true);
   }
 
   const draftValue = useCallback((key: string) => drafts[key] ?? "", [drafts]);
 
-  const savedValue = useCallback(
-    (key: string) => settings?.[key] ?? DEFAULTS[key] ?? "",
-    [settings],
-  );
-
-  const dirtyKeys = useMemo(() => {
-    if (!initialized) return [] as string[];
-    return Object.keys(DEFAULTS).filter((key) => draftValue(key) !== savedValue(key));
-  }, [draftValue, initialized, savedValue]);
+  const dirtyKeys = useMemo(() => initialized ? Object.keys(DEFAULTS).filter((key) => draftValue(key) !== baseDraft[key]) : [], [draftValue, initialized, baseDraft]);
 
   const saveAll = useCallback(async () => {
     setSaving(true);
     try {
-      for (const [key, value] of Object.entries(drafts)) {
-        await updateSetting.mutateAsync({ key, value: value.trim() });
-      }
+      if (!dirtyKeys.length) return;
+      const changes = dirtyKeys.map((key) => ({ key, value: drafts[key].trim() }));
+      const result = await updateSetting.mutateAsync({ changes, expectedRevision: revision });
+      setRevision(result.revision);
+      setBaseDraft({ ...drafts });
       toast.success(t("设置已保存", "Settings saved"));
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
       setSaving(false);
     }
-  }, [drafts, updateSetting, t]);
+  }, [drafts, dirtyKeys, revision, updateSetting, t]);
 
   const clearLocalCache = useCallback(async () => {
     setMaintenanceBusy(true);
     try {
       localStorage.removeItem("app-store");
-      sessionStorage.clear();
+      for (const key of Object.keys(sessionStorage)) if (key.startsWith("wordloom:")) sessionStorage.removeItem(key);
       if ("caches" in window) {
         const keys = await caches.keys();
-        await Promise.all(keys.map((k) => caches.delete(k)));
+        await Promise.all(keys.filter((k) => k.startsWith("wordloom-") || k === "cards-cache").map((k) => caches.delete(k)));
       }
       toast.success(t("本地缓存已清理，正在刷新…", "Local cache cleared. Reloading…"));
       window.location.reload();
@@ -117,18 +138,14 @@ export function SettingsPage() {
   const refreshPwa = useCallback(async () => {
     setMaintenanceBusy(true);
     try {
-      if ("serviceWorker" in navigator) {
-        const regs = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(regs.map((r) => r.update()));
-      }
-      toast.success(t("正在检查应用更新…", "Checking for app update…"));
+      await activateUpdate();
       window.location.reload();
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
       setMaintenanceBusy(false);
     }
-  }, [t]);
+  }, []);
 
   // Where the admin's part of the page stands. Loading and failing stay inside
   // that part: the rest of the page does not depend on the server.

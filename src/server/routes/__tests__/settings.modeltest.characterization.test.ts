@@ -4,16 +4,6 @@ import { Hono } from "hono";
 // Characterization tests: they pin what POST /settings/test answers for the
 // branches that read untyped upstream JSON, so the handler can be moved and
 // re-typed without changing what the AI Providers page sees.
-vi.mock("../../db/index.js", () => ({
-  db: {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({ get: vi.fn(() => ({ value: "" })) })),
-        all: vi.fn(() => []),
-      })),
-    })),
-  },
-}));
 
 import { settingRoutes } from "../settings.js";
 

@@ -1,7 +1,8 @@
 import { serve } from "@hono/node-server";
 
 if (process.env.NODE_ENV === "production") {
-  if (!process.env.AUTH_SECRET || !process.env.AUTH_TOKEN) {
+  const placeholders = new Set(["your-secret-access-token", "your-hmac-signing-secret"]);
+  if ([process.env.AUTH_SECRET, process.env.AUTH_TOKEN].some((v) => !v?.trim() || placeholders.has(v.trim()))) {
     console.error("Missing AUTH_SECRET or AUTH_TOKEN in production.");
     process.exit(1);
   }
@@ -23,10 +24,8 @@ process.on("unhandledRejection", (reason) => {
   console.error("Unhandled rejection:", reason);
 });
 
-// Without AUTH_TOKEN whoever reaches the port is the admin (dev mode), and the
-// admin can point a provider's base URL anywhere: the next call sends the key
-// there. So such a server listens to this machine only.
-const hostname = process.env.AUTH_TOKEN ? undefined : "127.0.0.1";
+// Unauthenticated development is local-only, even if HOST was set for a container.
+const hostname = (process.env.AUTH_TOKEN && process.env.HOST) || "127.0.0.1";
 serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3001), hostname });
 console.log(`Server running on http://localhost:${process.env.PORT ?? 3001}`);
 if (!process.env.AUTH_TOKEN && process.env.EXPRESSIONS_OPEN_LOCALLY === "1") {

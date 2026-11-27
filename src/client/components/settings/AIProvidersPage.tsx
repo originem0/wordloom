@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Cpu, Loader2, PlayCircle, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, apiPost } from "@/client/lib/api";
@@ -57,13 +57,29 @@ function resolveRoute(route: (typeof ROUTES)[number], get: (key: string) => stri
 }
 
 /** Model list detected earlier in this browser session ([] if none or unreadable). */
-function readCachedModels(storageKey: string): string[] {
+function readCachedModels(provider: ProviderType, baseUrl: string, revision: string): string[] {
   try {
-    const cached = sessionStorage.getItem(storageKey);
-    return cached ? readModelList(JSON.parse(cached)).models : [];
+    const cached = JSON.parse(sessionStorage.getItem(`wordloom:ai-${provider}-models`) ?? "null");
+    return cached?.baseUrl === baseUrl && cached.revision === revision ? readModelList(cached).models : [];
   } catch {
     return [];
   }
+}
+
+type RouteHealth = Record<string, SettingTestResponse>;
+const HEALTH_CACHE = "wordloom:ai-route-health";
+
+function readCachedHealth(revision: string): RouteHealth {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(HEALTH_CACHE) ?? "null");
+    if (!revision || saved?.revision !== revision) return {};
+    const health: RouteHealth = {};
+    for (const { key } of ROUTES) {
+      const probe = saved.routes?.[key];
+      if (typeof probe?.ok === "boolean") health[key] = { ok: probe.ok, latencyMs: typeof probe.latencyMs === "number" ? probe.latencyMs : undefined };
+    }
+    return health;
+  } catch { return {}; }
 }
 
 /** Narrow the untyped `result` of a listModels / openaiListModels test. */
@@ -91,11 +107,14 @@ export function AIProvidersPage() {
   const settings = settingsQuery.data;
 
   const [drafts, setDrafts] = useState<Drafts>({});
+  const [baseDraft, setBaseDraft] = useState<Drafts>({});
+  const [savedRevision, setSavedRevision] = useState("");
+  const probeVersion = useRef(0);
   const [initialized, setInitialized] = useState(false);
 
   // Per-provider state
-  const [geminiModels, setGeminiModels] = useState(() => readCachedModels("wordloom:ai-gemini-models"));
-  const [openaiModels, setOpenaiModels] = useState(() => readCachedModels("wordloom:ai-openai-models"));
+  const [geminiModels, setGeminiModels] = useState<string[]>([]);
+  const [openaiModels, setOpenaiModels] = useState<string[]>([]);
   const [detectingGemini, setDetectingGemini] = useState(false);
   const [detectingOpenai, setDetectingOpenai] = useState(false);
   const [testingAll, setTestingAll] = useState(false);
@@ -103,20 +122,7 @@ export function AIProvidersPage() {
   const [saving, setSaving] = useState(false);
   const [manualInput, setManualInput] = useState<Record<string, boolean>>({});
   const [showAllCandidates, setShowAllCandidates] = useState<Record<string, boolean>>({});
-  const [routeHealth, setRouteHealth] = useState<Record<string, SettingTestResponse>>(() => {
-    try {
-      const cached = sessionStorage.getItem("wordloom:ai-route-health");
-      if (cached) return JSON.parse(cached);
-    } catch { /* ignore */ }
-    return {};
-  });
-
-  // Persist routeHealth to sessionStorage on change
-  useEffect(() => {
-    if (Object.keys(routeHealth).length > 0) {
-      try { sessionStorage.setItem("wordloom:ai-route-health", JSON.stringify(routeHealth)); } catch { /* ignore */ }
-    }
-  }, [routeHealth]);
+  const [routeHealth, setRouteHealth] = useState<RouteHealth>({});
 
   // Seed the drafts from the saved settings once, the first render they are
   // available. Done during render (not in an effect) so the form never paints
@@ -145,12 +151,30 @@ export function AIProvidersPage() {
       d[`${r.key}_openai_model`] = settings[`${r.key}_openai_model`] ?? "";
       if (!("once" in r)) d[`${r.key}_openai_fallback_model`] = settings[`${r.key}_openai_fallback_model`] ?? "";
     }
+    setBaseDraft(d);
+    setGeminiModels(readCachedModels("gemini", d.gemini_base_url, settings._revision ?? ""));
+    setOpenaiModels(readCachedModels("openai", d.openai_base_url, settings._revision ?? ""));
+    setRouteHealth(readCachedHealth(settings._revision ?? ""));
+    setSavedRevision(settings._revision ?? "");
     setDrafts(d);
     setInitialized(true);
   }
 
+  useEffect(() => {
+    if (!savedRevision || settings?._revision !== savedRevision || !Object.keys(routeHealth).length) return;
+    if (Object.entries(drafts).some(([key, value]) => value !== baseDraft[key])) return;
+    // A probe may include an upstream diagnostic or response body. Only its
+    // status and latency belong in browser storage for this settings revision.
+    const routes = Object.fromEntries(Object.entries(routeHealth).map(([key, { ok, latencyMs }]) => [key, { ok, latencyMs }]));
+    try { sessionStorage.setItem(HEALTH_CACHE, JSON.stringify({ revision: savedRevision, routes })); } catch { /* storage unavailable */ }
+  }, [baseDraft, drafts, routeHealth, savedRevision, settings?._revision]);
+
   const draftValue = useCallback((key: string) => drafts[key] ?? "", [drafts]);
   const setDraft = useCallback((key: string, value: string) => {
+    probeVersion.current++;
+    setRouteHealth({});
+    if (key === "gemini_base_url" || key === "gemini_api_key") setGeminiModels([]);
+    if (key === "openai_base_url" || key === "openai_api_key") setOpenaiModels([]);
     setDrafts((prev) => ({ ...prev, [key]: value }));
   }, []);
 
@@ -160,57 +184,66 @@ export function AIProvidersPage() {
 
   // --- Detect models ---
   const detectGeminiModels = useCallback(async () => {
+    const version = probeVersion.current;
     setDetectingGemini(true);
     try {
       const payload: Record<string, unknown> = { target: "listModels", baseUrl: draftValue("gemini_base_url"), verify: true };
       if (drafts.gemini_api_key?.trim()) payload.apiKey = drafts.gemini_api_key.trim();
       const res = await apiPost<SettingTestResponse>("/api/settings/test", payload);
+      if (version !== probeVersion.current) return;
       if (!res.ok) { toast.error(t(`Gemini 模型识别失败：${settingTestError(res)}`, `Gemini model detection failed: ${settingTestError(res)}`)); return; }
       const { models, totalListed } = readModelList(res.result);
       setGeminiModels(models);
-      try { sessionStorage.setItem("wordloom:ai-gemini-models", JSON.stringify({ models, ts: Date.now() })); } catch { /* cache is best-effort (private mode / quota) */ }
+      if (!payload.apiKey && payload.baseUrl === baseDraft.gemini_base_url) {
+        try { sessionStorage.setItem("wordloom:ai-gemini-models", JSON.stringify({ models, baseUrl: payload.baseUrl, revision: savedRevision })); } catch { /* storage unavailable */ }
+      }
       if (models.length > 0) {
         const msg = totalListed > models.length
-          ? t(`${models.length} 个可用模型，已过滤 ${totalListed - models.length} 个`, `${models.length} usable model${models.length === 1 ? "" : "s"} (${totalListed - models.length} filtered out)`)
+          ? t(`列出 ${totalListed} 个模型，已验证 ${models.length} 个可用`, `${models.length} of ${totalListed} listed models verified`)
           : t(`${models.length} 个模型已验证`, `${models.length} model${models.length === 1 ? "" : "s"} verified`);
         toast.success(msg);
       } else {
-        toast.error(totalListed > 0 ? t(`找到 ${totalListed} 个模型，但都没有回应`, `Listed ${totalListed} models but none responded`) : t("已连接，但没有返回模型", "Connected, no models returned"));
+        toast.error(totalListed > 0 ? t(`列出 ${totalListed} 个模型，本次未验证到可用模型`, `Listed ${totalListed} models. None of the models tested responded.`) : t("已连接，但没有返回模型", "Connected, no models returned"));
       }
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
       setDetectingGemini(false);
     }
-  }, [draftValue, drafts.gemini_api_key, t]);
+  }, [draftValue, drafts.gemini_api_key, baseDraft.gemini_base_url, savedRevision, t]);
 
   const detectOpenaiModels = useCallback(async () => {
+    const version = probeVersion.current;
     setDetectingOpenai(true);
     try {
       const payload: Record<string, unknown> = { target: "openaiListModels", baseUrl: draftValue("openai_base_url"), verify: true };
       if (drafts.openai_api_key?.trim()) payload.apiKey = drafts.openai_api_key.trim();
       const res = await apiPost<SettingTestResponse>("/api/settings/test", payload);
+      if (version !== probeVersion.current) return;
       if (!res.ok) { toast.error(t(`OpenAI 模型识别失败：${settingTestError(res)}`, `OpenAI model detection failed: ${settingTestError(res)}`)); return; }
       const { models, totalListed } = readModelList(res.result);
       setOpenaiModels(models);
-      try { sessionStorage.setItem("wordloom:ai-openai-models", JSON.stringify({ models, ts: Date.now() })); } catch { /* cache is best-effort (private mode / quota) */ }
+      if (!payload.apiKey && payload.baseUrl === baseDraft.openai_base_url) {
+        try { sessionStorage.setItem("wordloom:ai-openai-models", JSON.stringify({ models, baseUrl: payload.baseUrl, revision: savedRevision })); } catch { /* storage unavailable */ }
+      }
       if (models.length > 0) {
         const msg = totalListed > models.length
-          ? t(`${models.length} 个可用模型，已过滤 ${totalListed - models.length} 个`, `${models.length} usable model${models.length === 1 ? "" : "s"} (${totalListed - models.length} filtered out)`)
+          ? t(`列出 ${totalListed} 个模型，已验证 ${models.length} 个可用`, `${models.length} of ${totalListed} listed models verified`)
           : t(`${models.length} 个模型已验证`, `${models.length} model${models.length === 1 ? "" : "s"} verified`);
         toast.success(msg);
       } else {
-        toast.error(totalListed > 0 ? t(`找到 ${totalListed} 个模型，但都没有回应`, `Listed ${totalListed} models but none responded`) : t("已连接，但没有返回模型", "Connected, no models returned"));
+        toast.error(totalListed > 0 ? t(`列出 ${totalListed} 个模型，本次未验证到可用模型`, `Listed ${totalListed} models. None of the models tested responded.`) : t("已连接，但没有返回模型", "Connected, no models returned"));
       }
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
       setDetectingOpenai(false);
     }
-  }, [draftValue, drafts.openai_api_key, t]);
+  }, [draftValue, drafts.openai_api_key, baseDraft.openai_base_url, savedRevision, t]);
 
   // --- Per-route test ---
   const testRoute = useCallback(async (routeKey: string, target: string, model: string, provider: ProviderType) => {
+    const version = probeVersion.current;
     const healthKey = routeKey;
     setTestingSingle(healthKey);
     try {
@@ -223,6 +256,7 @@ export function AIProvidersPage() {
         if (drafts.openai_api_key?.trim()) payload.apiKey = drafts.openai_api_key.trim();
       }
       const res = await apiPost<SettingTestResponse>("/api/settings/test", payload);
+      if (version !== probeVersion.current) return;
       setRouteHealth((prev) => ({ ...prev, [healthKey]: res }));
       const route = ROUTES.find((item) => item.key === routeKey);
       const label = route ? t(route.label[0], route.label[1]) : routeKey;
@@ -235,6 +269,7 @@ export function AIProvidersPage() {
         message: e instanceof Error ? e.message : "",
         ...(e instanceof ApiError ? { status: e.status, code: e.code } : {}),
       } };
+      if (version !== probeVersion.current) return;
       setRouteHealth((prev) => ({ ...prev, [healthKey]: fail }));
       toast.error(errorMessage(e));
     } finally {
@@ -259,39 +294,23 @@ export function AIProvidersPage() {
   const saveAll = useCallback(async () => {
     setSaving(true);
     try {
-      const pairs: Array<{ key: string; value: string; skipEmpty?: boolean }> = [
-        { key: "gemini_api_key", value: drafts.gemini_api_key ?? "", skipEmpty: true },
-        { key: "gemini_base_url", value: draftValue("gemini_base_url") },
-        { key: "openai_api_key", value: drafts.openai_api_key ?? "", skipEmpty: true },
-        { key: "openai_base_url", value: draftValue("openai_base_url") },
-        { key: "rime_api_key", value: drafts.rime_api_key ?? "", skipEmpty: true },
-        ...Object.keys(RIME_DEFAULTS).map((key) => ({ key, value: draftValue(key) })),
-      ];
-      for (const r of ROUTES) {
-        pairs.push({ key: `${r.key}_provider`, value: draftValue(`${r.key}_provider`) });
-        // Gemini model keys
-        pairs.push({ key: `${r.key}_model`, value: draftValue(`${r.key}_model`) });
-        // OpenAI model keys
-        pairs.push({ key: `${r.key}_openai_model`, value: draftValue(`${r.key}_openai_model`) });
-        if ("once" in r) continue;
-        pairs.push({ key: `${r.key}_fallback_model`, value: draftValue(`${r.key}_fallback_model`) });
-        pairs.push({ key: `${r.key}_openai_fallback_model`, value: draftValue(`${r.key}_openai_fallback_model`) });
-      }
-
-      for (const pair of pairs) {
-        if (pair.skipEmpty && !pair.value.trim()) continue;
-        // Never write the mask the server shows in place of a key back into the DB (it rejects that too).
-        if (pair.value.trim() === "configured") continue;
-        await updateSetting.mutateAsync({ key: pair.key, value: pair.value.trim() });
+      const changes = Object.entries(drafts).filter(([key, value]) => value !== baseDraft[key] && (!key.endsWith("_api_key") || value.trim())).map(([key, value]) => ({ key, value: value.trim() }));
+      if (changes.length) {
+        const result = await updateSetting.mutateAsync({ changes, expectedRevision: savedRevision });
+        probeVersion.current++;
+        setRouteHealth({});
+        setSavedRevision(result.revision);
+        const clean: Drafts = { ...drafts, gemini_api_key: "", openai_api_key: "", rime_api_key: "" };
+        setBaseDraft(clean);
+        setDrafts((current) => ({ ...current, ...Object.fromEntries(Object.keys(clean).filter((key) => current[key] === drafts[key]).map((key) => [key, clean[key]])) }));
       }
       toast.success(t("AI 配置已保存", "AI provider settings saved"));
-      setDrafts((prev) => ({ ...prev, rime_api_key: "" }));
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
       setSaving(false);
     }
-  }, [drafts, draftValue, updateSetting, t]);
+  }, [drafts, baseDraft, savedRevision, updateSetting, t]);
 
   // --- Model picker ---
   const modelField = (
@@ -369,14 +388,8 @@ export function AIProvidersPage() {
   // Dirty check
   const isDirty = useMemo(() => {
     if (!initialized || !settings) return false;
-    // Check API key drafts
-    if (drafts.gemini_api_key?.trim()) return true;
-    if (drafts.openai_api_key?.trim()) return true;
-    if (drafts.rime_api_key?.trim()) return true;
-    // Check all other keys
-    const keys = Object.keys(drafts).filter((k) => !k.endsWith("_api_key"));
-    return keys.some((k) => (drafts[k] ?? "") !== (k in RIME_DEFAULTS ? settings[k] || RIME_DEFAULTS[k] : settings[k] ?? GEMINI_DEFAULTS[k] ?? ""));
-  }, [initialized, settings, drafts]);
+    return Object.entries(drafts).some(([key, value]) => value !== baseDraft[key]);
+  }, [initialized, settings, drafts, baseDraft]);
 
   if (settingsQuery.isLoading && !initialized) {
     return (
@@ -526,7 +539,7 @@ export function AIProvidersPage() {
         const primaryKey = getRouteModelKey(route.key, provider, "model");
         const fallbackKey = getRouteModelKey(route.key, provider, "fallback_model");
         const runtimeModel = model || t("未设置", "(not set)");
-        const health = routeHealth[route.key];
+        const health = (settings?._revision ?? "") === savedRevision ? routeHealth[route.key] : undefined;
         const healthLabel = health
           ? health.ok
             ? `${health.latencyMs ?? ""}ms`

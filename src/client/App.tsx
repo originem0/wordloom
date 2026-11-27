@@ -1,8 +1,8 @@
 import { useEffect, lazy, Suspense } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, Routes, Route, Navigate, useRouteError } from "react-router-dom";
 import { queryClient } from "./lib/query-client";
-import { ErrorBoundary } from "./components/layout/ErrorBoundary";
+import { ErrorBoundary, FailureView } from "./components/layout/ErrorBoundary";
 import { Shell } from "./components/layout/Shell";
 import { LoginPage } from "./components/auth/LoginPage";
 import { AuthGuard } from "./components/auth/AuthGuard";
@@ -11,22 +11,18 @@ import { AIProvidersPage } from "./components/settings/AIProvidersPage";
 import { Toaster } from "./components/ui/sonner";
 import { HomeSplit } from "./components/expressions/HomeSplit";
 import { useAppStore } from "./store";
+import { useSessionEvents } from "./hooks/useAuth";
 import { applyTheme } from "./lib/theme";
 
-// After a deploy, old chunk filenames are gone. Reload to get fresh HTML.
-const reloadOnMiss = () => {
-  window.location.reload();
-  return { default: () => <></> };
-};
-
+// A failed import is handled by the recoverable error boundary.
 const WordForgePage = lazy(() =>
-  import("./components/cards/WordForgePage").then((m) => ({ default: m.WordForgePage })).catch(reloadOnMiss),
+  import("./components/cards/WordForgePage").then((m) => ({ default: m.WordForgePage })),
 );
 const ExpressionsPage = lazy(() =>
-  import("./components/expressions/ExpressionsPage").then((m) => ({ default: m.ExpressionsPage })).catch(reloadOnMiss),
+  import("./components/expressions/ExpressionsPage").then((m) => ({ default: m.ExpressionsPage })),
 );
 const TalkPage = lazy(() =>
-  import("./components/expressions/TalkPage").then((m) => ({ default: m.TalkPage })).catch(reloadOnMiss),
+  import("./components/expressions/TalkPage").then((m) => ({ default: m.TalkPage })),
 );
 
 const pageFallback = (
@@ -36,6 +32,7 @@ const pageFallback = (
 );
 
 function AppContent() {
+  useSessionEvents();
   const theme = useAppStore((s) => s.theme);
   const uiLanguage = useAppStore((s) => s.uiLanguage);
 
@@ -57,7 +54,6 @@ function AppContent() {
   }, [theme]);
 
   return (
-    <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<Shell />}>
@@ -69,15 +65,22 @@ function AppContent() {
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </BrowserRouter>
   );
 }
+
+function RouteFailure() {
+  const error = useRouteError();
+  // React.lazy caches a rejected import. An explicit retry must load a fresh document.
+  return <FailureView error={error instanceof Error ? error : null} retry={() => window.location.reload()} />;
+}
+
+const router = createBrowserRouter([{ path: "*", element: <AppContent />, errorElement: <RouteFailure /> }]);
 
 export default function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <AppContent />
+        <RouterProvider router={router} />
         <Toaster />
       </QueryClientProvider>
     </ErrorBoundary>

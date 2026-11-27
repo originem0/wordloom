@@ -19,8 +19,8 @@ export function useSettings({ enabled = true }: { enabled?: boolean } = {}) {
 export function useUpdateSetting() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ key, value }: { key: string; value: string }) =>
-      apiPut("/api/settings", { key, value }),
+    mutationFn: (update: { key: string; value: string } | { changes: { key: string; value: string }[]; expectedRevision: string }) =>
+      apiPut<{ ok: boolean; revision: string }>("/api/settings", update),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["settings"] }),
   });
 }

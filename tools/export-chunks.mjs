@@ -9,7 +9,8 @@
 //
 // Write the output somewhere outside the repository.
 import { createClient } from "@libsql/client";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, statSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { basename, resolve } from "node:path";
 
 const [dbArg, outArg] = process.argv.slice(2);
@@ -71,7 +72,13 @@ function renderChunk(row) {
   return out;
 }
 
-const client = createClient({ url: `file:${dbPath}` });
+const outPath = resolve(outArg);
+if (existsSync(outPath)) {
+  const source = statSync(dbPath, { bigint: true }), output = statSync(outPath, { bigint: true });
+  console.error(source.dev === output.dev && source.ino === output.ino ? "Output refers to the source database" : "Output already exists");
+  process.exit(1);
+}
+const client = createClient({ url: pathToFileURL(dbPath).href });
 try {
   const { rows } = await client.execute(
     "SELECT * FROM chunks ORDER BY category, form COLLATE NOCASE",
@@ -96,8 +103,7 @@ try {
     for (const row of items) lines.push(...renderChunk(row));
   }
 
-  const outPath = resolve(outArg);
-  writeFileSync(outPath, lines.join("\n"), "utf8");
+  writeFileSync(outPath, lines.join("\n"), { encoding: "utf8", flag: "wx", mode: 0o600 });
   console.log(`${rows.length} chunks → ${outPath}`);
 } finally {
   client.close();

@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useAppStore } from "@/client/store";
 
 let saved: Record<string, string>;
-const save = vi.fn(async (pair: { key: string; value: string }) => void pair);
+const save = vi.fn(async (batch: { changes: { key: string; value: string }[]; expectedRevision: string }) => ({ revision: batch.expectedRevision + "-next" }));
 
 vi.mock("@/client/hooks/useSettings", () => ({
   useSettings: () => ({ data: saved, isLoading: false, error: null }),
@@ -38,14 +38,17 @@ function row(label: string) {
 }
 
 function renderPage(settings: Record<string, string>) {
-  saved = settings;
-  render(<AIProvidersPage />);
+  saved = { ...settings, _revision: "saved-1" };
+  return render(<AIProvidersPage />);
 }
 
 async function saveAll() {
   fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
   await waitFor(() => expect(toast.success).toHaveBeenCalledWith("AI provider settings saved"));
-  return Object.fromEntries(save.mock.calls.map(([pair]) => [pair.key, pair.value]));
+  expect(save).toHaveBeenCalledTimes(1);
+  const [batch] = save.mock.calls[0];
+  expect(batch.expectedRevision).toBe("saved-1");
+  return Object.fromEntries(batch.changes.map((pair) => [pair.key, pair.value]));
 }
 
 const CARDS_ON_A_GATEWAY = { cards_provider: "openai", cards_openai_model: "deepseek-chat", openai_base_url: "https://gw.example.com/v1" };
@@ -68,19 +71,11 @@ describe("the Expressions route", () => {
     expect(row("Expressions").runsOn.getByText("gemini-2.5-flash")).toBeInTheDocument();
   });
 
-  // Saving the page writes every row. A row that was only following must be
-  // written as empty: "gemini" there would pin it and end the following.
-  it("is saved empty when it was left alone", async () => {
+  it("preserves inheritance by submitting only edited settings", async () => {
     renderPage(CARDS_ON_A_GATEWAY);
     fireEvent.change(row("Cards").primaryModel, { target: { value: "deepseek-reasoner" } });
     const written = await saveAll();
-    expect(written).toMatchObject({
-      cards_openai_model: "deepseek-reasoner",
-      cards_openai_fallback_model: "",
-      expressions_provider: "",
-      expressions_model: "",
-      expressions_openai_model: "",
-    });
+    expect(written).toEqual({ cards_openai_model: "deepseek-reasoner" });
   });
 
   // Its calls are made once, inside the request that waits for them: there is
@@ -94,11 +89,7 @@ describe("the Expressions route", () => {
 
     fireEvent.change(row("Cards").primaryModel, { target: { value: "deepseek-reasoner" } });
     const written = await saveAll();
-    expect(Object.keys(written).filter((key) => key.startsWith("expressions_")).sort()).toEqual([
-      "expressions_model",
-      "expressions_openai_model",
-      "expressions_provider",
-    ]);
+    expect(Object.keys(written).filter((key) => key.startsWith("expressions_")).sort()).toEqual([]);
   });
 
   it("keeps a provider and a model of its own once they are chosen", async () => {
@@ -111,7 +102,7 @@ describe("the Expressions route", () => {
     expect(row("Cards").runsOn.getByText("deepseek-chat")).toBeInTheDocument();
 
     const written = await saveAll();
-    expect(written).toMatchObject({ expressions_provider: "gemini", expressions_model: "gemini-2.5-pro", cards_provider: "openai" });
+    expect(written).toEqual({ expressions_provider: "gemini", expressions_model: "gemini-2.5-pro" });
   });
 
   // The server has no probe for this route. A cards probe sent with this row's
@@ -129,5 +120,34 @@ describe("the Expressions route", () => {
       provider: "openai",
       baseUrl: "https://gw.example.com/v1",
     });
+  });
+
+  it("restores probe status on refresh only for the settings revision that was tested", async () => {
+    const first = renderPage(CARDS_ON_A_GATEWAY);
+    fireEvent.click(row("Expressions").test);
+    await waitFor(() => expect(row("Expressions").runsOn.getByText("Ready")).toBeInTheDocument());
+    first.unmount();
+
+    const next = render(<AIProvidersPage />);
+    expect(row("Expressions").runsOn.getByText("Ready")).toBeInTheDocument();
+    fireEvent.change(row("Cards").primaryModel, { target: { value: "draft-model" } });
+    expect(row("Expressions").runsOn.getByText("Untested")).toBeInTheDocument();
+    next.unmount();
+
+    saved = { ...saved, _revision: "saved-2" };
+    render(<AIProvidersPage />);
+    expect(row("Expressions").runsOn.getByText("Untested")).toBeInTheDocument();
+  });
+
+  it("keeps a probe of an unsaved provider configuration out of the saved status", async () => {
+    const first = renderPage(CARDS_ON_A_GATEWAY);
+    fireEvent.change(row("Cards").primaryModel, { target: { value: "draft-model" } });
+    fireEvent.click(row("Expressions").test);
+    await waitFor(() => expect(row("Expressions").runsOn.getByText("Ready")).toBeInTheDocument());
+    first.unmount();
+
+    render(<AIProvidersPage />);
+    expect(row("Expressions").runsOn.getByText("deepseek-chat")).toBeInTheDocument();
+    expect(row("Expressions").runsOn.getByText("Untested")).toBeInTheDocument();
   });
 });

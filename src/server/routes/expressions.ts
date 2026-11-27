@@ -1,22 +1,22 @@
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
-import { and, asc, eq, sql } from "drizzle-orm";
-import { db } from "../db/index.js";
-import { encounters, expressions } from "../db/schema.js";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { db, readSnapshot } from "../db/index.js";
+import { encounters, expressionPassageNotes, expressions } from "../db/schema.js";
 import { failureReason } from "../services/ai-shared.js";
 import { annotate, pick } from "../services/expressions-ai.js";
 import { dropThread, hasThread, normalize, readThread, retryCoaching, talk, threads } from "../services/expressions-talk.js";
 import { expressionSpeechRoutes } from "./expressions-speech.js";
 import {
-  attemptResponse, judgeAttempt, loadAttempt, overturn, recordAttempt, sceneOf, stats, tryItems,
+  attemptResponse, judgeAttempt, loadAttempt, overturn, recordAttempt, recordDay, sceneOf, stats, tryItems,
 } from "../services/expressions-try.js";
-import { isMasked, loadEntry, loadLibrary, toDetail, toDuplicate, toSummary } from "../services/expressions-view.js";
+import { currentState, isMasked, loadEntry, loadLibrary, toDetail, toDuplicate, toSummary } from "../services/expressions-view.js";
 import {
   attemptRequestSchema, captureRequestSchema, encounterRequestSchema, expressionPatchSchema, overturnRequestSchema, pickRequestSchema,
-  revealRequestSchema, talkRequestSchema,
+  passageNoteChangeSchema, revealRequestSchema, talkRequestSchema,
 } from "../../shared/validation.js";
 import type {
-  CaptureRequest, DuplicateResponse, EncounterSource, ExpressionListResponse, PickResponse, TalkFailure, TalkListResponse,
+  CaptureRequest, DuplicateResponse, EncounterSource, ExpressionListResponse, PassageNoteContent, PickResponse, TalkFailure, TalkListResponse,
   TalkThreadResponse, TryResponse,
 } from "../../shared/expressions.js";
 
@@ -34,13 +34,15 @@ const oldestFirst = [asc(encounters.createdAt), asc(encounters.id)];
 
 /** One entry as its own routes answer with it: masked while it is in 想用. */
 async function detailOf(id: number) {
-  const entry = await loadEntry(id);
-  return entry && toDetail(entry);
+  return readSnapshot(async (tx) => {
+    const entry = await loadEntry(id, tx);
+    return entry && toDetail(entry, false, tx);
+  });
 }
 
 /** The scene an entry came from. Capture writes it, so it is the oldest. */
-const firstMet = (id: number) =>
-  db
+const firstMet = (id: number, from: Pick<typeof db, "select"> = db) =>
+  from
     .select()
     .from(encounters)
     .where(and(eq(encounters.expressionId, id), eq(encounters.kind, "met")))
@@ -79,7 +81,7 @@ async function annotateEntry(id: number): Promise<void> {
       aiIntent: sql`coalesce(${expressions.aiIntent}, ${out.aiIntent})`,
       nextScene: sql`coalesce(${expressions.nextScene}, ${out.scene})`,
     })
-    .where(eq(expressions.id, id));
+    .where(and(eq(expressions.id, id), eq(expressions.targetVersion, row.targetVersion)));
 }
 
 const annotateFailed = (id: number, err: unknown) =>
@@ -96,25 +98,29 @@ expressionRoutes.post("/", async (c) => {
   const parsed = captureRequestSchema.safeParse(await c.req.json());
   if (!parsed.success) return invalid(c);
   const { text, force, found } = parsed.data;
-  const focus = blank(parsed.data.focus);
+  const focus = blank(parsed.data.focusRange ? parsed.data.focus : parsed.data.focus?.trim());
   const norm = normalize(focus ?? text);
 
-  // The check has to live here: for an entry in 想用 the page does not hold
-  // the text to compare with, and is told only its intent and date.
-  if (!force && (await db.select({ id: expressions.id }).from(expressions).where(eq(expressions.norm, norm)).get())) {
-    const existing = (await loadLibrary()).filter((e) => e.row.norm === norm).map(toDuplicate);
-    return c.json({ error: "Already saved", code: "DUPLICATE", existing } satisfies DuplicateResponse, 409);
-  }
-
   const now = Date.now();
-  const id = await db.transaction(async (tx) => {
-    const [row] = await tx
-      .insert(expressions)
-      .values({ text, norm, focus, createdAt: now, updatedAt: now })
-      .returning({ id: expressions.id });
+  const range = parsed.data.focusRange;
+  if (range && (!focus || text.slice(range.start, range.end) !== focus || range.end > text.length)) return invalid(c);
+  const result = await db.transaction(async (tx) => {
+    if (!force) {
+      const matches = await tx.select({ id: expressions.id }).from(expressions).where(eq(expressions.norm, norm)).orderBy(desc(expressions.createdAt), desc(expressions.id));
+      if (matches.length) {
+        const existing = await Promise.all(matches.map(async ({ id }) => toDuplicate((await loadEntry(id, tx))!)));
+        return { existing };
+      }
+    }
+    const [row] = await tx.insert(expressions).values({ text, norm, focus, focusStart: range?.start, createdAt: now, updatedAt: now,
+      learningHistory: [{ at: now, status: "seen", activeSince: null, focus, version: 0 }],
+    }).returning({ id: expressions.id });
+    await recordDay(tx, now, "met");
     await tx.insert(encounters).values(metRow(row.id, text, parsed.data, now, found));
-    return row.id;
+    return { id: row.id };
   });
+  if (result.existing) return c.json({ error: "Already saved", code: "DUPLICATE", existing: result.existing } satisfies DuplicateResponse, 409);
+  const id = result.id!;
   const detail = await detailOf(id);
   // Not awaited, and not a job: a job row would keep the sentence as its input.
   void annotateEntry(id).catch((err) => annotateFailed(id, err));
@@ -132,39 +138,79 @@ expressionRoutes.patch("/:id{[0-9]+}", async (c) => {
   const id = Number(c.req.param("id"));
   const parsed = expressionPatchSchema.safeParse(await c.req.json());
   if (!parsed.success) return invalid(c);
-  const row = await db.select().from(expressions).where(eq(expressions.id, id)).get();
-  if (!row) return notFound(c);
-
   const patch = parsed.data;
-  const now = Date.now();
-  const set: Partial<typeof expressions.$inferInsert> = { updatedAt: now };
-  if (patch.note !== undefined) set.note = blank(patch.note);
-  if (patch.focus !== undefined) {
-    set.focus = blank(patch.focus);
-    set.norm = normalize(set.focus ?? row.text);
-  }
-  if (patch.intent !== undefined) {
-    set.intent = blank(patch.intent);
-    set.intentBy = set.intent ? (patch.intentBy ?? "self") : null;
-  }
-  const status = patch.status ?? row.status;
-  // In 想用 an entry is asked for by its intent, in the user's own words.
-  if (status === "active" && !(set.intent !== undefined ? set.intent : row.intent)) {
-    return c.json({ error: "An entry in 想用 needs an intent", code: "INTENT_REQUIRED" }, 400);
-  }
-  if (status !== row.status) {
-    set.status = status;
-    // Entering starts the first 24 hours. Leaving is not kept anywhere, so
-    // coming back starts them again: whatever was shown in between is unknown.
-    set.activeSince = status === "active" ? now : null;
-  }
-  const met = patch.occurredAt === undefined ? undefined : await firstMet(id);
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
+    const row = await tx.select().from(expressions).where(eq(expressions.id, id)).get();
+    if (!row) return notFound(c);
+    if (patch.expectedUpdatedAt != null && row.updatedAt !== patch.expectedUpdatedAt) return c.json({ error: "Entry changed. Reopen it before saving.", code: "EDIT_CONFLICT" }, 409);
+    const now = Date.now();
+    const set: Partial<typeof expressions.$inferInsert> = { updatedAt: Math.max(now, row.updatedAt + 1) };
+    if (patch.note !== undefined) set.note = blank(patch.note);
+    const focus = patch.focus === undefined ? row.focus : blank(patch.focusRange ? patch.focus : patch.focus?.trim());
+    const start = patch.focusRange === undefined ? (focus === row.focus ? row.focusStart : null) : patch.focusRange?.start ?? null;
+    if (patch.focusRange && (!focus || patch.focusRange.end > row.text.length || row.text.slice(start!, patch.focusRange.end) !== focus)) return invalid(c);
+    const changed = focus !== row.focus || start !== row.focusStart;
+    if (changed) Object.assign(set, { focus, focusStart: start, norm: normalize(focus ?? row.text), targetVersion: row.targetVersion + 1,
+      gloss: null, aiIntent: null, nextScene: null, intent: null, intentBy: null });
+    if (patch.intent !== undefined) {
+      set.intent = blank(patch.intent);
+      set.intentBy = set.intent ? patch.intentBy ?? "self" : null;
+    }
+    const status = patch.status ?? (changed && row.status === "active" && !set.intent ? "seen" : row.status);
+    const intent = set.intent === undefined ? row.intent : set.intent;
+    if (status === "active" && !intent) return c.json({ error: "An entry in 想用 needs an intent", code: "INTENT_REQUIRED" }, 400);
+    if (changed || status !== row.status) {
+      set.status = status;
+      set.activeSince = status === "active" ? now : null;
+      set.learningHistory = [...(row.learningHistory ?? [{ ...currentState(row), estimated: true }]), { at: now, status: status as ReturnType<typeof currentState>["status"], activeSince: set.activeSince, focus, version: set.targetVersion ?? row.targetVersion }];
+    }
     await tx.update(expressions).set(set).where(eq(expressions.id, id));
-    if (met) await tx.update(encounters).set({ occurredAt: patch.occurredAt }).where(eq(encounters.id, met.id));
+    if (patch.occurredAt !== undefined) {
+      const met = await firstMet(id, tx);
+      if (met) await tx.update(encounters).set({ occurredAt: patch.occurredAt }).where(eq(encounters.id, met.id));
+    }
+    return c.json(await toDetail((await loadEntry(id, tx))!, false, tx));
   });
-  const detail = await detailOf(id);
-  return detail ? c.json(detail) : notFound(c);
+});
+
+const sameContent = (a: PassageNoteContent | null, b: PassageNoteContent | null) =>
+  a?.body === b?.body && a?.examples?.[0] === b?.examples?.[0] && a?.examples?.[1] === b?.examples?.[1];
+
+// Native browser selections count UTF-16 code units. Keep those offsets even
+// across repeated words and line breaks, without accepting half an emoji.
+const splitsSurrogate = (text: string, at: number) =>
+  /[\uD800-\uDBFF]/.test(text.charAt(at - 1)) && /[\uDC00-\uDFFF]/.test(text.charAt(at));
+
+expressionRoutes.patch("/:id{[0-9]+}/passage-notes", async (c) => {
+  const parsed = passageNoteChangeSchema.safeParse(await c.req.json());
+  if (!parsed.success) return invalid(c);
+  const id = Number(c.req.param("id"));
+  const { start, end, before, after } = parsed.data;
+  return db.transaction(async (tx) => {
+    const entry = await loadEntry(id, tx);
+    if (!entry) return notFound(c);
+    // Check before inspecting the range: even a validation result must not
+    // give away the length or contents of a masked original.
+    if (isMasked(entry)) return c.json({ error: "Expression is masked", code: "EXPRESSION_MASKED" }, 409);
+    const { text } = entry.row;
+    if (end > text.length || !text.slice(start, end).trim() || splitsSurrogate(text, start) || splitsSurrogate(text, end)) return invalid(c);
+
+    const notes = expressionPassageNotes;
+    const key = and(eq(notes.expressionId, id), eq(notes.start, start), eq(notes.end, end));
+    const saved = await tx.select().from(notes).where(key).get() ?? null;
+    if (!sameContent(saved, after)) {
+      if (!sameContent(saved, before)) return c.json({ error: "Passage note changed", code: "PASSAGE_NOTE_CHANGED" }, 409);
+      if (after) {
+        await tx.insert(notes).values({ expressionId: id, start, end, ...after })
+          .onConflictDoUpdate({ target: [notes.expressionId, notes.start, notes.end], set: after });
+      } else {
+        await tx.delete(notes).where(key);
+      }
+      entry.row.updatedAt = Math.max(Date.now(), entry.row.updatedAt + 1);
+      await tx.update(expressions).set({ updatedAt: entry.row.updatedAt }).where(eq(expressions.id, id));
+    }
+    return c.json(await toDetail(entry, false, tx));
+  });
 });
 
 // DELETE /:id — permanent removal, unlike moving an entry to retired.
@@ -182,7 +228,11 @@ expressionRoutes.post("/:id{[0-9]+}/encounters", async (c) => {
   if (!parsed.success) return invalid(c);
   const row = await db.select({ id: expressions.id }).from(expressions).where(eq(expressions.id, id)).get();
   if (!row) return notFound(c);
-  await db.insert(encounters).values(metRow(id, parsed.data.text, parsed.data, Date.now()));
+  await db.transaction(async (tx) => {
+    const now = Date.now();
+    await recordDay(tx, now, "met");
+    await tx.insert(encounters).values(metRow(id, parsed.data.text, parsed.data, now));
+  });
   return c.json(await detailOf(id), 201);
 });
 
@@ -204,16 +254,16 @@ expressionRoutes.post("/:id{[0-9]+}/reveal", async (c) => {
   const id = Number(c.req.param("id"));
   const parsed = revealRequestSchema.safeParse(await c.req.json());
   if (!parsed.success) return invalid(c);
-  const entry = await loadEntry(id);
-  if (!entry) return notFound(c);
-  if (!isMasked(entry)) return c.json(toDetail(entry));
   // The row and the read after it are one transaction: the answer never leaves
   // without the timeline saying so, and no row says so when it did not leave.
-  const revealed = await db.transaction(async (tx) => {
-    await tx.insert(encounters).values({ expressionId: id, kind: "reveal", text: "", cue: parsed.data.cue, createdAt: Date.now() });
-    return loadEntry(id, tx);
+  return db.transaction(async (tx) => {
+    const entry = await loadEntry(id, tx);
+    if (!entry) return notFound(c);
+    if (!isMasked(entry)) return c.json(await toDetail(entry, false, tx));
+    await tx.insert(encounters).values({ expressionId: id, kind: "reveal", targetVersion: entry.row.targetVersion, text: "", cue: parsed.data.cue, createdAt: Date.now() });
+    const revealed = await loadEntry(id, tx);
+    return revealed ? c.json(await toDetail(revealed, true, tx)) : notFound(c);
   });
-  return revealed ? c.json(toDetail(revealed, true)) : notFound(c);
 });
 
 // GET /:id/scene — the second hint; reading it writes nothing
@@ -227,7 +277,7 @@ expressionRoutes.get("/:id{[0-9]+}/scene", async (c) => {
 // GET /try?exclude=1,2 — what to ask now. Ids are all the query string holds.
 expressionRoutes.get("/try", async (c) => {
   const exclude = new Set((c.req.query("exclude") ?? "").split(",").map(Number));
-  return c.json({ items: tryItems(await loadLibrary(), Date.now(), exclude) } satisfies TryResponse);
+  return c.json({ items: tryItems(await loadLibrary(db, true), Date.now(), exclude) } satisfies TryResponse);
 });
 
 /** The attempt row as it stands now, in the shape all three routes answer with. */
@@ -245,11 +295,13 @@ expressionRoutes.post("/:id{[0-9]+}/attempts", async (c) => {
   if (!entry) return notFound(c);
   // Out of 想用, or graduated: nothing an answer could move. A queued entry
   // is taken, since the user ran into it in 找 by themselves.
+  if ((parsed.data.targetVersion ?? 0) !== entry.row.targetVersion) return c.json({ error: "Practice target changed", code: "TARGET_CHANGED" }, 409);
   if (!isMasked(entry)) return c.json({ error: "Not in 想用", code: "NOT_ACTIVE" }, 409);
   // The page reports the hint level. "none" can be checked: it means the
   // question was the stored scene, which is cleared once asked.
   if (parsed.data.cue === "none" && parsed.data.prompt !== entry.row.nextScene) return invalid(c);
-  const row = await recordAttempt(id, parsed.data);
+  const row = await recordAttempt(id, parsed.data, undefined, entry.row.targetVersion);
+  if (!row) return c.json({ error: "Practice target changed", code: "TARGET_CHANGED" }, 409);
   await judgeAttempt({ entry, row });
   return attemptOf(c, row.id, 201);
 });

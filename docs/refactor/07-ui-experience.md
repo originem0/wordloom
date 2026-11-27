@@ -33,15 +33,15 @@
 
 测试排在家族对比之前，是因为对比表的典型场景就是测试题的场景，先看表等于先看答案。家族对比因此默认折叠，第一次显示答案后自动展开；读者手动开合过就不再替他决定。没有测试题的卡直接展开对比。
 
-核心图解直接展示已保存内容，不再给同一段内容加简化翻译或完整图解折叠。这让界面语言与生成内容语言保持各自的作用范围。
+核心意象直接展开。新生成的图、说明和英文例句讲同一个场景。例句属于这个用法，分级例句仍在「搭配与例句」里。
 
 ### 图与主题
 
-account、grim、compromise、assume 使用代码中人工校对的场景图，避免只改某一本机数据库才能得到新图。其余优先使用已保存的模型 SVG，缺失时使用既有五种图式模板。图式为 `none` 时不画模板：有文字意象就只显示文字，两者都没有则整段不出现。
+旧卡里的 grim、动词 resume 和 spontaneous 有三组人工编写的意象。grim 画读报告时紧锁的眉头，resume 画午休前后同一场预算讨论，spontaneous 直接写演讲结束时的掌声。每组都带对应的英文例句，图内标签和人工说明跟随界面语言。已保存的新式场景整组显示，保留生成时的解释语言。
 
-模型 SVG 始终作为 `<img>`，解析和序列化只用于字号、位置与主题呈现，不插入页面 DOM、不回写数据。代码图作为受控 React SVG。词卡使用主站表面与文字色；`--word-*` 变量只负责词卡呈现，不覆盖控件使用的全局 `--card`、`--muted`。
+其他旧卡沿用原说明。account、compromise、assume 使用既有的人工图，其余优先使用保存的 SVG，缺图时使用已知图式的模板。`none` 配说明时只显示文字。模型 SVG 始终作为独立的 `<img>`，源码保持原样，呈现时按容器补偿标签字号并调整配色。
 
-按实际容器计算图内字号补偿。390px 验收的七张样本标签最小为 14.0–14.93px；深色正文与辅助文字在词卡表面的对比度约为 5.70 和 4.55。此结果来自样本浏览器检查，不宣称所有未来模型布局都已人工验证。
+打开单张词卡或一条表达时，浅色详情以燕麦色 `#F2E8D5` 为底，图面用 `#ECE1CD`，重点标记用墨青色 `#245C54`。表达原文选中的片段另加浅绿底与实线。深色详情使用暗青底和浅青重点色。两个列表页使用应用主题。
 
 ### 详情、对比与自检
 
@@ -67,13 +67,13 @@ account、grim、compromise、assume 使用代码中人工校对的场景图，�
 
 表层提示词不再要求 contextLadder、phrases、synonyms：前者与三句分级例句重复，后两者并入 4–6 条搭配，近义词由家族对比承担。对应的列和校验保留，旧数据照常读取。
 
-深层提示词先让模型判断词类（spatial、action、light、abstract、academic、scene、general），再按词类决定后面的内容：区分轴怎么选，以及要不要画图。`coreSvg` 改为可选，只有空间词、动作词或确有一幅具体画面的词才画；`coreSchema` 允许 `none`，不再要求"选最接近的"。新增 `familyAxes`（区分轴）与 `familyChoiceRule`（一句话怎么选），`familyBoundaryNote` 改为一对一行；三者都并入 `schemaAnalysis` JSON 列，没有新的数据库列。`metaphoricalExtensions` 与 `registerVariation` 不再生成，它们与词源链、场景和语域列重复，也从未显示过。
+深层提示词先判断词类，再选一个具体用法。`coreImageText` 描述场景里能看出词义的细节，`coreImageExample` 保存同场景英文例句，`coreSvg` 按需生成。图默认静态，过程可以用前后两幅说明。纯文字场景使用 `coreSchema: "none"`。例句与家族的区分轴、选择规则、边界说明一起保存在现有 `schemaAnalysis` JSON 列。旧数据仍可缺少这些字段。
 
 三条家族说明的校验是宽松的：模型给了数组就拼接，给了读不懂的东西就丢弃这一条，不让整层失败。两个提供方共用 `ai-normalize.ts` 的 `normalizeCoreSchema`，认不出的图式标签归为 `none`；此前归为 `blockage`，任何放不进五种图式的词都会画一堵墙。
 
 2026-11-26 用实际配置的模型各跑了一次（只读设置，不写库）：spontaneous 判为 abstract、`none`、不画图；withstand 判为 spatial、`blockage`、带 SVG；两者都给出三条轴、一句选择规则和每行一对的边界说明，并通过校验。两个词不构成对模型稳定性的评估。
 
-实现见 `src/client/components/cards/CardCollection.tsx`、`PrototypeWordCard.tsx`、`card-detail.ts`、`CoreImageVisual.tsx`、`ReviewedCoreImage.tsx` 与 `prototype-word-card.css`；生成侧见 `src/server/services/ai-prompts.ts`、`ai-normalize.ts` 与 `src/shared/validation.ts`。
+三张样卡的图文在 `src/client/components/cards/CoreImageScenes.tsx`，场景选择与显示在 `CoreImageVisual.tsx`。生成规则见 `src/server/services/ai-prompts.ts`，数据校验见 `src/shared/validation.ts`。
 
 ## 4. 表达库
 
@@ -81,7 +81,17 @@ account、grim、compromise、assume 使用代码中人工校对的场景图，�
 
 搜索和分栏切换回第一页；翻页滚回列表开头。归档使最后一页消失时，显示和记住有效页码，后来另一个条目到达也不会跳回被移除的页。新收下的条目转到全部第一页。
 
-没有到期条目时，可以从见过选择一条并直接聚焦自己的提示句。放进想用紧邻提示句；备注、补注、出处与学习记录随后展开。空想用栏和空库提供对应的开始入口；过滤无结果可清除过滤。
+没有到期条目时，可以从见过选择一条并直接聚焦自己的提示句。放进想用紧邻提示句。空想用栏和空库提供对应的开始入口；过滤无结果可清除过滤。
+
+普通详情首先显示逐字保留的原句。有批注的片段带下划线，点一下即可切换解释。默认打开阅读顺序中的第一处，桌面批注在原句右侧，手机全屏并把批注紧接在原句下方。重复词按选中位置分别保存，重叠片段可以在批注里切换。整篇详情共用一个滚动区域，顶部保留关闭按钮。关闭后焦点回到打开它的条目，条目已删除或被过滤时回到列表区域。
+
+选中原文后点「写批注」，也可先打开选区输入框，用键盘或触屏选取文字。每处批注可以附一组同场景例句。片段批注独立保存，写入只比较正在编辑的这一处，失败保留草稿。进入想用时，练习焦点仍只有一个。迁移 0013 新建批注表，旧原句和整条笔记可直接读取。
+
+笔记默认以正文显示，点「编辑笔记」才出现焦点输入框和较大的备注编辑区；「预览笔记」保留未保存内容，保存仍只发送修改过的字段。笔记中的分段、标题、列表、加粗、斜体、行内代码、高亮与有效的 Markdown 表格按内容排版；桌面表格在手机变成逐项对照。只折叠明确以「延伸」「拓展」「更多例句」等标题标出的补充内容，主解释保持展开。原文、提示句、出处与反馈始终按字面显示，笔记中的 HTML 和链接也保持字面文本，不生成任意元素或可点击链接。没有引入完整 Markdown 编辑器或自动整理功能。
+
+旧种子中仅含来源标签和逐字重复原句的笔记收在「原笔记摘录」里。带有额外解读的笔记直接展开。
+
+需要回想的条目先显示提示。揭晓后才返回原文、个人批注和笔记，可切换片段阅读。关闭详情后重新遮挡。个人批注只随可阅读的详情返回。AI 补注明确标明来源，由读者展开。出处、时间和学习记录放在底部。
 
 详情底部有永久删除，适用于见过、想用和已收起三种状态。确认后通过私有 `DELETE /api/expressions/:id` 删除该条及其整条学习时间线；对谈仍保留，读旧对谈时忽略已经不存在的命中。删除失败保留原记录与未保存内容，执行中禁用其他写操作；成功后关闭详情并刷新共享列表和统计，删除最后一页的条目时回到有效页码。旧读取和迟到的补注不能把删除的记录重新放回缓存。
 
@@ -111,6 +121,10 @@ account、grim、compromise、assume 使用代码中人工校对的场景图，�
 
 2026-11-27 的永久删除补充通过类型检查、lint、52 文件/901 项测试与完整构建。1280/390/320px 浏览器检查通过确认、取消、失败恢复、44px 触达和无横向溢出；删除请求使用模拟条目，未删除用户真实表达。重新生成的种子包通过 SQLite 完整性与外键检查，实际应用读取验证为 3380 张词卡、301 条语块、40 条表达；所有配置、会话、对谈和实际练习表为空。
 
+2026-11-27 的表达详情阅读布局通过类型检查、lint、52 文件/909 项测试和完整构建。浏览器在 1280px 桌面、390px 浅色/深色与 320px 英文界面下检查单栏阅读、手机全屏、表格变为逐项对照、编辑与预览、原样保存、补充内容折叠、揭晓后只读和关闭后重新遮挡；正常流程无横向溢出或控制台错误。另复验延迟读取、缺少补注、读取失败与关闭后焦点返回，按钮触达尺寸不少于 44px。验收使用仓库外的模拟条目，没有发起模型调用或写入真实学习记录。
+
+片段批注通过类型检查、lint、52 个测试文件的 917 项测试和完整构建。浏览器连接使用旧种子库副本升级的本地服务，在 1280px 桌面和 390px、320px 触屏视口检查选词、切换、对照例句、旧短句、刷新与揭晓。英文窄屏编辑、同时保存不同片段、SQLite 完整性与外键检查均通过。
+
 此前的浏览器验收覆盖 1440px 桌面、390px 手机与 320px 配置页，检查返回、键盘、焦点、分页、筛选、首次学习、图示、对谈、配置和登录，并确认顶部新增块已移除、完整图解可直接阅读。私人验收材料未提交；检查没有发起模型生成或写入真实学习记录。
 
 | 当前实现 | 源码入口 |
@@ -123,9 +137,11 @@ account、grim、compromise、assume 使用代码中人工校对的场景图，�
 | 深层提示词 | [ai-prompts.ts:33](../../src/server/services/ai-prompts.ts#L33) |
 | 图与完整图解 | [CoreImageVisual.tsx:26](../../src/client/components/cards/CoreImageVisual.tsx#L26) |
 | 表达分页 | [ExpressionsPage.tsx:25](../../src/client/components/expressions/ExpressionsPage.tsx#L25) |
-| 表达学习动作 | [ExpressionDetail.tsx:158](../../src/client/components/expressions/ExpressionDetail.tsx#L158) |
+| 原句选区与批注 | [PassageReader.tsx](../../src/client/components/expressions/PassageReader.tsx) |
+| 表达详情阅读与学习动作 | [ExpressionDetail.tsx](../../src/client/components/expressions/ExpressionDetail.tsx) |
+| 表达笔记排版 | [ExpressionNotes.tsx:94](../../src/client/components/expressions/ExpressionNotes.tsx#L94) |
 | 对谈反馈 | [TalkTurn.tsx:130](../../src/client/components/expressions/TalkTurn.tsx#L130) |
 | 可见配置状态 | [SettingWidgets.tsx:16](../../src/client/components/settings/SettingWidgets.tsx#L16) |
 | 登录回退 | [LoginPage.tsx:12](../../src/client/components/auth/LoginPage.tsx#L12) |
 
-本轮没有新依赖或数据库迁移。开发后端使用 Node watch 配合 tsx。维护和部署见根 [README](../../README.md)；模型准确率、用户真实评测集、对话整理/便签与自发产出识别仍属于后续工作，不能用自动测试冒充已完成的教学效果验证。
+开发后端使用 Node watch 配合 tsx，启动时应用数据库迁移。维护和部署见根 [README](../../README.md)；模型准确率、用户真实评测集、对话整理/便签与自发产出识别仍属于后续工作，不能用自动测试冒充已完成的教学效果验证。

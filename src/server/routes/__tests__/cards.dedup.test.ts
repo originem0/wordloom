@@ -1,112 +1,58 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// --- Mocks ---
-
-// Mock db — Proxy-based to support drizzle's chained API
-function mockDbChain(result: unknown) {
-  const proxy: unknown = new Proxy(
-    {},
-    {
-      get: (_target, prop) => {
-        if (prop === "all") return () => result;
-        if (prop === "get") return () => result;
-        if (prop === "returning") return () => [result];
-        // Everything else returns the proxy for chaining
-        return () => proxy;
-      },
-    },
-  );
-  return proxy;
-}
-
-const mockSelectResult: { word: string }[] = [];
-const mockGenerateCards = vi.fn();
-
-vi.mock("../../db/index.js", () => ({
-  db: {
-    select: vi.fn(() => mockDbChain(mockSelectResult)),
-    insert: vi.fn(() => mockDbChain({})),
-    update: vi.fn(() => mockDbChain({})),
-    delete: vi.fn(() => mockDbChain({})),
-  },
-}));
-
-vi.mock("../../services/ai-router.js", () => ({
-  generateCards: (...args: unknown[]) => mockGenerateCards(...args),
-  generateDeepLayer: vi.fn(),
-  extractWords: vi.fn(),
-}));
-
-vi.mock("../../services/ai-shared.js", () => ({
-  AI_BUSY: "AI_BUSY",
-}));
-
-vi.mock("../../middleware/rateLimit.js", () => ({
-  rateLimit: () => null,
-}));
-
-// Import after mocks
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
-import { cardRoutes } from "../cards.js";
 import { db } from "../../db/index.js";
+import { cards } from "../../db/schema.js";
+import { cardRoutes } from "../cards.js";
 
-function buildApp() {
-  const app = new Hono();
-  app.route("/cards", cardRoutes);
-  return app;
-}
+const generate = vi.hoisted(() => vi.fn());
+vi.mock("../../services/ai-router.js", () => ({ generateCards: generate, generateDeepLayer: vi.fn(), extractWords: vi.fn() }));
 
-describe("POST /cards/generate — deduplication", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockSelectResult.length = 0;
+const app = new Hono().route("/cards", cardRoutes);
+const post = (words: string[]) => app.request("/cards/generate", {
+  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ words }),
+});
+
+describe("card generation on SQLite", () => {
+  beforeEach(async () => {
+    await db.delete(cards);
+    await db.insert(cards).values({ word: "birch", coreMeaning: "original", createdAt: 1, updatedAt: 1 });
+    generate.mockReset();
   });
 
-  it('returns "All words already exist" when all words exist', async () => {
-    // db.select chain returns these existing words
-    const existingWords = [{ word: "hello" }, { word: "world" }];
-    vi.mocked(db.select).mockReturnValue(mockDbChain(existingWords) as never);
-
-    const app = buildApp();
-    const res = await app.request("/cards/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ words: ["hello", "world"] }),
-    });
-
-    expect(await res.json()).toMatchObject({ message: "All words already exist" });
-    expect(mockGenerateCards).not.toHaveBeenCalled();
+  it("returns existing cards without a model call even for case variants", async () => {
+    const res = await post(["BIRCH", "birch"]);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ success: [{ word: "birch" }], existing: [{ word: "birch" }], failed: [] });
+    expect(generate).not.toHaveBeenCalled();
+    await expect(db.insert(cards).values({ word: "Birch", createdAt: 2, updatedAt: 2 })).rejects.toThrow();
   });
 
-  it("only generates cards for new words (case-insensitive)", async () => {
-    vi.mocked(db.select).mockReturnValue(
-      mockDbChain([{ word: "hello" }]) as never,
-    );
-    mockGenerateCards.mockResolvedValue({ success: [], failed: [] });
-
-    const app = buildApp();
-    await app.request("/cards/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ words: ["HELLO", "world"] }),
-    });
-
-    expect(mockGenerateCards).toHaveBeenCalledWith(["world"]);
+  it("never replaces birch when the model omits aspen and elm", async () => {
+    generate.mockResolvedValue({ success: [{ word: "birch", coreMeaning: "replacement" }], failed: [] });
+    const res = await post(["aspen", "elm"]);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ existing: [], success: [], failed: [
+      { word: "aspen", error: "Not returned by AI" }, { word: "elm", error: "Not returned by AI" },
+    ] });
+    expect(await db.select({ word: cards.word, meaning: cards.coreMeaning }).from(cards)).toEqual([{ word: "birch", meaning: "original" }]);
   });
 
-  it("skips all when duplicates differ only by case", async () => {
-    vi.mocked(db.select).mockReturnValue(
-      mockDbChain([{ word: "hello" }]) as never,
-    );
+  it("uses the same Unicode case key across separate requests", async () => {
+    generate.mockResolvedValueOnce({ success: [{ word: "café" }], failed: [] });
+    expect((await post(["CAFÉ"])).status).toBe(200);
+    const res = await post(["café"]);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ existing: [{ word: "CAFÉ" }], failed: [] });
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
 
-    const app = buildApp();
-    const res = await app.request("/cards/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ words: ["HELLO", "hello"] }),
-    });
-
-    expect(await res.json()).toMatchObject({ message: "All words already exist" });
-    expect(mockGenerateCards).not.toHaveBeenCalled();
+  it("accounts for duplicates, existing cards and valid model results individually", async () => {
+    generate.mockResolvedValue({ success: [{ word: "aspen" }, { word: "Aspen" }, { word: "ELM", coreMeaning: "tree" }], failed: [] });
+    const res = await post(["BIRCH", "aspen", "elm"]);
+    expect(res.status).toBe(200);
+    expect(generate).toHaveBeenCalledExactlyOnceWith(["aspen", "elm"]);
+    expect(await res.json()).toMatchObject({ success: [{ word: "birch" }, { word: "elm" }], existing: [{ word: "birch" }], failed: [{ word: "aspen" }] });
+    expect(await db.select({ word: cards.word, meaning: cards.coreMeaning }).from(cards).orderBy(cards.id))
+      .toEqual([{ word: "birch", meaning: "original" }, { word: "elm", meaning: "tree" }]);
   });
 });

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, index, unique } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, primaryKey, unique } from "drizzle-orm/sqlite-core";
 
 // Data kept, code removed: Story Studio (image → story, TTS, translation) is
 // gone. The definition stays so the rows survive, cards.story_id keeps a table
@@ -19,6 +19,7 @@ export const stories = sqliteTable("stories", {
 export const cards = sqliteTable("cards", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   word: text("word").notNull().unique(),
+  wordKey: text("word_key"),
   ipa: text("ipa"),
   pos: text("pos"),
   cefr: text("cefr"),
@@ -45,6 +46,7 @@ export const cards = sqliteTable("cards", {
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 }, (table) => [
+  index("cards_word_key_idx").on(table.wordKey),
   index("cards_created_at_idx").on(table.createdAt),
   index("cards_cefr_idx").on(table.cefr),
 ]);
@@ -65,6 +67,7 @@ export const sessions = sqliteTable("sessions", {
 export const jobs = sqliteTable("jobs", {
   id: text("id").primaryKey(),
   type: text("type").notNull(), // cards (rows from before the refactor may say story, chunks or practice)
+  workKey: text("work_key").unique(),
   status: text("status").notNull(), // queued | running | done | failed | cancelled
   input: text("input").notNull(), // JSON payload
   result: text("result"), // JSON payload
@@ -151,14 +154,28 @@ export const practices = sqliteTable("practices", {
 
 // ---------------------------------------------------------------------------
 // Expressions: what the admin met and wants to be able to say. Private data:
-// every route that reads these two tables sits behind requirePrivate.
+// every route that reads the originals, marginal notes or timeline sits behind requirePrivate.
 // ---------------------------------------------------------------------------
+
+export const evaluationWindow = sqliteTable("evaluation_window", {
+  id: integer("id").primaryKey(),
+  startedAt: integer("started_at").notNull(),
+});
+
+export const learningDays = sqliteTable("learning_days", {
+  day: integer("day").primaryKey(),
+  testable: integer("testable").notNull().default(0),
+  attempted: integer("attempted").notNull().default(0),
+});
 
 export const expressions = sqliteTable("expressions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   text: text("text").notNull(), // verbatim; the only required field
   norm: text("norm").notNull(), // not unique: the same form can be saved as another sense
   focus: text("focus"),
+  focusStart: integer("focus_start"),
+  targetVersion: integer("target_version").notNull().default(0),
+  learningHistory: text("learning_history", { mode: "json" }).$type<import("../../shared/expressions.js").LearningState[]>(),
   intent: text("intent"),
   intentBy: text("intent_by"), // self | find | paste | ai
   aiIntent: text("ai_intent"), // written once by the annotate call, never regenerated
@@ -174,6 +191,16 @@ export const expressions = sqliteTable("expressions", {
   index("expressions_status_created_idx").on(table.status, table.createdAt),
 ]);
 
+// Loaded only for a readable detail. A list, a talk prompt and a recall
+// question have no use for the reader's marginal notes.
+export const expressionPassageNotes = sqliteTable("expression_passage_notes", {
+  expressionId: integer("expression_id").notNull().references(() => expressions.id, { onDelete: "cascade" }),
+  start: integer("start_offset").notNull(),
+  end: integer("end_offset").notNull(),
+  body: text("body").notNull(),
+  examples: text("examples", { mode: "json" }).$type<[string, string]>(),
+}, (table) => [primaryKey({ columns: [table.expressionId, table.start, table.end] })]);
+
 // The timeline. Individual rows are never deleted and `text` is never rewritten;
 // permanently deleting the parent expression cascades its whole timeline.
 // `outcome` and `feedback` may be filled in later on the same row. Level, due
@@ -183,6 +210,7 @@ export const encounters = sqliteTable("encounters", {
   expressionId: integer("expression_id").references(() => expressions.id, {
     onDelete: "cascade",
   }),
+  targetVersion: integer("target_version").notNull().default(0),
   kind: text("kind").notNull(), // met | looked_up | reveal | attempt | used
   text: text("text").notNull(),
   textBefore: text("text_before"),
@@ -201,12 +229,18 @@ export const encounters = sqliteTable("encounters", {
 ]);
 
 // The 对谈 page: one row a turn, what the user wrote and what the partner
-// answered. Private like the two tables above. `notes` is kept as the model
+// answered. Private like the expression library. `notes` is kept as the model
 // wrote it once the checks had passed; whatever of it is masked by the time it
 // is read is blanked then, not here.
+export const talkThreads = sqliteTable("talk_threads", { id: integer("id").primaryKey({ autoIncrement: true }) });
+
+// Receipts retain only a random request identifier after deletion.
+export const talkReceipts = sqliteTable("talk_receipts", { id: text("id").primaryKey() });
+
 export const talkTurns = sqliteTable("talk_turns", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  thread: integer("thread").notNull(), // created_at of the opening turn: the conversation's id
+  thread: integer("thread").notNull(),
+  messageId: text("message_id").unique(),
   said: text("said").notNull(), // verbatim
   reply: text("reply").notNull(),
   notes: text("notes").notNull(), // JSON: TalkNotes in expressions-talk.ts

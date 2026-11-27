@@ -140,6 +140,24 @@ describe("a stored key goes to its own provider only", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each(["gemini", "openai"])("requires a new %s key for another origin", async (provider) => {
+    await store({ [provider + "_base_url"]: GATEWAY, [provider + "_api_key"]: "previous-key" });
+    const mock = upstream({ models: [], data: [] });
+    const payload = { target: provider === "gemini" ? "listModels" : "openaiListModels", baseUrl: "https://new.example" };
+    expect((await run(payload)).ok).toBe(false);
+    expect(mock).not.toHaveBeenCalled();
+    expect((await run({ ...payload, apiKey: "new-key" })).ok).toBe(true);
+    expect(mock.mock.calls[0][1]?.redirect).toBe("error");
+    expect(Object.values(mock.mock.calls[0][1]?.headers ?? {}).join(" ")).not.toContain("previous-key");
+  });
+
+  it("derives credentials from the actual probe destination for a conflicting provider field", async () => {
+    await store({ ...openaiOnly, gemini_api_key: "g-key" });
+    const mock = upstream({ models: [] });
+    expect((await run({ target: "listModels", provider: "openai" })).ok).toBe(true);
+    expect(sent(mock)).toEqual({ url: "https://generativelanguage.googleapis.com/v1beta/models", googleKey: "g-key" });
+  });
+
   it("with both stored, each probe carries its own", async () => {
     await store({ ...openaiOnly, gemini_api_key: "g-key" });
     const toGateway = upstream({ data: [] });

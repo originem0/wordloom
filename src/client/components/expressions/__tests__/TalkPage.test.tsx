@@ -282,7 +282,7 @@ describe("a message", () => {
     expect(await screen.findByText("reply to Hello there")).toBeInTheDocument();
     expect(screen.queryByText("对方在写…")).toBeNull();
     expect(box()).not.toHaveAttribute("readonly");
-    expect(posted()).toEqual([{ said: "Hello there" }]);
+    expect(posted()).toEqual([{ messageId: expect.stringMatching(/^[0-9a-f-]{36}$/i), said: "Hello there" }]);
     expect(requests.some((r) => /hello/i.test(r.url))).toBe(false);
     expect(stored).not.toHaveBeenCalled();
     stored.mockRestore();
@@ -335,7 +335,7 @@ describe("a message", () => {
     await screen.findByText("reply to second");
 
     const { thread } = server.turns[0];
-    expect(posted()).toEqual([{ said: "first" }, { said: "second", thread }]);
+    expect(posted()).toEqual([{ messageId: expect.stringMatching(/^[0-9a-f-]{36}$/i), said: "first" }, { messageId: expect.stringMatching(/^[0-9a-f-]{36}$/i), said: "second", thread }]);
     // What is on screen is the answers themselves: the conversation is not read back.
     expect(asked("GET", `/api/expressions/talk/${thread}`)).toHaveLength(0);
     expect(shown().indexOf("reply to first")).toBeLessThan(shown().indexOf("reply to second"));
@@ -348,7 +348,7 @@ describe("a message", () => {
     await openLatest();
     say("one more");
     await screen.findByText("reply to one more");
-    expect(posted()).toEqual([{ said: "one more", thread: D24 }]);
+    expect(posted()).toEqual([{ messageId: expect.stringMatching(/^[0-9a-f-]{36}$/i), said: "one more", thread: D24 }]);
     expect(shown().indexOf("reply to latest follow-up")).toBeLessThan(shown().indexOf("reply to one more"));
     expect(asked("GET", `/api/expressions/talk/${D24}`)).toHaveLength(1);
   });
@@ -415,7 +415,8 @@ describe("a message that got no answer", () => {
     expect(await screen.findByText("reply to Hello")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(box()).toHaveValue("");
-    expect(posted()).toEqual([{ said: "Hello" }, { said: "Hello" }]);
+    expect(posted()[1]?.messageId).toBe(posted()[0]?.messageId);
+    expect(posted()).toEqual([{ messageId: expect.stringMatching(/^[0-9a-f-]{36}$/i), said: "Hello" }, { messageId: expect.stringMatching(/^[0-9a-f-]{36}$/i), said: "Hello" }]);
   });
 
   it("into a conversation deleted elsewhere becomes the first of a new one", async () => {
@@ -432,7 +433,7 @@ describe("a message that got no answer", () => {
 
     enter();
     expect(await screen.findByText("reply to still there?")).toBeInTheDocument();
-    expect(posted()).toEqual([{ said: "still there?", thread: D24 }, { said: "still there?" }]);
+    expect(posted()).toEqual([{ messageId: expect.stringMatching(/^[0-9a-f-]{36}$/i), said: "still there?", thread: D24 }, { messageId: expect.stringMatching(/^[0-9a-f-]{36}$/i), said: "still there?" }]);
   });
 });
 
@@ -446,7 +447,7 @@ describe("the conversations", () => {
     expect(asked("GET", `/api/expressions/talk/${D20}`)).toHaveLength(1);
     say("back to this");
     await screen.findByText("reply to back to this");
-    expect(posted()).toEqual([{ said: "back to this", thread: D20 }]);
+    expect(posted()).toEqual([{ messageId: expect.stringMatching(/^[0-9a-f-]{36}$/i), said: "back to this", thread: D20 }]);
   });
 
   it("make room for a new one without a word to the server", async () => {
@@ -461,7 +462,7 @@ describe("the conversations", () => {
     expect(requests).toHaveLength(before);
     say("fresh start");
     await screen.findByText("reply to fresh start");
-    expect(posted()).toEqual([{ said: "fresh start" }]);
+    expect(posted()).toEqual([{ messageId: expect.stringMatching(/^[0-9a-f-]{36}$/i), said: "fresh start" }]);
   });
 
   it("are forgotten in two clicks, and a new one is open after", async () => {

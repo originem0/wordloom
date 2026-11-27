@@ -1,9 +1,9 @@
-import { asc, eq, sql } from "drizzle-orm";
-import { db } from "../db/index.js";
-import { encounters, expressions, talkTurns } from "../db/schema.js";
+import { and, asc, desc, eq, lt, inArray, count, sql } from "drizzle-orm";
+import { db, readSnapshot } from "../db/index.js";
+import { encounters, expressions, talkTurns, talkThreads, talkReceipts } from "../db/schema.js";
 import { failureReason } from "./ai-shared.js";
 import { answerReview, chooseReview } from "./expressions-review.js";
-import { attemptResponse } from "./expressions-try.js";
+import { attemptResponse, recordDay } from "./expressions-try.js";
 import { coachConversation, converse, replyConversation, type ConversationMaterial } from "./expressions-ai.js";
 import { isMasked, loadLibrary, toSummary, type Entry } from "./expressions-view.js";
 import {
@@ -34,7 +34,13 @@ const NEVER = /(?!)/g;
  * the punctuation around a whole sentence, taken as whole words; a word ends
  * where the Latin letters do, since Chinese quotes English unspaced.
  */
+const readers = new WeakMap<Entry[], ReturnType<typeof createReader>>();
 function reader(library: Entry[]) {
+  let result = readers.get(library);
+  if (!result) { result = createReader(library); readers.set(library, result); }
+  return result;
+}
+function createReader(library: Entry[]) {
   const targets = new Map<Entry, RegExp>();
   for (const e of library) {
     const target = e.row.norm.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
@@ -67,28 +73,48 @@ function reader(library: Entry[]) {
 
 // Characters of index per call. What does not fit is not searched this time,
 // and the answer says how much was.
-const INDEX_BUDGET = 60_000;
+const INDEX_BUDGET = 12_000;
 const MAX_HITS = 5;
 const MAX_REWRITES = 3;
 const MAX_FRESH = 2;
 const cell = (s: string | null, max: number) => (s ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 
-/** The library as the model reads it, one line an entry: 想用 first, then 见过
- *  from the newest, then what was shelved. A masked entry goes without its
- *  English: what the model was never shown it cannot give away. */
-function buildIndex(library: Entry[]) {
+function indexTerms(text: string) {
+  const terms = new Set<string>();
+  for (const [part] of normalize(text).matchAll(/[\p{Script=Han}]+|[\p{Script=Latin}\d]+(?:['’][\p{Script=Latin}]+)*/gu)) {
+    const chars = [...part];
+    if (/\p{Script=Han}/u.test(part) && chars.length > 1) {
+      for (let i = 1; i < chars.length; i++) terms.add(chars[i - 1] + chars[i]);
+    } else {
+      terms.add(part);
+    }
+  }
+  return terms;
+}
+
+/** Rank matches to the message first, breaking ties by layer and recency.
+ *  A masked entry contributes only its cues to the model's index. */
+function buildIndex(library: Entry[], message: string) {
   const lines: string[] = [];
   const indexed = new Map<number, Entry>();
   const { veil } = reader(library);
   const masked = library.filter(isMasked);
   let room = INDEX_BUDGET;
-  for (const e of ["active", "seen", "retired"].flatMap((status) => library.filter(({ row }) => row.status === status))) {
+  const tokens = indexTerms(message);
+  const ordered = library.map((entry) => {
+    const { text, focus, intent, aiIntent, status } = entry.row;
+    const searchable = indexTerms([text, focus, intent, aiIntent].join(" "));
+    let relevance = 0;
+    for (const token of tokens) if (searchable.has(token)) relevance++;
+    return { entry, relevance, priority: status === "active" ? 0 : status === "seen" ? 1 : 2 };
+  }).sort((a, b) => b.relevance - a.relevance || a.priority - b.priority);
+  for (const { entry: e } of ordered) {
     const { id, focus, text, intent, aiIntent } = e.row;
     const shown = isMasked(e) ? "" : cell(focus, EXPRESSION_LIMITS.focus) || cell(text, 80);
     // A cue may itself quote the target, even on a different entry. Every
     // text column passes the same mask; clearing just the English is not enough.
     const line = [id, ...[shown, cell(intent, 100), cell(aiIntent, 100)].map((s) => veil(s, masked))].join(" | ");
-    if (line.length + 1 > room) break;
+    if (line.length + 1 > room) continue;
     room -= line.length + 1;
     lines.push(line);
     indexed.set(id, e);
@@ -117,13 +143,13 @@ interface TalkNotes {
   fix: Suggestion | null;
   rewrites: Rewrite[];
   fresh: Suggestion[];
-  mine: { id: number; why: string }[];
+  mine: { id: number; why: string; version?: number }[];
   searched: number;
   total: number;
   coachingPending?: boolean;
   coachingFailure?: TalkFailure["reason"];
-  reviewCandidate?: { id: number; cue: string };
-  review?: { id: number; scene: string };
+  reviewCandidate?: { id: number; cue: string; version?: number };
+  review?: { id: number; scene: string; version?: number };
   reviewAttempt?: number;
 }
 type TurnRow = typeof talkTurns.$inferSelect;
@@ -135,22 +161,36 @@ type TurnRow = typeof talkTurns.$inferSelect;
  * message itself, which comes back as it was typed; read again later, the
  * user's own words are blanked like the rest.
  */
+function indexAttempts(library: Entry[]) {
+  const entries = new Map(library.map((e) => [e.row.id, e]));
+  const byId = new Map<number, { entry: Entry; row: Entry["timeline"][number] }>();
+  const bySource = new Map<string, { entry: Entry; row: Entry["timeline"][number] }>();
+  for (const entry of library) for (const row of entry.timeline) if (row.kind === "attempt") {
+    byId.set(row.id, { entry, row });
+    if (row.sourceType === "chat" && row.sourceLocator) bySource.set(row.sourceLocator, { entry, row });
+  }
+  return { entries, byId, bySource };
+}
+const attemptIndexes = new WeakMap<Entry[], ReturnType<typeof indexAttempts>>();
 function present(row: TurnRow, library: Entry[], shown: Set<number>, live: boolean): TalkTurn {
   const notes = JSON.parse(row.notes) as TalkNotes;
-  const reviewed = library.flatMap((entry) => entry.timeline.filter((r) => r.id === notes.reviewAttempt || (r.kind === "attempt" && r.sourceType === "chat" && r.sourceLocator === `talk:${row.id}`)).map((r) => ({ entry, row: r })))[0];
+  let attempts = attemptIndexes.get(library);
+  if (!attempts) { attempts = indexAttempts(library); attemptIndexes.set(library, attempts); }
+  const reviewed = attempts.byId.get(notes.reviewAttempt ?? -1) ?? attempts.bySource.get(`talk:${row.id}`);
   const result = reviewed ? attemptResponse(reviewed) : null;
-  if (live && result?.answer && reviewed) shown.add(reviewed.entry.row.id);
+  const hits = notes.mine.filter((hit) => attempts.entries.get(hit.id)?.row.targetVersion === (hit.version ?? 0));
+  const visible = new Set(hits.filter((hit) => shown.has(hit.id)).map((hit) => hit.id));
+  if (live && result?.answer && reviewed && reviewed.row.targetVersion === reviewed.entry.row.targetVersion) visible.add(reviewed.entry.row.id);
   const { veil } = reader(library);
-  const hidden = library.filter((e) => isMasked(e) && !shown.has(e.row.id));
+  const hidden = library.filter((e) => isMasked(e) && !visible.has(e.row.id));
   const v = (s: string) => veil(s, hidden);
-  const mine: TalkHit[] = notes.mine.flatMap(({ id, why }) => {
-    const e = library.find((x) => x.row.id === id);
-    if (!e) return [];
-    const summary = toSummary(e, shown.has(id));
+  const mine: TalkHit[] = hits.map(({ id, why }) => {
+    const e = attempts.entries.get(id)!;
+    const summary = toSummary(e, visible.has(id));
     const expression = { ...summary, text: summary.text && v(summary.text), focus: summary.focus && v(summary.focus),
       intent: summary.intent && v(summary.intent), sourceTitle: summary.sourceTitle && v(summary.sourceTitle) };
     // A reason tends to quote what it is about, so a masked hit goes without one.
-    return [{ expression, why: expression.masked ? null : v(why) || null }];
+    return { expression, why: expression.masked ? null : v(why) || null };
   });
   const offer = (s: Suggestion): Suggestion => ({ ...s, text: v(s.text), why: v(s.why) });
   // Something worth keeping that has since become an entry in 想用 is no
@@ -171,7 +211,8 @@ function present(row: TurnRow, library: Entry[], shown: Set<number>, live: boole
     searched: notes.searched,
     total: notes.total,
     ...(notes.coachingPending || notes.coachingFailure ? { coachingFailure: notes.coachingFailure ?? "failed" } : {}),
-    ...(notes.review ? { review: { ...notes.review, scene: v(notes.review.scene) } } : {}),
+    ...(notes.review && attempts.entries.get(notes.review.id)?.row.targetVersion === (notes.review.version ?? 0)
+      ? { review: { id: notes.review.id, scene: v(notes.review.scene) } } : {}),
     ...(result && reviewed ? { reviewResult: !live && isMasked(reviewed.entry)
       ? { ...result, answer: null, rewrites: [], intent: result.intent && v(result.intent) }
       : { ...result, intent: result.intent && v(result.intent), answer: result.answer && {
@@ -185,23 +226,51 @@ function present(row: TurnRow, library: Entry[], shown: Set<number>, live: boole
  * usable answer, the reason: nothing is written then, so sending the message
  * again leaves it on no timeline twice.
  */
-export async function talk(q: TalkRequest, opts?: { onDelta: (text: string) => Promise<void>; signal?: AbortSignal }): Promise<TalkTurn | { failed: TalkFailure["reason"] } | null> {
+type TalkOptions = { onDelta: (text: string) => Promise<void>; signal?: AbortSignal };
+const pendingMessages = new Map<string, { said: string; thread?: number; result: ReturnType<typeof talkOnce> }>();
+export async function talk(q: TalkRequest, opts?: TalkOptions) {
+  if (!q.messageId) return talkOnce(q, opts);
+  const pending = pendingMessages.get(q.messageId);
+  if (pending) return pending.said === q.said && pending.thread === q.thread ? pending.result : null;
+  const result = talkOnce(q, opts);
+  pendingMessages.set(q.messageId, { said: q.said, thread: q.thread, result });
+  try { return await result; } finally { pendingMessages.delete(q.messageId); }
+}
+
+async function history(thread?: number, before?: number) {
+  if (thread == null) return { turns: [] as TurnRow[], total: 0 };
+  const condition = and(eq(talkTurns.thread, thread), before == null ? undefined : lt(talkTurns.id, before));
+  return readSnapshot(async (tx) => {
+    const size = await tx.select({ n: count() }).from(talkTurns).where(condition).get();
+    const total = size?.n ?? 0;
+    const recent = await tx.select().from(talkTurns).where(condition).orderBy(desc(talkTurns.id)).limit(TALK_HISTORY_TURNS).all();
+    const turns = recent.reverse();
+    if (total > TALK_HISTORY_TURNS) turns[0] = (await tx.select().from(talkTurns).where(condition).orderBy(asc(talkTurns.id)).limit(1).get())!;
+    return { turns, total };
+  });
+}
+
+async function talkOnce(q: TalkRequest, opts?: TalkOptions): Promise<TalkTurn | { failed: TalkFailure["reason"] } | null> {
   const library = await loadLibrary();
+  if (q.messageId && await db.select().from(talkReceipts).where(eq(talkReceipts.id, q.messageId)).get()) {
+    const row = await db.select().from(talkTurns).where(eq(talkTurns.messageId, q.messageId)).get();
+    return row && row.said === q.said && (q.thread == null || row.thread === q.thread) ? present(row, library, new Set(), false) : null;
+  }
   const { veil } = reader(library);
-  const earlier = q.thread == null ? [] : await db.select().from(talkTurns).where(eq(talkTurns.thread, q.thread)).orderBy(asc(talkTurns.id)).all();
-  if (q.thread != null && !earlier.length) return null;
+  const { turns: earlier, total } = await history(q.thread);
+  if (q.thread != null && !total) return null;
 
   // The history comes from the database, not from the page: the opening turn
   // says what the conversation is about and the latest ones where it stands.
   // The model reads it as the user would now, with what is masked blanked.
   const masked = library.filter(isMasked);
-  const told = earlier.length > TALK_HISTORY_TURNS ? [earlier[0], ...earlier.slice(1 - TALK_HISTORY_TURNS)] : earlier;
-  const { index, indexed } = buildIndex(library);
-  const candidate = chooseReview(library, earlier.length + 1);
+  const told = earlier;
+  const { index, indexed } = buildIndex(library, q.said);
+  const candidate = chooseReview(library, total + 1);
   const cue = candidate && veil(candidate.cue, masked);
   const material = { said: q.said, history: told.map((t) => ({ said: veil(t.said, masked), reply: veil(t.reply, masked) })), index,
     ...(cue && /\p{L}/u.test(cue) ? { reviewCue: cue } : {}) };
-  if (opts) return streamTurn(q, material, library, earlier, opts);
+  if (opts) return streamTurn(q, material, library, indexed, earlier, total, opts);
   let out;
   try {
     out = await converse(material);
@@ -213,15 +282,13 @@ export async function talk(q: TalkRequest, opts?: { onDelta: (text: string) => P
 
   const previous = earlier.at(-1);
   const review = previous && (JSON.parse(previous.notes) as TalkNotes).review;
-  let stored: TurnRow | undefined;
+  const stored = await saveReply(q, out.reply, library, total);
+  if (!stored) return null;
   if (review && !/\p{Script=Han}/u.test(q.said)) {
-    const reply = await saveReply(q, out.reply, library, earlier.length);
-    if (!reply) return null;
-    stored = reply;
     const attempt = await answerReview(review, q.said, stored.id);
     if (attempt) stored.notes = JSON.stringify({ ...JSON.parse(stored.notes), reviewAttempt: attempt });
   }
-  return saveTurn(q, out, library, indexed, earlier.length, stored);
+  return saveTurn(q, out, library, indexed, total, stored);
 }
 
 function checkedNotes(q: TalkRequest, out: Awaited<ReturnType<typeof converse>>, library: Entry[], indexed: Map<number, Entry>) {
@@ -272,7 +339,7 @@ function checkedNotes(q: TalkRequest, out: Awaited<ReturnType<typeof converse>>,
     fix,
     rewrites,
     fresh,
-    mine: [...hits].map(([e, why]) => ({ id: e.row.id, why })),
+    mine: [...hits].map(([e, why]) => ({ id: e.row.id, why, ...(e.row.targetVersion && { version: e.row.targetVersion }) })),
     searched: indexed.size,
     total: library.length,
   };
@@ -282,22 +349,20 @@ function checkedNotes(q: TalkRequest, out: Awaited<ReturnType<typeof converse>>,
 
 async function saveTurn(
   q: TalkRequest, out: Awaited<ReturnType<typeof converse>>, library: Entry[], indexed: Map<number, Entry>,
-  earlierCount: number, stored?: TurnRow,
+  earlierCount: number, stored: TurnRow,
 ): Promise<TalkTurn | null> {
   const { notes: checked, hits, shown, open } = checkedNotes(q, out, library, indexed);
-  const notes: TalkNotes = stored
-    ? { ...JSON.parse(stored.notes), ...checked, coachingPending: undefined, coachingFailure: undefined }
-    : checked;
+  const notes: TalkNotes = { ...JSON.parse(stored.notes), ...checked, coachingPending: undefined, coachingFailure: undefined };
   const candidate = notes.reviewCandidate ?? chooseReview(library, earlierCount + 1);
   const scene = out.scene?.trim();
   if (candidate && !shown.has(candidate.id) && scene && out.reply.includes(scene) && reader(library).veil(scene, library.filter(isMasked)) === scene) {
-    notes.review = { id: candidate.id, scene };
+    notes.review = { id: candidate.id, scene, version: candidate.version };
   }
   const now = Date.now();
-  const thread = stored?.thread ?? q.thread ?? now;
+  const thread = stored.thread;
   const asked = { kind: "looked_up", text: q.said, feedback: JSON.stringify({ turn: earlierCount + 1, thread }), createdAt: now };
   const row = await db.transaction(async (tx) => {
-    if (stored) {
+    {
       const current = await tx.select().from(talkTurns).where(eq(talkTurns.id, stored.id)).get();
       if (!current) return null;
       const previous = JSON.parse(current.notes) as TalkNotes;
@@ -306,20 +371,21 @@ async function saveTurn(
     // An entry may have been deleted while the model was answering. Recheck
     // under the write transaction so its old hit cannot recreate a timeline
     // or make an otherwise valid conversation fail its foreign-key check.
-    const liveIds = new Set((await tx.select({ id: expressions.id }).from(expressions).all()).map((entry) => entry.id));
+    const relevant = [...hits.keys()].map((e) => e.row.id).concat([notes.review?.id, notes.reviewCandidate?.id].filter((id): id is number => id != null));
+    const live = relevant.length ? await tx.select({ id: expressions.id, version: expressions.targetVersion }).from(expressions).where(inArray(expressions.id, relevant)).all() : [];
+    const liveIds = new Set(live.filter((r) => library.find((e) => e.row.id === r.id)?.row.targetVersion === r.version).map((r) => r.id));
     const liveHits = [...hits.keys()].filter((entry) => liveIds.has(entry.row.id));
     notes.mine = notes.mine.filter((hit) => liveIds.has(hit.id));
     if (notes.review && !liveIds.has(notes.review.id)) delete notes.review;
     if (notes.reviewCandidate && !liveIds.has(notes.reviewCandidate.id)) delete notes.reviewCandidate;
+    await recordDay(tx, now, "looked_up");
     await tx.insert(encounters).values(
       liveHits.length > 0
-        ? liveHits.map((e) => ({ ...asked, expressionId: e.row.id, cue: isMasked(e) && !open ? "masked" : null }))
-        : [{ ...asked, expressionId: null, cue: null }],
+        ? liveHits.map((e) => ({ ...asked, expressionId: e.row.id, targetVersion: e.row.targetVersion, cue: isMasked(e) && !open ? "masked" : null }))
+        : [{ kind: "looked_up", text: "", expressionId: null, createdAt: now }],
     );
     const values = { reply: out.reply, notes: JSON.stringify(notes) };
-    return stored
-      ? tx.update(talkTurns).set(values).where(eq(talkTurns.id, stored.id)).returning().get()
-      : tx.insert(talkTurns).values({ ...values, thread, said: q.said, createdAt: now }).returning().get();
+    return tx.update(talkTurns).set(values).where(eq(talkTurns.id, stored.id)).returning().get();
   });
   return row ? present(row, await loadLibrary(), shown, true) : null;
 }
@@ -333,13 +399,18 @@ async function saveReply(q: TalkRequest, reply: string, library: Entry[], earlie
   return db.transaction(async (tx) => {
     // A conversation deleted while the model was replying stays deleted.
     if (q.thread != null && !await tx.select({ id: talkTurns.id }).from(talkTurns).where(eq(talkTurns.thread, q.thread)).limit(1).get()) return null;
-    return tx.insert(talkTurns).values({ thread: q.thread ?? now, said: q.said, reply, notes: JSON.stringify(notes), createdAt: now }).returning().get();
+    if (q.messageId) {
+      const receipt = await tx.insert(talkReceipts).values({ id: q.messageId }).onConflictDoNothing().returning().get();
+      if (!receipt) return null;
+    }
+    const thread = q.thread ?? (await tx.insert(talkThreads).values({}).returning().get()).id;
+    return tx.insert(talkTurns).values({ thread, messageId: q.messageId, said: q.said, reply, notes: JSON.stringify(notes), createdAt: now }).returning().get();
   });
 }
 
 const coachingJobs = new Map<number, Promise<TalkTurn | null>>();
 
-async function finishCoaching(row: TurnRow, material: ConversationMaterial, library: Entry[], earlierCount: number, signal?: AbortSignal, beforeSave?: Promise<number | null>) {
+async function finishCoaching(row: TurnRow, material: ConversationMaterial, library: Entry[], indexed: Map<number, Entry>, earlierCount: number, signal?: AbortSignal, beforeSave?: Promise<number | null>) {
   const pending = coachingJobs.get(row.id);
   if (pending) return pending;
   const work = (async () => {
@@ -350,7 +421,7 @@ async function finishCoaching(row: TurnRow, material: ConversationMaterial, libr
       const out = await coachConversation({ ...material, reply }, { signal });
       const attempt = await beforeSave;
       if (attempt) row.notes = JSON.stringify({ ...JSON.parse(row.notes), reviewAttempt: attempt });
-      return await saveTurn({ said: row.said, thread: row.thread }, { ...out, reply: row.reply }, library, buildIndex(library).indexed, earlierCount, row);
+      return await saveTurn({ said: row.said, thread: row.thread }, { ...out, reply: row.reply }, library, indexed, earlierCount, row);
     } catch (err) {
       const reason = failureReason(err) as TalkFailure["reason"];
       console.warn(`[expressions] coaching #${row.id} failed: ${reason}`);
@@ -365,7 +436,7 @@ async function finishCoaching(row: TurnRow, material: ConversationMaterial, libr
   try { return await work; } finally { coachingJobs.delete(row.id); }
 }
 
-async function streamTurn(q: TalkRequest, material: ConversationMaterial, library: Entry[], earlier: TurnRow[], opts: { onDelta: (text: string) => Promise<void>; signal?: AbortSignal }) {
+async function streamTurn(q: TalkRequest, material: ConversationMaterial, library: Entry[], indexed: Map<number, Entry>, earlier: TurnRow[], total: number, opts: TalkOptions) {
   const signal = opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(45_000)]) : AbortSignal.timeout(45_000);
   const masked = library.filter(isMasked);
   const mask = reader(library);
@@ -395,7 +466,7 @@ async function streamTurn(q: TalkRequest, material: ConversationMaterial, librar
   }
   // Once the reply is complete it is durable. The auxiliary call may fail or
   // be interrupted; reopening the thread offers a retry on this same row.
-  const row = await saveReply(q, reply, library, earlier.length);
+  const row = await saveReply(q, reply, library, total);
   if (!row) return null;
   const previous = earlier.at(-1);
   const review = previous && (JSON.parse(previous.notes) as TalkNotes).review;
@@ -406,9 +477,9 @@ async function streamTurn(q: TalkRequest, material: ConversationMaterial, librar
       console.warn(`[expressions] review failed: ${failureReason(err)}`);
       return null;
     });
-    return finishCoaching(row, material, library, earlier.length, signal, reviewWork);
+    return finishCoaching(row, material, library, indexed, total, signal, reviewWork);
   }
-  return finishCoaching(row, material, library, earlier.length, signal);
+  return finishCoaching(row, material, library, indexed, total, signal);
 }
 
 /** A missing thread is refused before opening an SSE response. */
@@ -421,13 +492,12 @@ export async function retryCoaching(id: number, signal?: AbortSignal): Promise<T
   const library = await loadLibrary();
   const notes = JSON.parse(row.notes) as TalkNotes;
   if (!notes.coachingPending && !notes.coachingFailure) return present(row, library, new Set(), false);
-  const earlier = await db.select().from(talkTurns).where(eq(talkTurns.thread, row.thread)).orderBy(asc(talkTurns.id)).all();
-  const before = earlier.filter((t) => t.id < row.id);
-  const told = before.length > TALK_HISTORY_TURNS ? [before[0], ...before.slice(1 - TALK_HISTORY_TURNS)] : before;
+  const { turns: told, total } = await history(row.thread, row.id);
   const mask = reader(library);
   const hidden = library.filter(isMasked);
-  const material = { said: row.said, history: told.map((t) => ({ said: mask.veil(t.said, hidden), reply: mask.veil(t.reply, hidden) })), index: buildIndex(library).index, reviewCue: notes.reviewCandidate && mask.veil(notes.reviewCandidate.cue, hidden) };
-  return finishCoaching(row, material, library, before.length, signal);
+  const { index, indexed } = buildIndex(library, row.said);
+  const material = { said: row.said, history: told.map((t) => ({ said: mask.veil(t.said, hidden), reply: mask.veil(t.reply, hidden) })), index, reviewCue: notes.reviewCandidate && mask.veil(notes.reviewCandidate.cue, hidden) };
+  return finishCoaching(row, material, library, indexed, total, signal);
 }
 
 /** A conversation as the library stands now, oldest turn first. Null when there is none. */
@@ -445,17 +515,22 @@ export async function threads(): Promise<TalkThread[]> {
     from talk_turns t
     join (select min(id) as first, count(*) as turns, max(created_at) as updated_at from talk_turns group by thread) c on c.first = t.id
     order by c.updated_at desc, t.thread desc`);
-  const library = await loadLibrary();
+  const library = await loadLibrary(db, true);
   const { veil } = reader(library);
   const masked = library.filter(isMasked);
   return rows.map(({ said, ...rest }) => ({ ...rest, title: veil(said, masked).replace(/\s+/g, " ").slice(0, 60) }));
 }
 
 /** Forgets a conversation. The rows its turns left on the timelines stay: they are what happened. */
-export const dropThread = (thread: number) => db.delete(talkTurns).where(eq(talkTurns.thread, thread));
+export const dropThread = (thread: number) => db.transaction(async (tx) => {
+  await tx.delete(talkTurns).where(eq(talkTurns.thread, thread));
+  await tx.delete(talkThreads).where(eq(talkThreads.id, thread));
+});
 
 /** Speech reads the reply as it may be shown now, including later masks. */
 export async function speechText(turnId: number): Promise<string | null> {
   const row = await db.select().from(talkTurns).where(eq(talkTurns.id, turnId)).get();
-  return row ? present(row, await loadLibrary(), new Set(), false).reply : null;
+  if (!row) return null;
+  const active = await loadLibrary(db, true);
+  return reader(active).veil(row.reply, active.filter(isMasked));
 }

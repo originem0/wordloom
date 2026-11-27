@@ -1,7 +1,7 @@
 import { aiCardsResponseSchema, aiDeepLayerSchema } from "../../shared/validation.js";
 import {
   Semaphore,
-  getSetting,
+  getProviderCredentials,
   runWithModelFallback,
   runJsonCall,
   runTextCall,
@@ -30,11 +30,11 @@ const openaiDeepSemaphore = new Semaphore(2);   // deep analysis only
 // ---------------------------------------------------------------------------
 
 async function getOpenaiConfig(): Promise<{ apiKey: string; chatUrl: string }> {
-  const apiKey = (await getSetting("openai_api_key")).trim();
+  const { apiKey, baseUrl: address } = await getProviderCredentials("openai");
   if (!apiKey)
     throw new Error("OpenAI-compatible API Key not configured. Set it in AI Providers.");
 
-  const baseUrl = (await getSetting("openai_base_url")).trim().replace(/\/+$/, "");
+  const baseUrl = address.replace(/\/+$/, "");
   if (!baseUrl)
     throw new Error("OpenAI-compatible Base URL not configured. Set it in AI Providers.");
 
@@ -54,6 +54,7 @@ async function openaiChat(opts: {
   const { apiKey, chatUrl } = await getOpenaiConfig();
 
   const res = await fetch(chatUrl, {
+      redirect: "error",
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -94,7 +95,7 @@ async function openaiChat(opts: {
 // ---------------------------------------------------------------------------
 
 export async function openaiGenerateCards(
-  words: string[],
+  words: string[], signal?: AbortSignal,
 ): Promise<{ success: ParsedCard[]; failed: { word: string; error: string }[] }> {
   await acquireSemaphore(openaiSemaphore);
   try {
@@ -103,7 +104,7 @@ export async function openaiGenerateCards(
       primaryKeys: ["cards_openai_model"],
       primaryFallback: "",
       fallbackKeys: ["cards_openai_fallback_model"],
-      label: "generateCards (OpenAI)",
+      label: "generateCards (OpenAI)", signal,
       run: async (model, signal) => {
         const text = await openaiChat({
           signal,
@@ -176,7 +177,7 @@ export async function openaiGenerateCards(
 // ---------------------------------------------------------------------------
 
 export async function openaiGenerateDeepLayer(
-  word: string,
+  word: string, signal?: AbortSignal,
 ): Promise<{
   familyComparison: unknown[];
   familyBoundaryNote?: string;
@@ -192,7 +193,7 @@ export async function openaiGenerateDeepLayer(
       primaryKeys: ["deep_openai_model"],
       primaryFallback: "",
       fallbackKeys: ["deep_openai_fallback_model"],
-      label: "generateDeepLayer (OpenAI)",
+      label: "generateDeepLayer (OpenAI)", signal,
       timeoutMultiplier: 2,
       run: async (model, signal) => {
         const text = await openaiChat({
@@ -319,6 +320,7 @@ export async function openaiTextStream(opts: StreamCall): Promise<string> {
     run: async (model, signal) => {
       const { apiKey, chatUrl } = await getOpenaiConfig();
       const res = await fetch(chatUrl, {
+      redirect: "error",
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({ model, stream: true, messages: [{ role: "system", content: opts.system }, { role: "user", content: opts.user }] }),
@@ -339,7 +341,8 @@ export async function openaiTextStream(opts: StreamCall): Promise<string> {
       // Some compatible gateways ignore stream:true and return the normal
       // envelope. It is still the same call and model, just one complete delta.
       if (res.headers.get("content-type")?.includes("application/json")) {
-        const body = await res.json() as { choices?: { message?: { content?: string } }[] };
+        const body = await res.json() as { choices?: { finish_reason?: string; message?: { content?: string } }[] };
+        if (body.choices?.[0]?.finish_reason !== "stop") throw new Error("Incomplete reply");
         const content = body.choices?.[0]?.message?.content;
         if (typeof content !== "string" || !content.trim()) throw new Error("Missing reply");
         if (content.length > 8000) throw new Error("Reply too long");
@@ -353,7 +356,7 @@ export async function openaiTextStream(opts: StreamCall): Promise<string> {
         const packet = JSON.parse(frame.data) as { error?: unknown; choices?: { delta?: { content?: unknown }; finish_reason?: string | null }[] };
         if (packet.error) throw new Error("Provider stream failed");
         const choice = packet.choices?.[0];
-        if (choice?.finish_reason === "length" || choice?.finish_reason === "content_filter") throw new Error("Incomplete reply");
+        if (choice?.finish_reason && choice.finish_reason !== "stop") throw new Error("Incomplete reply");
         if (choice?.finish_reason) finished = true;
         const delta = choice?.delta?.content;
         if (typeof delta !== "string" || !delta) continue;

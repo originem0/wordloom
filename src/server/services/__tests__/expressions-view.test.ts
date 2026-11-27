@@ -9,7 +9,7 @@ let nextId = 1;
 const encounter = (expressionId: number, kind: string, createdAt: number, extra: Partial<EncounterRow> = {}): EncounterRow => ({
   id: nextId++, expressionId, kind, text: "", textBefore: null, myAttempt: null,
   sourceType: null, sourceTitle: null, sourceLocator: null, outcome: null, cue: null, feedback: null,
-  occurredAt: null, createdAt, ...extra,
+  targetVersion: 0, occurredAt: null, createdAt, ...extra,
 });
 
 /** An entry met five days before T0; in 想用 since `activeSince` unless that is null. */
@@ -17,7 +17,7 @@ function entry(id: number, activeSince: number | null, rows: [kind: string, at: 
   const row: ExpressionRow = {
     id, text: `text ${id}`, norm: `text ${id}`, focus: null, intent: "我想说…", intentBy: "self",
     aiIntent: null, gloss: null, note: null, status: activeSince == null ? "seen" : "active", activeSince,
-    nextScene: null, createdAt: T0 - 5 * DAY, updatedAt: T0 - 5 * DAY,
+    focusStart: null, learningHistory: null, targetVersion: 0, nextScene: null, createdAt: T0 - 5 * DAY, updatedAt: T0 - 5 * DAY,
   };
   const timeline = [encounter(id, "met", T0 - 5 * DAY), ...rows.map(([kind, at, extra]) => encounter(id, kind, at, extra))];
   // `folded` and `queued` are what loadLibrary derives; testableAt works them out for its own moment.
@@ -88,19 +88,19 @@ describe("what an entry shows", () => {
     expect(toSummary({ ...entry(3, T0), folded: graduated })).toMatchObject({ masked: false, text: "text 3", graduated: true, produced: true });
   });
 
-  it("can be told to show a masked entry this once", () => {
+  it("can be told to show a masked entry this once", async () => {
     const e = entry(1, T0, [["attempt", T0 + DAY, { cue: "need", outcome: "fail", text: "my sentence", feedback: JSON.stringify({ prompt: "p", status: "done" }) }]]);
-    expect(toDetail(e).timeline[1]).toMatchObject({ kind: "attempt", cue: "need", outcome: "fail", text: null, feedback: null });
-    const shown = toDetail(e, true);
+    expect((await toDetail(e)).timeline[1]).toMatchObject({ kind: "attempt", cue: "need", outcome: "fail", text: null, feedback: null });
+    const shown = await toDetail(e, true);
     expect(shown).toMatchObject({ masked: false, text: "text 1" });
     expect(shown.timeline[1]).toMatchObject({ text: "my sentence", feedback: { prompt: "p", status: "done" } });
   });
 
-  it("gives feedback for attempts only, and none when it cannot be read", () => {
+  it("gives feedback for attempts only, and none when it cannot be read", async () => {
     const e = entry(1, null, [
       ["looked_up", T0, { feedback: JSON.stringify({ turn: 1, thread: T0 }) }],
       ["attempt", T0 + 1, { cue: "need", feedback: "{not json" }],
     ]);
-    expect(toDetail(e).timeline.map((r) => r.feedback)).toEqual([null, null, null]);
+    expect((await toDetail(e)).timeline.map((r) => r.feedback)).toEqual([null, null, null]);
   });
 });

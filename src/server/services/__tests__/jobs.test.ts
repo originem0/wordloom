@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../../db/index.js";
 import { jobs } from "../../db/schema.js";
-import { createJob, runJob, failOrphanedJobs, setJobCancelled } from "../jobs.js";
+import { createJob, claimJob, runJob, failOrphanedJobs, setJobCancelled, setJobRunning } from "../jobs.js";
 
 async function read(id: string) {
   const row = await db.select().from(jobs).where(eq(jobs.id, id)).get();
@@ -19,6 +19,28 @@ afterEach(() => {
 });
 
 describe("runJob", () => {
+  it("cancels work claimed by a batch and leaves an independently started deep job running", async () => {
+    const batch = await createJob("deep-batch", {});
+    await setJobRunning(batch);
+    const own = await claimJob("deep", "deep:1", { id: 1 }, batch);
+    const independent = await claimJob("deep", "deep:2", { id: 2 });
+    expect(await claimJob("deep", "deep:2", { id: 2 }, batch)).toEqual({ id: independent.id, created: false });
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    const working = runJob(own.id, async (signal) => {
+      started();
+      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+      return {};
+    });
+    await ready;
+    await setJobCancelled(batch);
+    await working;
+    expect((await read(batch)).status).toBe("cancelled");
+    expect((await read(own.id)).status).toBe("cancelled");
+    expect((await read(independent.id)).status).toBe("queued");
+    await expect(claimJob("deep", "deep:3", { id: 3 }, batch)).rejects.toThrow("Batch stopped");
+  });
+
   it("records the result of work that succeeds", async () => {
     const id = await createJob("cards", { words: ["a"] });
     await runJob(id, async () => ({ success: [1], failed: [] }));

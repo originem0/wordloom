@@ -25,8 +25,9 @@
 //   prompt       what the learner was shown
 //   answer       what they wrote
 //   used         whether a careful reader says the answer uses the target
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 const [mode, file] = process.argv.slice(2);
@@ -37,13 +38,22 @@ if ((mode !== "recall" && mode !== "judge") || !file) {
 // Checked before anything of the app is imported: importing it opens the
 // database and migrates it, and libsql creates a file that is not there.
 const copy = (process.env.DATABASE_URL ?? "").replace(/^file:/, "");
-if (!copy || resolve(copy).toLowerCase() === resolve("data/app.db").toLowerCase()) {
+if (!process.env.DATABASE_URL?.startsWith("file:") || !copy || resolve(copy).toLowerCase() === resolve("data/app.db").toLowerCase()) {
   console.error("Set DATABASE_URL to a copy of the database (file:<path>), not data/app.db: an evaluation writes rows.");
   process.exit(1);
 }
 if (!existsSync(copy)) {
   console.error(`database not found: ${resolve(copy)}`);
   process.exit(1);
+}
+
+if (existsSync("data/app.db")) {
+  const live = statSync("data/app.db", { bigint: true });
+  const target = statSync(copy, { bigint: true });
+  if (live.dev === target.dev && live.ino === target.ino) {
+    console.error("Evaluation requires a separate database file.");
+    process.exit(1);
+  }
 }
 
 const recallCase = z.object({ need: z.string().trim().min(1), attempt: z.string().optional(), expect: z.array(z.union([z.number().int(), z.string().trim().min(1)])) });
@@ -103,10 +113,11 @@ async function recall(): Promise<number> {
   const n = { failed: 0, whole: 0, part: 0, missed: 0, quiet: 0, noisy: 0, wanted: 0, found: 0, extra: 0 };
   for (const [i, c] of cases.entries()) {
     // No thread: every case opens a conversation, so none is answered in the light of another.
-    const out = await timed(() => talk({ said: c.need }));
-    if (!out || "failed" in out) {
+    n.wanted += wanted[i].length;
+    const out = await timed(() => talk({ said: c.need, messageId: randomUUID() }, { onDelta: async () => {} })).catch(() => null);
+    if (!out || "failed" in out || out.coachingFailure) {
       n.failed++;
-      console.log(`${i + 1}. FAILED  ${c.need}  (no answer${out ? `: ${out.failed}` : ""}, ${last()})`);
+      console.log(`${i + 1}. FAILED  ${c.need}  (no answer${out ? `: ${"failed" in out ? out.failed : out.coachingFailure}` : ""}, ${last()})`);
       continue;
     }
     const got = out.mine.map((h) => h.expression.id);
@@ -115,7 +126,6 @@ async function recall(): Promise<number> {
     const found = wanted[i].length - missing.length;
     const verdict = wanted[i].length === 0 ? (got.length ? "noisy" : "quiet") : missing.length === 0 ? "whole" : found ? "part" : "missed";
     n[verdict]++;
-    n.wanted += wanted[i].length;
     n.found += found;
     n.extra += extra.length;
     console.log(
@@ -132,7 +142,10 @@ async function recall(): Promise<number> {
   console.log(`expecting entries: ${n.whole} whole, ${n.part} in part, ${n.missed} missed; expected entries that came back: ${share(n.found, n.wanted)}`);
   console.log(`expecting none: ${n.quiet} came back empty, ${n.noisy} did not`);
   console.log(`hits beyond what was expected: ${n.extra} (not wrong by themselves: read them)`);
-  return n.failed;
+  console.log(`reply and coaching availability: ${share(cases.length - n.failed, cases.length)}`);
+  const negative = cases.filter((c) => c.expect.length === 0).length;
+  console.log(`false positives on negative cases: ${share(n.noisy, negative)}`);
+  return n.failed ? 2 : Number(n.wanted !== n.found || n.extra > 0);
 }
 
 async function judged(): Promise<number> {
@@ -140,6 +153,8 @@ async function judged(): Promise<number> {
   const { judge } = await import("../src/server/services/expressions-ai.js");
   const n = { failed: 0, agreed: 0, used: 0, usedCalledMissed: 0, unused: 0, unusedCalledUsed: 0 };
   for (const [i, c] of cases.entries()) {
+    if (c.used) n.used++;
+    else n.unused++;
     let out;
     try {
       out = await timed(() => judge({ text: c.text, focus: c.focus ?? null, prompt: c.prompt, answer: c.answer }));
@@ -148,8 +163,6 @@ async function judged(): Promise<number> {
       console.log(`${i + 1}. FAILED  ${c.answer}  (${err instanceof Error ? err.message : String(err)}, ${last()})`);
       continue;
     }
-    if (c.used) n.used++;
-    else n.unused++;
     if (out.used === c.used) n.agreed++;
     else if (c.used) n.usedCalledMissed++;
     else n.unusedCalledUsed++;
@@ -160,13 +173,13 @@ async function judged(): Promise<number> {
   }
   const answered = cases.length - n.failed;
   console.log(`\n${cases.length} cases, ${n.failed} without a judgement`);
-  console.log(`agrees with you: ${share(n.agreed, answered)}`);
+  console.log(`availability: ${share(answered, cases.length)}; all-case agreement: ${share(n.agreed, cases.length)}`);
   console.log(`uses the target, judged as not: ${share(n.usedCalledMissed, n.used)}  <- what makes a user stop trusting the count`);
   console.log(`does not use it, judged as used: ${share(n.unusedCalledUsed, n.unused)}`);
-  return n.failed;
+  return n.failed ? 2 : Number(n.agreed !== cases.length);
 }
 
 const failed = await (mode === "recall" ? recall() : judged());
 if (took.length) console.log(latency());
 // The database client keeps the process alive.
-process.exit(failed && failed === took.length ? 1 : 0);
+process.exit(failed);

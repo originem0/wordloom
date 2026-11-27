@@ -15,13 +15,13 @@ import { app } from "../../app.js";
 import { db } from "../../db/index.js";
 import { cards } from "../../db/schema.js";
 
-const HOST = "wordloom.test";
+const HOST = "localhost";
 
-function postDeep(id: number) {
-  return app.request(`/api/cards/${id}/deep`, {
+function postDeep(id: number, query = "") {
+  return app.request(`https://${HOST}/api/cards/${id}/deep${query}`, {
     method: "POST",
-    headers: { host: HOST, origin: `https://${HOST}`, "x-real-ip": "203.0.113.9" },
-  });
+    headers: { host: HOST, origin: `https://${HOST}` },
+  }, { incoming: { socket: { remoteAddress: "127.0.0.1" } } });
 }
 
 async function seedCard(word: string) {
@@ -66,7 +66,11 @@ describe("POST /api/cards/:id/deep persistence", () => {
   });
 
   it("returns the decoded deep layer, note included, to the client", async () => {
-    mockDeep.mockResolvedValue(DEEP);
+    const scene = {
+      coreSchema: "blockage", coreImageText: "倒下的树挡住了一半车道，车流慢了下来。",
+      coreImageExample: "The fallen tree **impeded** traffic.",
+    };
+    mockDeep.mockResolvedValue({ ...DEEP, schemaAnalysis: scene });
     const card = await seedCard("impede");
 
     const body = (await (await postDeep(card.id)).json()) as {
@@ -74,7 +78,7 @@ describe("POST /api/cards/:id/deep persistence", () => {
       familyComparison: unknown[];
     };
     expect(body.schemaAnalysis.familyBoundaryNote).toBe("hinder is slower than block");
-    expect(body.schemaAnalysis.coreSchema).toBe("blockage");
+    expect(body.schemaAnalysis).toMatchObject(scene);
     expect(body.familyComparison).toHaveLength(1);
   });
 
@@ -99,6 +103,25 @@ describe("POST /api/cards/:id/deep persistence", () => {
     });
   });
 
+  it("keeps a legacy empty shell retryable after an empty provider result", async () => {
+    const card = await seedCard("retryable");
+    await db.update(cards).set({ familyComparison: "[]", boundaryTests: "[]", schemaAnalysis: '{"coreSchema":"none"}' }).where(eq(cards.id, card.id));
+    mockDeep.mockResolvedValueOnce({}).mockResolvedValueOnce(DEEP);
+    expect((await postDeep(card.id)).status).toBe(502);
+    expect((await postDeep(card.id)).status).toBe(200);
+    expect(mockDeep).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers repair when the only family row is a word and the exercise has no answers", async () => {
+    const card = await seedCard("hollow");
+    await db.update(cards).set({ familyComparison: '[{"word":"hollow"}]', boundaryTests: '[{"sentence":"The tree was ___."}]' }).where(eq(cards.id, card.id));
+    const res = await app.request("http://localhost/api/cards/missing-deep", { headers: { host: HOST } }, { incoming: { socket: { remoteAddress: "127.0.0.1" } } });
+    expect(await res.json()).toMatchObject({ cards: [{ id: card.id, word: "hollow" }] });
+    mockDeep.mockResolvedValue(DEEP);
+    expect((await postDeep(card.id)).status).toBe(200);
+    expect(mockDeep).toHaveBeenCalledTimes(1);
+  });
+
   it("does not call the model again once a deep layer is stored", async () => {
     mockDeep.mockResolvedValue(DEEP);
     const card = await seedCard("clog");
@@ -106,6 +129,21 @@ describe("POST /api/cards/:id/deep persistence", () => {
     await postDeep(card.id);
     const again = await postDeep(card.id);
     expect(again.status).toBe(200);
+    expect(mockDeep).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares one durable job between simultaneous requests", async () => {
+    const card = await seedCard("concurrent");
+    let complete!: (result: typeof DEEP) => void;
+    mockDeep.mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
+    const pair = await Promise.all([postDeep(card.id, "?async=1"), postDeep(card.id, "?async=1")]);
+    expect(pair.map((r) => r.status)).toEqual([202, 202]);
+    const [a, b] = await Promise.all(pair.map(async (r) => await r.json() as { jobId: string }));
+    expect(a.jobId).toEqual(expect.any(String));
+    expect(b.jobId).toBe(a.jobId);
+    await vi.waitFor(() => expect(mockDeep).toHaveBeenCalledTimes(1));
+    complete(DEEP);
+    expect((await postDeep(card.id)).status).toBe(200);
     expect(mockDeep).toHaveBeenCalledTimes(1);
   });
 });

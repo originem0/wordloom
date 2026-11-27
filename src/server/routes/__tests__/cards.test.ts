@@ -31,6 +31,7 @@ function fakeRow(overrides: Partial<CardRow> = {}): CardRow {
   return {
     id: 1,
     word: "test",
+    wordKey: "test",
     ipa: null,
     pos: null,
     cefr: null,

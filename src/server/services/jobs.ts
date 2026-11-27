@@ -1,9 +1,10 @@
 import { randomUUID } from "crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { jobs } from "../db/schema.js";
 
-export type JobType = "cards";
+export type JobType = "cards" | "deep" | "deep-batch";
+const controllers = new Map<string, AbortController>();
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
 // Anything JSON.stringify can take. (The old Record<string, unknown> alias
@@ -44,7 +45,27 @@ export function parseJob(row: typeof jobs.$inferSelect) {
   };
 }
 
+export async function pruneJobs() {
+  await db.delete(jobs).where(lt(jobs.completedAt, Date.now() - 14 * 86_400_000));
+}
+
+export async function claimJob(type: JobType, workKey: string, input: JsonLike, batchId?: string) {
+  await pruneJobs();
+  return db.transaction(async (tx) => {
+    if (batchId) {
+      const batch = await tx.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, batchId)).get();
+      if (batch?.status !== "running") throw new Error("Batch stopped");
+    }
+    const active = await tx.select({ id: jobs.id }).from(jobs).where(eq(jobs.workKey, workKey)).get();
+    if (active) return { id: active.id, created: false };
+    const id = randomUUID(), ts = now();
+    await tx.insert(jobs).values({ id, type, workKey, status: "queued", input: serializeJson(batchId ? { ...input, batchId } : input), createdAt: ts, updatedAt: ts });
+    return { id, created: true };
+  });
+}
+
 export async function createJob(type: JobType, input: JsonLike): Promise<string> {
+  await pruneJobs();
   const id = randomUUID();
   const ts = now();
   await db.insert(jobs).values({
@@ -72,17 +93,17 @@ export async function setJobRunning(jobId: string): Promise<boolean> {
   const rows = await db
     .update(jobs)
     .set({ status: "running", updatedAt: ts, startedAt: ts })
-    .where(and(eq(jobs.id, jobId), inArray(jobs.status, ACTIVE)))
+    .where(and(eq(jobs.id, jobId), eq(jobs.status, "queued")))
     .returning({ id: jobs.id });
   return rows.length > 0;
 }
 
-export async function setJobDone(jobId: string, result: JsonLike) {
+export async function setJobDone(jobId: string, result: JsonLike, writer: Pick<typeof db, "update"> = db) {
   const ts = now();
-  await db
+  await writer
     .update(jobs)
     .set({
-      status: "done",
+      status: "done", workKey: null,
       result: serializeJson(result),
       error: null,
       updatedAt: ts,
@@ -96,7 +117,7 @@ export async function setJobFailed(jobId: string, error: string) {
   await db
     .update(jobs)
     .set({
-      status: "failed",
+      status: "failed", workKey: null,
       error,
       updatedAt: ts,
       completedAt: ts,
@@ -106,10 +127,15 @@ export async function setJobFailed(jobId: string, error: string) {
 
 export async function setJobCancelled(jobId: string) {
   const ts = now();
-  await db
+  // Cancel work started by this batch in the same statement as its parent.
+  // A job the batch merely joined keeps its original owner.
+  const ownedByBatch = and(eq(jobs.type, "deep"), sql`CASE WHEN json_valid(${jobs.input}) THEN json_extract(${jobs.input}, '$.batchId') END = ${jobId}`);
+  const stopped = await db
     .update(jobs)
-    .set({ status: "cancelled", updatedAt: ts, completedAt: ts })
-    .where(eq(jobs.id, jobId));
+    .set({ status: "cancelled", workKey: null, updatedAt: ts, completedAt: ts })
+    .where(and(or(eq(jobs.id, jobId), ownedByBatch), inArray(jobs.status, ACTIVE)))
+    .returning({ id: jobs.id });
+  for (const job of stopped) controllers.get(job.id)?.abort();
 }
 
 /**
@@ -121,19 +147,23 @@ export async function setJobCancelled(jobId: string) {
  * therefore caught and logged; the row is reconciled by failOrphanedJobs() on
  * the next start.
  */
-export async function runJob(jobId: string, work: () => Promise<JsonLike>): Promise<void> {
+export async function runJob(jobId: string, work: (signal: AbortSignal) => Promise<JsonLike>): Promise<void> {
+  const controller = new AbortController();
+  controllers.set(jobId, controller);
   try {
     if (!(await setJobRunning(jobId))) return;
     let result: JsonLike;
     try {
-      result = await work();
+      result = await work(controller.signal);
     } catch (err) {
       await setJobFailed(jobId, err instanceof Error ? err.message : "Job failed");
       return;
     }
     await setJobDone(jobId, result);
   } catch (err) {
-    console.error(`[jobs] could not record outcome of job ${jobId}:`, err);
+    console.error(`[jobs] could not record outcome of job ${jobId}:`, err instanceof Error ? err.name : "Error");
+  } finally {
+    controllers.delete(jobId);
   }
 }
 
@@ -143,11 +173,12 @@ export async function runJob(jobId: string, work: () => Promise<JsonLike>): Prom
  * clients get an answer instead of waiting forever.
  */
 export async function failOrphanedJobs(): Promise<number> {
+  await pruneJobs();
   const ts = now();
   const rows = await db
     .update(jobs)
     .set({
-      status: "failed",
+      status: "failed", workKey: null,
       error: "Interrupted by a server restart — please try again",
       updatedAt: ts,
       completedAt: ts,

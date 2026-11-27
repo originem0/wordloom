@@ -49,12 +49,12 @@ export const openThread = (thread: number | null) => useOpenThread.setState((s) 
  * above it is offered as 上文. Nothing selected: the whole box is the text.
  */
 export function readBox(box: string, start: number, end: number): { text: string; focus?: string; before?: string } {
-  const whole = box.trim();
-  const picked = box.slice(start, end).trim();
-  if (!picked || picked === whole) return { text: whole };
-  if (!whole.includes("\n")) return { text: whole, focus: picked };
+  const whole = box;
+  const picked = box.slice(start, end);
+  if (!picked.trim() || picked === whole) return { text: whole };
+  if (!whole.trim().includes("\n")) return { text: whole, focus: picked };
   const above = box.slice(0, start).split("\n").slice(0, -1);
   // No longer than the server takes, or a long paragraph the user never typed
   // would refuse the save. The end is kept: it is what the selection follows.
-  return { text: picked, before: (above.reverse().find((line) => line.trim())?.trim() ?? "").slice(-EXPRESSION_LIMITS.text) };
+  return { text: picked, before: (above.reverse().find((line) => line.trim()) ?? "").slice(-EXPRESSION_LIMITS.text) };
 }

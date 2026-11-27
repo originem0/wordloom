@@ -9,7 +9,7 @@ import { useAppStore } from "@/client/store";
 let isAdmin: boolean;
 let saved: Record<string, string>;
 let queryError: Error | null;
-const save = vi.fn(async (pair: { key: string; value: string }) => void pair);
+const save = vi.fn(async (update: { key?: string; value?: string; changes?: { key: string; value: string }[] }) => ({ revision: update.changes ? "rev2" : "rev1" }));
 const settingsRead = vi.fn((options?: { enabled?: boolean }) => {
   void options;
   return { data: queryError ? undefined : saved, isLoading: false, error: queryError };
@@ -77,8 +77,8 @@ describe("interface language and AI explanation language", () => {
     expect(screen.getByRole("combobox", { name: "AI Explanation Language" })).toHaveValue("en");
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Settings saved"));
-    expect(save.mock.calls.map(([pair]) => pair)).toContainEqual({ key: "analysis_language", value: "en" });
-    expect(save.mock.calls.some(([pair]) => /ui.?language/i.test(pair.key))).toBe(false);
+    expect(save.mock.calls).toEqual([[{ expectedRevision: "", changes: [{ key: "analysis_language", value: "en" }] }]]);
+    expect(save.mock.calls.some(([pair]) => /ui.?language/i.test(pair.key ?? ""))).toBe(false);
     expect(useAppStore.getState().uiLanguage).toBe("en");
   });
 
@@ -104,8 +104,8 @@ describe("AI provider labels and callbacks", () => {
     expect(screen.getByRole("textbox", { name: "Gemini Base URL" })).toHaveValue("https://typing.example");
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("AI provider settings saved"));
-    expect(save.mock.calls.map(([pair]) => pair)).toContainEqual({ key: "gemini_base_url", value: "https://typing.example" });
-    expect(save.mock.calls.some(([pair]) => /ui.?language/i.test(pair.key))).toBe(false);
+    expect(save.mock.calls).toEqual([[{ expectedRevision: "", changes: [{ key: "gemini_base_url", value: "https://typing.example" }] }]]);
+    expect(save.mock.calls.some(([pair]) => /ui.?language/i.test(pair.key ?? ""))).toBe(false);
     expect(save.mock.calls.some(([pair]) => pair.key === "rime_api_key")).toBe(false);
   });
 

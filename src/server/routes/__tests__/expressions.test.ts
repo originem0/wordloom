@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { runtimeCaching } from "../../../../tools/pwa-cache.js";
 import { format } from "node:util";
 
 // Installed before the app is imported: hono's logger keeps the console.log it
@@ -32,7 +32,7 @@ vi.mock("../../services/ai-router.js", () => ({
 import { eq, sql } from "drizzle-orm";
 import { app } from "../../app.js";
 import { db } from "../../db/index.js";
-import { encounters, expressions, jobs, sessions, settings, talkTurns } from "../../db/schema.js";
+import { encounters, expressionPassageNotes, expressions, jobs, sessions, settings, talkTurns } from "../../db/schema.js";
 import { hashSessionId } from "../../middleware/auth.js";
 import type {
   DuplicateResponse,
@@ -66,7 +66,7 @@ function req(
   const body = init.raw ?? (init.body === undefined ? undefined : JSON.stringify(init.body));
   if (body !== undefined) headers.set("content-type", "application/json");
   const method = init.method ?? (body === undefined ? "GET" : "POST");
-  return app.request(path, { method, headers, body }, init.env);
+  return app.request(`https://${HOST}${path}`, { method, headers, body }, init.env);
 }
 
 async function capture(body: Record<string, unknown>) {
@@ -108,6 +108,69 @@ beforeEach(async () => {
 
 afterEach(() => {
   process.env = { ...originalEnv };
+});
+
+it("returns one new entry and one duplicate for simultaneous captures", async () => {
+  const body = { text: "The tide is turning." };
+  const responses = await Promise.all([capture(body), capture(body)]);
+  expect(responses.map(({ res }) => res.status).sort()).toEqual([201, 409]);
+  expect(await db.select().from(expressions)).toHaveLength(1);
+  expect(await db.select().from(encounters)).toHaveLength(1);
+});
+
+describe("passage notes on the original", () => {
+  const sentence = "🔎 This way, that way.";
+  const second = { start: sentence.lastIndexOf("way"), end: sentence.lastIndexOf("way") + 3 };
+  const first = { start: sentence.indexOf("way"), end: sentence.indexOf("way") + 3 };
+  const content = { body: "这里是另一种办法。", examples: ["Try this way.", "Try another way."] };
+  const edit = (id: number, body: unknown) => req(`/api/expressions/${id}/passage-notes`, { method: "PATCH", body });
+
+  it("anchors repeated words separately and makes retries safe without replacing another editor's work", async () => {
+    const { id, passageNotes } = await entry({ text: sentence, focus: "This" });
+    expect(passageNotes).toEqual([]);
+    const add = { ...second, before: null, after: content };
+    for (const change of [add, add, { ...first, before: null, after: { body: "指眼前的方法", examples: null } }]) {
+      expect((await edit(id, change)).status).toBe(200);
+    }
+    const revised = { body: "补上了上下文", examples: null };
+    expect((await edit(id, { ...second, before: content, after: revised })).status).toBe(200);
+    const stale = await edit(id, { ...second, before: content, after: null });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ code: "PASSAGE_NOTE_CHANGED" });
+    const detail = await detailOf(id);
+    expect(detail.focus).toBe("This");
+    expect(detail.passageNotes).toEqual([{ ...first, body: "指眼前的方法", examples: null }, { ...second, ...revised }]);
+    for (let i = 0; i < 2; i++) expect((await edit(id, { ...second, before: revised, after: null })).status).toBe(200);
+    expect((await detailOf(id)).passageNotes).toHaveLength(1);
+    await req(`/api/expressions/${id}`, { method: "DELETE" });
+    expect(await db.select().from(expressionPassageNotes).where(eq(expressionPassageNotes.expressionId, id))).toHaveLength(0);
+    expect(model).not.toHaveBeenCalled();
+  });
+
+  it("withholds both an annotation and its existence until an explicit reveal", async () => {
+    const { id } = await entry({ text: sentence });
+    const after = { ...content, body: MARKER };
+    await edit(id, { ...second, before: null, after });
+    const list = (await (await req("/api/expressions")).json()) as ExpressionListResponse;
+    expect(list.expressions[0]).not.toHaveProperty("passageNotes");
+    expect((await (await patch(id, { status: "active", intent: "怎样指明另一种办法" })).json())).toMatchObject({ masked: true, passageNotes: [] });
+    expect((await edit(id, { ...second, before: after, after: null })).status).toBe(409);
+    const reveal = await req(`/api/expressions/${id}/reveal`, { body: { cue: "masked" } });
+    expect(await reveal.json()).toMatchObject({ masked: false, passageNotes: [{ ...second, ...after }] });
+    expect((await detailOf(id)).passageNotes).toEqual([]);
+    expect((await metRows(id)).map((r) => r.kind)).toEqual(["met", "reveal"]);
+    expect(printed()).not.toContain(MARKER);
+  });
+
+  it("rejects invalid UTF-16 ranges, blank notes and incomplete example pairs", async () => {
+    const { id } = await entry({ text: sentence });
+    for (const bad of [{ start: 0, end: 1 }, { start: 2, end: 3 }, { start: 7, end: 7 }, { start: 3, end: 85 },
+      { start: -1, end: 5 }, { after: { ...content, body: " " } }, { after: { ...content, examples: ["only one"] } }]) {
+      const res = await edit(id, { ...first, before: null, after: content, ...bad });
+      expect(res.status).toBe(400);
+    }
+    expect((await detailOf(id)).passageNotes).toEqual([]);
+  });
 });
 
 describe("permanently deleting an expression", () => {
@@ -175,7 +238,7 @@ describe("the guard on the expression library", () => {
     });
   const conversations = () => db.select().from(talkTurns).all();
 
-  it("is probed on all twenty-one routes", () => {
+  it("is probed on every expression route", () => {
     expect(routes().map(([method, path]) => `${method} ${path}`).sort()).toEqual([
       "DELETE /api/expressions/1",
       "DELETE /api/expressions/talk/1",
@@ -187,6 +250,7 @@ describe("the guard on the expression library", () => {
       "GET /api/expressions/talk/1",
       "GET /api/expressions/try",
       "PATCH /api/expressions/1",
+      "PATCH /api/expressions/1/passage-notes",
       "POST /api/expressions",
       "POST /api/expressions/1/annotate",
       "POST /api/expressions/1/attempts",
@@ -358,26 +422,20 @@ describe("the guard on the expression library", () => {
     for (const res of answers) expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
-  // no-store does not bind a service worker: a runtimeCaching rule that matched
-  // these paths would keep their answers on the device for as long as the rule
-  // says, signed in or not. Read off the config, so a rule added later is
-  // checked without anyone remembering this file.
-  it("is matched by no cache rule of the service worker", () => {
-    // What every urlPattern is set to: a regex literal whole, anything else to the end of its line.
-    const value = /urlPattern:\s*(\/(?:\\.|\[(?:\\.|[^\]\\\r\n])*\]|[^/\\[\r\n])+\/[a-z]*|.*)/g;
-    const rules = [...readFileSync("vite.config.ts", "utf8").matchAll(value)].map((m) => m[1]);
-    // Guards the probe itself: the one rule there is, for the public cards.
-    expect(rules).toContain(String.raw`/\/api\/cards(\?.*)?$/`);
-    for (const rule of rules) {
-      // Only a regular expression can be tried here. A rule written as a
-      // function or a string fails this line until the test learns to read it.
-      const [, source, flags] = /^\/(.+)\/([a-z]*)$/.exec(rule) ?? [];
-      expect(source, `a rule this test cannot read: ${rule}`).toBeTruthy();
-      for (const [, path] of routes()) {
-        for (const url of [path, `${path}?page=2`, `${path}/`]) {
-          expect(new RegExp(source, flags).test(`https://${HOST}${url}`), `${rule} keeps ${url}`).toBe(false);
-        }
-      }
+  // Workbox can cache responses even when HTTP says no-store. Exercise its
+  // actual configured matchers, including public detail and private routes.
+  it("caches public card lists and details only", () => {
+    const origin = `https://${HOST}`;
+    const cached = (path: string) => {
+      const url = new URL(path, origin);
+      return runtimeCaching.some(({ urlPattern }) => urlPattern({ url, sameOrigin: url.origin === origin }));
+    };
+    expect(cached("/api/cards?page=2")).toBe(true);
+    expect(cached("/api/cards/42")).toBe(true);
+    expect(cached("/api/cards/missing-deep")).toBe(false);
+    expect(cached("https://other.example/api/cards/42")).toBe(false);
+    for (const [, path] of routes()) {
+      for (const url of [path, `${path}?page=2`, `${path}/`]) expect(cached(url), url).toBe(false);
     }
   });
 });

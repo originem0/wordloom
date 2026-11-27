@@ -31,9 +31,12 @@ const encounterSource = {
   occurredAt: z.number().int().positive().optional(),
 };
 
+const focusRange = z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive() }).refine((r) => r.end > r.start);
+
 export const captureRequestSchema = z.object({
   text: verbatimText,
-  focus: label(EXPRESSION_LIMITS.focus).optional(),
+  focusRange: focusRange.optional(),
+  focus: z.string().max(EXPRESSION_LIMITS.focus).optional(),
   force: z.boolean().optional(),
   found: z.object({ need: said, attempt: attempt.optional() }).optional(),
   ...encounterSource,
@@ -42,17 +45,32 @@ export const captureRequestSchema = z.object({
 export const encounterRequestSchema = z.object({ text: verbatimText, ...encounterSource });
 
 export const expressionPatchSchema = z.object({
+  expectedUpdatedAt: z.number().int().nonnegative().optional(),
+  focusRange: focusRange.nullable().optional(),
   note: z.string().max(EXPRESSION_LIMITS.note).nullable().optional(),
-  focus: label(EXPRESSION_LIMITS.focus).nullable().optional(),
+  focus: z.string().max(EXPRESSION_LIMITS.focus).nullable().optional(),
   intent: label(EXPRESSION_LIMITS.intent).nullable().optional(),
   intentBy: z.enum(["self", "find", "paste", "ai"]).optional(),
   status: z.enum(EXPRESSION_STATUSES).optional(),
   occurredAt: z.number().int().positive().optional(),
 });
 
+const noteText = z.string().trim().min(1).max(EXPRESSION_LIMITS.note);
+const passageContent = z.object({
+  body: noteText,
+  examples: z.tuple([noteText, noteText]).nullable(),
+});
+export const passageNoteChangeSchema = z.object({
+  start: z.number().int().min(0).max(EXPRESSION_LIMITS.text - 1),
+  end: z.number().int().positive().max(EXPRESSION_LIMITS.text),
+  before: passageContent.nullable(),
+  after: passageContent.nullable(),
+}).refine((v) => v.start < v.end && (v.before !== null || v.after !== null));
+
 export const revealRequestSchema = z.object({ cue: z.enum(["masked", "none", "need", "scene"]) });
 
 export const attemptRequestSchema = z.object({
+  targetVersion: z.number().int().nonnegative().optional(),
   text: attempt.refine((s) => s.trim().length > 0),
   cue: z.enum(["none", "need", "scene", "revealed"]),
   // A stored scene, the intent, or in 对谈 the message that found the entry.
@@ -62,6 +80,7 @@ export const attemptRequestSchema = z.object({
 export const overturnRequestSchema = z.object({ outcome: z.enum(["pass", "fail"]) });
 
 export const talkRequestSchema = z.object({
+  messageId: z.string().uuid().optional(),
   said,
   thread: z.number().int().positive().optional(),
 });
@@ -145,7 +164,8 @@ export const aiDeepLayerSchema = z.object({
     .object({
       coreSchema: z.string(),
       coreImageText: z.string().optional(),
-      coreSvg: z.string().optional(),
+      coreImageExample: z.string().trim().optional().catch(undefined),
+      coreSvg: z.string().optional().catch(undefined),
       wordType: z.string().optional().catch(undefined),
       // No longer asked for; tolerated from models that still send them.
       metaphoricalExtensions: z.array(z.string()).optional().catch(undefined),
@@ -192,3 +212,10 @@ export const updateSettingsSchema = z.object({
   key: z.string().min(1),
   value: z.string(),
 });
+
+/** Reject values the SQL driver would round, ignore or turn into an unlimited query. */
+export function pageNumber(raw: string | undefined, fallback: number, max: number): number | null {
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  return /^\d+$/.test(raw) && Number.isSafeInteger(n) && n >= 1 && n <= max ? n : null;
+}

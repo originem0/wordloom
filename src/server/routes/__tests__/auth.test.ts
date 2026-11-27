@@ -77,20 +77,22 @@ describe("auth middleware", () => {
       expect(await res.json()).toEqual({ authenticated: false });
     });
 
-    it("reports admin in dev mode, where writes are not guarded either", async () => {
-      const res = await buildApp().request("/auth/me");
+    it("reports dev admin only to the same local caller that can write", async () => {
+      const app = buildApp();
+      const res = await app.request("/auth/me", { headers: { host: "localhost" } }, { incoming: { socket: { remoteAddress: "127.0.0.1" } } });
       expect(await res.json()).toEqual({ authenticated: true });
+      expect(await (await app.request("/auth/me")).json()).toEqual({ authenticated: false });
     });
   });
 
   describe("login endpoint", () => {
-    it("returns ok in dev mode regardless of token", async () => {
+    it("returns ok to the local developer without a token", async () => {
       const app = buildApp();
       const res = await app.request("/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", host: "localhost" },
         body: JSON.stringify({ token: "anything" }),
-      });
+      }, { incoming: { socket: { remoteAddress: "127.0.0.1" } } });
       expect(res.status).toBe(200);
       expect(await res.json()).toMatchObject({ ok: true });
     });

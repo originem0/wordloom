@@ -48,6 +48,7 @@ function ExpressionsInner() {
   const [focusCue, setFocusCue] = useState(false);
   const all = list.data?.expressions ?? NO_EXPRESSIONS;
   const listStart = useRef<HTMLElement>(null);
+  const opener = useRef<HTMLElement>(null);
   const captureStart = useRef<HTMLDivElement>(null);
   useReadingPosition("expressions", !!list.data);
 
@@ -81,6 +82,7 @@ function ExpressionsInner() {
   const visible = shown.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const starter = all.find((entry) => entry.status === "seen");
   const chooseSaved = starter ? () => {
+    opener.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
     setFocusCue(true);
     setQuery("");
     setLayer("seen");
@@ -138,7 +140,7 @@ function ExpressionsInner() {
                 <p>
                 {needle ? t("没有匹配的条目。", "No matching expressions.") : list.data.expressions.length ? t("这一栏是空的。", "This section is empty.") : t("还没有收下任何表达。", "No expressions saved yet.")}
                 </p>
-                {!needle && layer === "active" && chooseSaved && <Button variant="outline" onClick={chooseSaved}>{t("从见过选一条", "Choose an expression from Seen")}</Button>}
+                {!needle && layer === "active" && starter && <Button variant="outline" onClick={chooseSaved}>{t("从见过选一条", "Choose an expression from Seen")}</Button>}
                 {!all.length && <Button variant="outline" onClick={startCapture}>{t("收下第一条表达", "Save your first expression")}</Button>}
                 {needle && <Button variant="outline" onClick={() => setQuery("")}>{t("清除筛选", "Clear filter")}</Button>}
               </div>
@@ -146,7 +148,7 @@ function ExpressionsInner() {
             <ul className="space-y-2">
               {visible.map((e) => (
                 <li key={e.id}>
-                  <button type="button" className="block w-full rounded-lg border bg-card p-4 text-left shadow-sm transition-shadow hover:shadow-md" onClick={() => { setFocusCue(false); setOpenId(e.id); }}>
+                  <button type="button" className="block w-full rounded-lg border bg-card p-4 text-left shadow-sm transition-shadow hover:shadow-md" onClick={(ev) => { opener.current = ev.currentTarget; setFocusCue(false); setOpenId(e.id); }}>
                     <span className="line-clamp-3 whitespace-pre-line text-sm">
                       <Marked text={titleOf(e)} mark={e.text ? e.focus : null} />
                     </span>
@@ -163,7 +165,12 @@ function ExpressionsInner() {
             </ul>
             <PaginationControls page={page} total={shown.length} pageSize={PAGE_SIZE} noun={t("条", "expressions")} label={t("表达分页", "Expression pages")} onChange={changePage} />
           </section>
-          <ExpressionDetailDialog id={isAdmin ? selectedId : null} glossing={glossing === selectedId} draft={draft} focusCue={linkedId === null && focusCue} onClose={closeDetail} />
+          <ExpressionDetailDialog id={isAdmin ? selectedId : null} glossing={glossing === selectedId} draft={draft} focusCue={linkedId === null && focusCue} onClose={closeDetail} onCloseAutoFocus={(ev) => {
+            // These buttons are not Radix Triggers. Return to the opener, or to
+            // the list when deleting or filtering has removed that button.
+            ev.preventDefault();
+            (opener.current?.isConnected ? opener.current : listStart.current)?.focus({ preventScroll: true });
+          }} />
         </>
       )}
     </div>

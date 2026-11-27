@@ -123,6 +123,35 @@
   }
 }
 
+/* Keep the reading colors on the two detail dialogs, including their toolbars. */
+.word-dialog, .expression-dialog {
+  --background: #f2e8d5;
+  --foreground: #302d26;
+  --card: var(--background);
+  --card-foreground: var(--foreground);
+  --primary: #245c54;
+  --primary-foreground: var(--background);
+  --muted: #ece1cd;
+  --muted-foreground: #625846;
+  --accent: #d8e3d2;
+  --accent-foreground: var(--primary);
+  --secondary: var(--muted);
+  --secondary-foreground: var(--foreground);
+  --border: #c3b8a3;
+  --input: var(--border);
+  --ring: var(--primary);
+  color: var(--foreground);
+}
+.dark :is(.word-dialog, .expression-dialog) {
+  --background: #123438;
+  --foreground: #e0e6d9;
+  --muted: #193e42;
+  --muted-foreground: #adc1b9;
+  --primary: #91d3c3;
+  --accent: #284e4d;
+  --border: #496765;
+}
+
 /* Native disclosures share the reading pages' type and keyboard treatment. */
 .reading-details {
   border-top: 1px solid var(--border);

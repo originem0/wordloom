@@ -1,26 +1,38 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState, type ComponentProps, type RefObject } from "react";
+import { useBeforeUnload, useBlocker } from "react-router-dom";
+import { Loader2, Pencil, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/client/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/client/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/client/components/ui/dialog";
 import { Input } from "@/client/components/ui/input";
-import { useAnnotate, useDeleteExpression, useExpression, usePatchExpression, useReveal } from "@/client/hooks/useExpressions";
+import { useAnnotate, useDeleteExpression, useExpression, usePatchExpression, useReveal, useWritePassageNote } from "@/client/hooks/useExpressions";
 import { ApiError } from "@/client/lib/api";
 import {
-  EXPRESSION_LIMITS, type Cue, type EncounterKind, type EncounterView, type ExpressionDetail, type ExpressionPatch, type IntentBy,
+  EXPRESSION_LIMITS, type Cue, type EncounterKind, type EncounterView, type ExpressionDetail, type ExpressionPatch, type IntentBy, type PassageNoteChange,
 } from "@/shared/expressions";
 import { AREA_CLASS, sourceLabel, verdictLabel, day } from "./shared";
 import { errorMessage, useI18n } from "@/client/lib/i18n";
+import { ExpressionNotes } from "./ExpressionNotes";
+import { PassageReader } from "./PassageReader";
+import "./expression-detail.css";
 
 /** Local time to the minute, as a datetime-local input takes it: the UTC form of the instant moved by the zone's offset. */
 const localMinute = (ms: number) => new Date(ms - new Date(ms).getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+
+// Some imported notes consist entirely of the source labels and the original
+// quoted verbatim. Only fold that exact format; keep any learner commentary visible.
+function isSourceExcerpt(note: string | null, original: string | null) {
+  if (!note || !original) return false;
+  const match = /^例句性质：[^\n]+\n笔记摘录：([\s\S]+)\n原遇见日期未记录。$/.exec(note.replace(/\r\n/g, "\n").trim());
+  return match?.[1] === original.replace(/\r\n/g, "\n");
+}
 
 /**
  * A text with its focus marked. Both come from the user or the model, so they
  * are only ever text nodes: nothing in them is read as markup.
  */
-export function Marked({ text, mark }: { text: string; mark: string | null }) {
-  const at = mark ? text.toLowerCase().indexOf(mark.toLowerCase()) : -1;
+export function Marked({ text, mark, start }: { text: string; mark: string | null; start?: number }) {
+  const at = mark ? start ?? text.toLowerCase().indexOf(mark.toLowerCase()) : -1;
   if (!mark || at < 0) return <>{text}</>;
   return (
     <>
@@ -52,13 +64,14 @@ function TimelineRow({ row, own, first }: { row: EncounterView; own: string | nu
   return (
     <li>
       {[
+        row.previousFocus !== undefined && (row.previousFocus ?? t("整句", "Whole sentence")),
         day(row.occurredAt ?? row.createdAt), t(...KIND_LABELS[row.kind]), tried && hint && t(...hint),
         tried && (row.outcome === "pass" ? t("算用上", "Counts as used") : row.outcome === "fail" ? t("不算", "Does not count") : t("没判", "Not judged")), said?.overturned && t("你改过", "Changed by you"),
         row.kind === "looked_up" && row.cue === "masked" && t("遮着给的", "Shown masked"), row.kind === "reveal" && row.cue !== "masked" && t("放弃", "Gave up"),
         row.sourceType && sourceLabel(row.sourceType), row.sourceTitle, row.sourceLocator,
       ].filter(Boolean).join(" · ")}
       {[
-        // What came before the scene the entry is from stands above its sentence, at the top of the dialog.
+        // The first scene is already available alongside the original.
         !first && row.textBefore && `${t("上文：", "Context: ")}${row.textBefore}`,
         // A `met` row repeats the entry's own sentence unless it was met in other words.
         (row.kind !== "met" || row.text !== own) && row.text, row.myAttempt && `${t("试写：", "Your attempt: ")}${row.myAttempt}`, said && `${t("题面：", "Prompt: ")}${said.prompt}`,
@@ -69,22 +82,41 @@ function TimelineRow({ row, own, first }: { row: EncounterView; own: string | nu
   );
 }
 
-function Detail({ e, glossing, draft, focusCue, unsavedRef, onDeleted }: { e: ExpressionDetail; glossing: boolean; draft: boolean; focusCue: boolean; unsavedRef: RefObject<boolean>; onDeleted: () => void }) {
+function Detail({ e, glossing, draft, focusCue, unsavedRef, passageDirty, reload, onDeleted }: {
+  e: ExpressionDetail; glossing: boolean; draft: boolean; focusCue: boolean; unsavedRef: RefObject<boolean>;
+  passageDirty: RefObject<boolean>; reload: () => void; onDeleted: () => void;
+}) {
   const { t } = useI18n();
   const patch = usePatchExpression();
   const annotate = useAnnotate();
   const reveal = useReveal();
   const remove = useDeleteExpression();
-  const writing = patch.isPending || remove.isPending;
+  const passage = useWritePassageNote();
+  const [passageEditing, setPassageEditing] = useState(false);
+  const busy = patch.isPending || remove.isPending || passage.isPending;
+  const writing = busy || passageEditing;
   // What 看答案 answered with. Held here and nowhere else: the next read is
   // masked again, so leaving the dialog drops the answer, and another look is
   // another request, which writes another row.
   const [revealed, setRevealed] = useState<ExpressionDetail | null>(null);
-  const full = revealed ?? e;
+  const full = revealed && e.masked && revealed.targetVersion === e.targetVersion ? revealed : e;
   const when = e.occurredAt ?? e.createdAt;
+  const [base, setBase] = useState(e);
+  const [focusRange, setFocusRange] = useState(e.focusRange ?? null);
   const [note, setNote] = useState(e.note ?? "");
   const [focus, setFocus] = useState(e.focus ?? "");
   const [at, setAt] = useState(localMinute(when));
+  const [editing, setEditing] = useState(false);
+  // After a reveal the local form still belongs to the masked entry. Read the
+  // answer itself, without making its withheld fields editable or cacheable.
+  const visibleFocus = e.masked ? full.focus : focus;
+  const visibleNote = e.masked ? full.note : note;
+  const excerptOnly = isSourceExcerpt(full.note, full.text);
+  const NoteSection = excerptOnly ? "details" : "section";
+  const passageNotes = full.passageNotes ?? [];
+  const practiceOptions = !e.masked && e.text ? passageNotes.map(({ start, end }) => ({ start, end, text: e.text!.slice(start, end) })).filter((o) => o.text.length <= EXPRESSION_LIMITS.focus) : [];
+  const optionKey = (o: typeof practiceOptions[number]) => `${o.start}:${o.end}`;
+  const selected = practiceOptions.find((o) => o.text === focus && (focusRange == null || o.start === focusRange.start));
   // Oldest first: the earliest `met` row is the scene the entry came from.
   const scene = full.timeline.find((row) => row.kind === "met");
   // What the user wanted to say when the entry was kept (the need in 找, their
@@ -97,6 +129,14 @@ function Detail({ e, glossing, draft, focusCue, unsavedRef, onDeleted }: { e: Ex
   // they lead to a pass. One that 帮我起草 filled in is the AI's from then on,
   // however much of it was rewritten: the draft has been read.
   const [drafted, setDrafted] = useState(false);
+  const changeFocus = (text: string, range: ExpressionDetail["focusRange"] = null) => {
+    if (text === focus && range?.start === focusRange?.start) return;
+    // A saved or model-drafted cue describes the previous practice target.
+    if (intent === (base.intent ?? suggested) || drafted) setIntent("");
+    setDrafted(false);
+    setFocus(text);
+    setFocusRange(range);
+  };
   const fill = (text: string) => {
     setIntent(text);
     setDrafted(true);
@@ -113,13 +153,14 @@ function Detail({ e, glossing, draft, focusCue, unsavedRef, onDeleted }: { e: Ex
         });
   const intentBy: IntentBy =
     drafted || e.intentBy === "ai" ? "ai" : suggested && intent === suggested ? (e.sourceType === "find" ? "find" : "paste") : "self";
-  const newIntent = intent !== (e.intent ?? "") && { intent: intent.trim() || null, intentBy };
+  const focusChanged = focus !== (base.focus ?? "") || focusRange?.start !== base.focusRange?.start;
+  const newIntent = (focusChanged || intent !== (base.intent ?? "")) && { intent: intent.trim() || null, intentBy };
   // Only what was changed is sent: an absent field is left alone, null clears it.
   const change = {
-    ...(note !== (e.note ?? "") && { note: note.trim() || null }),
-    ...(focus !== (e.focus ?? "") && { focus: focus.trim() || null }),
-    ...(at !== localMinute(when) && !Number.isNaN(Date.parse(at)) && { occurredAt: Date.parse(at) }),
-    ...(intent !== (e.intent ?? suggested) && newIntent),
+    ...(note !== (base.note ?? "") && { note: note.trim() || null }),
+    ...(focusChanged && { focus: focus || null, focusRange }),
+    ...(at !== localMinute(base.occurredAt ?? base.createdAt) && !Number.isNaN(Date.parse(at)) && { occurredAt: Date.parse(at) }),
+    ...(intent !== (base.intent ?? suggested) && { intent: intent.trim() || null, intentBy }),
   };
   const unsaved = Object.keys(change).length > 0;
   useEffect(() => {
@@ -129,15 +170,17 @@ function Detail({ e, glossing, draft, focusCue, unsavedRef, onDeleted }: { e: Ex
   // A change of layer takes what was typed with it: across the mask this view
   // is mounted afresh (see its key), and what was in its fields would be gone.
   const save = (more: ExpressionPatch = {}) => {
-    const body = { ...change, ...more };
+    const body = { ...change, ...more, expectedUpdatedAt: base.updatedAt };
     patch.mutate({ id: e.id, ...body }, {
       // Show what was stored, which is not always what was typed (trimmed).
       onSuccess: (saved) => {
+        setBase(saved);
+        setFocusRange(saved.focusRange ?? null);
         setNote(saved.note ?? "");
         setFocus(saved.focus ?? "");
         setAt(localMinute(saved.occurredAt ?? saved.createdAt));
         // Only when it was sent: a suggestion that was left alone stays in its field.
-        if (body.intent !== undefined) setIntent(saved.intent ?? "");
+        if (body.intent !== undefined || body.focus !== undefined) setIntent(saved.intent ?? "");
       },
       onError: (err) => toast.error(err instanceof ApiError && err.code === "INTENT_REQUIRED" ? t("先写一句提示句", "Write a cue first") : t(`没有改成：${errorMessage(err)}`, `Could not save changes: ${errorMessage(err)}`)),
     });
@@ -151,88 +194,136 @@ function Detail({ e, glossing, draft, focusCue, unsavedRef, onDeleted }: { e: Ex
     });
   };
 
-  return (
-    <div className="space-y-4 text-sm">
-      {full.text === null ? (
-        <Button size="sm" variant="outline" disabled={reveal.isPending || remove.isPending} onClick={() => reveal.mutate({ id: e.id, cue: "masked" }, { onSuccess: (answer) => setRevealed(answer), onError: (err) => toast.error(t(`没有看成：${errorMessage(err)}`, `Could not reveal the answer: ${errorMessage(err)}`)) })}>
-          {t("看答案", "Show answer")}
-        </Button>
-      ) : (
-        <div className="space-y-1">
-          {scene?.textBefore && <p className="whitespace-pre-line text-xs text-muted-foreground">{scene.textBefore}</p>}
-          <p className="whitespace-pre-line pr-10 text-base leading-relaxed">
-            <Marked text={full.text} mark={full.focus} />
-          </p>
-        </div>
-      )}
-      <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+  const savePassage = (change: PassageNoteChange) => passage.mutateAsync({ id: e.id, ...change }, {
+    onSuccess: (saved) => {
+      // The note uses its own compare-and-swap. Advance the ordinary form's
+      // revision only if none of its baseline fields changed in another tab.
+      const fields = ["note", "focus", "intent", "intentBy", "status", "occurredAt", "targetVersion"] as const;
+      if (fields.every((key) => saved[key] === base[key])
+        && saved.focusRange?.start === base.focusRange?.start) setBase(saved);
+    },
+    onError: (err) => { if (err instanceof ApiError && err.status === 409) reload(); },
+  });
+  const editNote = !e.masked && <Button size="sm" className="min-h-11" variant="ghost" disabled={writing} aria-pressed={editing} onClick={() => setEditing(!editing)}>
+    {!editing && <Pencil aria-hidden="true" />}{editing ? t("预览笔记", "Preview notes") : t("编辑笔记", "Edit notes")}
+  </Button>;
+
+  const cue = (
+      <section className="expression-cue space-y-3" aria-label={t("回想提示", "Recall cue")}>
+        <h4>{t("回想提示", "Recall cue")}</h4>
+        {practiceOptions.length > 0 && <label className="block space-y-2">
+          <span>{t("练习焦点", "Practice focus")}</span>
+          <select className="passage-select" disabled={writing || annotate.isPending} value={selected ? optionKey(selected) : focus ? "custom" : ""} onChange={(ev) => {
+            const option = practiceOptions.find((o) => optionKey(o) === ev.target.value);
+            changeFocus(option?.text ?? "", option ? { start: option.start, end: option.end } : null);
+          }}>
+            <option value="">{t("整句", "Whole sentence")}</option>
+            {focus && !selected && <option value="custom">{focus}</option>}
+            {practiceOptions.map((o) => <option key={optionKey(o)} value={optionKey(o)}>{o.text}{practiceOptions.some((other) => other !== o && other.text === o.text) ? ` (${o.start + 1}–${o.end})` : ""}</option>)}
+          </select>
+        </label>}
         <label className="block space-y-2 text-sm text-muted-foreground">
           {t("提示句：想说什么的时候该想起它，用你自己的话", "Cue: describe when you would use it, in your own words")}
-          <Input autoFocus={focusCue && !e.masked} maxLength={EXPRESSION_LIMITS.intent} value={intent} onChange={(ev) => setIntent(ev.target.value)} />
+          <Input autoFocus={focusCue && !e.masked} disabled={writing || annotate.isPending} maxLength={EXPRESSION_LIMITS.intent} value={intent} onChange={(ev) => setIntent(ev.target.value)} />
         </label>
         <div className="flex flex-wrap items-center gap-2">
           {e.status === "seen" && <Button className="min-h-11" disabled={writing || !intent.trim()} onClick={() => save({ ...newIntent, status: "active" })}>{t("放进想用", "Move to To use")}</Button>}
           {e.status === "active" && <Button className="min-h-11" variant="outline" disabled={writing} onClick={() => save({ status: "seen" })}>{t("退回见过", "Move back to Seen")}</Button>}
           {/* With the switch off the AI's cue must not leak into the user's own words. */}
-          {draft && !e.masked && <Button className="min-h-11" size="sm" variant="outline" disabled={annotate.isPending || glossing || remove.isPending} onClick={drawUp}>{t("帮我起草", "Draft a cue")}</Button>}
+          {draft && !e.masked && <Button className="min-h-11" size="sm" variant="outline" disabled={annotate.isPending || glossing || writing || change.focus !== undefined} onClick={drawUp}>{t("帮我起草", "Draft a cue")}</Button>}
         </div>
         {e.status === "seen" && <p className="text-sm text-muted-foreground">{intent.trim() ? t("放进想用后，隔一天再来试写一句。", "Move it to To use, then return after a day to try a sentence.") : t("放进想用之前，先写一句提示句。", "Write a cue before moving this to To use.")}</p>}
-      </div>
-      <details className="reading-details">
-        <summary>{t("备注与出处", "Notes and source")}</summary>
-        <div className="space-y-4 pt-3">
-      {/* An entry in 想用 is not edited: its focus and note are not here to edit. After 看答案 they are shown, read-only. */}
-      {!e.masked && (
-        <>
-          <label className="block space-y-1 text-xs text-muted-foreground">
-            {t("焦点", "Focus")}
-            <Input placeholder={t("原文里要记住的那个词或短语", "The word or phrase to remember")} maxLength={EXPRESSION_LIMITS.focus} value={focus} onChange={(ev) => setFocus(ev.target.value)} />
-          </label>
-          <label className="block space-y-1 text-xs text-muted-foreground">
-            {t("备注", "Note")}
-            <textarea className={AREA_CLASS} rows={3} maxLength={EXPRESSION_LIMITS.note} value={note} onChange={(ev) => setNote(ev.target.value)} />
-          </label>
-        </>
+        {full.text === null && (
+          <Button size="sm" className="min-h-11" variant="outline" disabled={reveal.isPending || remove.isPending} onClick={() => reveal.mutate({ id: e.id, cue: "masked" }, { onSuccess: (answer) => setRevealed(answer), onError: (err) => toast.error(t(`没有看成：${errorMessage(err)}`, `Could not reveal the answer: ${errorMessage(err)}`)) })}>
+            {t("看答案", "Show answer")}
+          </Button>
+        )}
+      </section>
+  );
+
+  return (
+    <article className="expression-reading">
+      <header>
+        {full.text === null && <h3>{t("先回想这条表达", "Recall this expression")}</h3>}
+        <p className="expression-source">
+          {t("出处：", "Source: ")}{sourceLabel(e.sourceType)}{e.sourceTitle && ` · ${e.sourceTitle}`} · {day(when)}
+        </p>
+        {full.text !== null && (
+          <>
+            <PassageReader text={full.text} notes={passageNotes} busy={busy || annotate.isPending} save={e.masked ? undefined : savePassage}
+              onEditing={setPassageEditing} dirtyRef={passageDirty} noteAction={!visibleNote?.trim() && !editing && editNote}>
+              <Marked text={full.text} mark={visibleFocus} start={(e.masked ? full.focusRange : focusRange)?.start} />
+            </PassageReader>
+            {scene?.textBefore && <details className="reading-help">
+              <summary>{t("查看上文", "Show context")}</summary>
+              <p className="expression-context">{scene.textBefore}</p>
+            </details>}
+          </>
+        )}
+      </header>
+      {/* The cue leads only while the answer is withheld. Reading an ordinary
+          entry starts with its original and the learner's own explanation. */}
+      {full.text === null && cue}
+      {full.text !== null && (visibleNote?.trim() || editing) && (
+        <NoteSection className={excerptOnly ? "reading-details" : undefined} aria-label={excerptOnly ? undefined : t("学习笔记", "Study notes")}>
+          {excerptOnly && <summary>{t("原笔记摘录", "Original note excerpt")}</summary>}
+          <div className="expression-section-heading">
+            <h4>{t("学习笔记", "Study notes")}</h4>
+            {editNote}
+          </div>
+          {editing && !e.masked ? (
+            <div className="expression-editor space-y-4">
+              <label className="block space-y-2 text-sm text-muted-foreground">
+                {t("焦点", "Focus")}
+                <Input disabled={writing || annotate.isPending} placeholder={t("原文里要记住的那个词或短语", "The word or phrase to remember")} maxLength={EXPRESSION_LIMITS.focus} value={focus} onChange={(ev) => changeFocus(ev.target.value)} />
+              </label>
+              <label className="block space-y-2 text-sm text-muted-foreground">
+                {t("备注", "Note")}
+                <textarea autoFocus disabled={writing} className={AREA_CLASS} rows={9} maxLength={EXPRESSION_LIMITS.note} value={note} onChange={(ev) => setNote(ev.target.value)} />
+              </label>
+            </div>
+          ) : visibleNote?.trim() ? <ExpressionNotes text={visibleNote} /> : null}
+        </NoteSection>
       )}
-      {revealed?.note && <p className="whitespace-pre-line"><span className="text-xs text-muted-foreground">{t("备注：", "Note: ")}</span>{revealed.note}</p>}
-      {/* The gloss never leads: it sits below the original and the user's own note, and says who wrote it. */}
-      {(full.gloss || !e.masked) && (
-        <div className="space-y-1 rounded-md bg-muted/50 p-3">
-          <p className="text-xs text-muted-foreground">{t("补注 · AI 写的", "Annotation · Written by AI")}</p>
-          {full.gloss ? (
-            <p className="whitespace-pre-line">{full.gloss}</p>
-          ) : glossing ? (
-            <p className="text-muted-foreground">{t("补注中…", "Annotating…")}</p>
-          ) : (
-            !e.annotated && (
-              <Button size="sm" variant="outline" disabled={annotate.isPending || remove.isPending} onClick={() => annotate.mutate(e.id, { onError: (err) => toast.error(t(`补注没有成功：${errorMessage(err)}`, `Annotation failed: ${errorMessage(err)}`)) })}>
+      <div className="expression-meta">
+        {(full.gloss || !e.masked) && (
+          <details className="reading-details expression-annotation">
+            <summary>{t("补注 · AI 写的", "Annotation · Written by AI")}</summary>
+            {full.gloss ? (
+              <p className="whitespace-pre-line">{full.gloss}</p>
+            ) : glossing ? (
+              <p className="text-muted-foreground">{t("补注中…", "Annotating…")}</p>
+            ) : !e.annotated && (
+              <Button size="sm" className="min-h-11" variant="outline" disabled={annotate.isPending || writing} onClick={() => annotate.mutate(e.id, { onError: (err) => toast.error(t(`补注没有成功：${errorMessage(err)}`, `Annotation failed: ${errorMessage(err)}`)) })}>
                 {annotate.isPending && <Loader2 className="animate-spin" />}
                 {t("补注", "Annotate")}
               </Button>
-            )
-          )}
-        </div>
-      )}
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>
-          {t("出处：", "Source: ")}{sourceLabel(e.sourceType)}
-          {e.sourceTitle && ` · ${e.sourceTitle}`}
-          {scene?.sourceLocator && ` · ${scene.sourceLocator}`}
-        </span>
-        <label className="flex flex-wrap items-center gap-2">
-          {t("遇到的时间", "When you met it")}
-          <Input type="datetime-local" className="h-11 min-w-0 max-w-full" value={at} onChange={(ev) => setAt(ev.target.value)} />
-        </label>
+            )}
+          </details>
+        )}
+        {full.text !== null && <details className="reading-details" open={focusCue || undefined}>
+          <summary>{t("回想与练习", "Recall and practice")}</summary>
+          {cue}
+        </details>}
+        <details className="reading-details">
+          <summary>{t("出处与时间", "Source and time")}</summary>
+          <div className="space-y-4 pt-3">
+            {scene?.sourceLocator && <p className="whitespace-pre-line text-muted-foreground">{scene.sourceLocator}</p>}
+            <label className="block space-y-2 text-muted-foreground">
+              {t("遇到的时间", "When you met it")}
+              <Input type="datetime-local" disabled={writing} className="h-11 w-auto min-w-0 max-w-full" value={at} onChange={(ev) => setAt(ev.target.value)} />
+            </label>
+          </div>
+        </details>
+        <details className="reading-details">
+          <summary>{t("学习记录", "Learning history")}</summary>
+          {e.legacyHistory && <p>{t("旧记录缺少完整的分层时间，早期成绩是估算值。", "Early progress is estimated from incomplete historical dates.")}</p>}
+          <ol className="space-y-2 pt-3 text-sm text-muted-foreground">
+            {full.timeline.map((row) => <TimelineRow key={row.id} row={row} own={full.text} first={row === scene} />)}
+          </ol>
+        </details>
       </div>
-        </div>
-      </details>
-      <details className="reading-details">
-        <summary>{t("学习记录", "Learning history")}</summary>
-      <ol className="space-y-2 pt-3 text-sm text-muted-foreground">
-        {full.timeline.map((row) => <TimelineRow key={row.id} row={row} own={full.text} first={row === scene} />)}
-      </ol>
-      </details>
-      <div className="flex flex-wrap justify-between gap-2">
+      <footer className="expression-actions">
         <div className="flex flex-wrap gap-2">
           <Button size="sm" className="min-h-11" variant="outline" disabled={writing} onClick={() => save({ status: e.status === "retired" ? "seen" : "retired" })}>
             {e.status === "retired" ? t("恢复", "Restore") : t("收起", "Archive")}
@@ -242,27 +333,53 @@ function Detail({ e, glossing, draft, focusCue, unsavedRef, onDeleted }: { e: Ex
           </Button>
         </div>
         <Button size="sm" className="min-h-11" disabled={writing || !unsaved} onClick={() => save()}>{t("保存", "Save changes")}</Button>
-      </div>
-    </div>
+      </footer>
+    </article>
   );
 }
 
-export function ExpressionDetailDialog(props: { id: number | null; glossing: boolean; draft: boolean; focusCue?: boolean; onClose: () => void }) {
+function DraftGuard({ dirty, confirmDiscard }: { dirty: () => boolean; confirmDiscard: () => boolean }) {
+  const blocker = useBlocker(({ nextLocation }) => nextLocation.pathname !== "/login" && dirty());
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    if (confirmDiscard()) blocker.proceed();
+    else blocker.reset();
+  }, [blocker, confirmDiscard]);
+  useBeforeUnload((event) => {
+    if (dirty()) { event.preventDefault(); event.returnValue = ""; }
+  });
+  return null;
+}
+
+export function ExpressionDetailDialog(props: { id: number | null; glossing: boolean; draft: boolean; focusCue?: boolean; onClose: () => void; onCloseAutoFocus?: ComponentProps<typeof DialogContent>["onCloseAutoFocus"] }) {
   const { t } = useI18n();
-  const { data, error } = useExpression(props.id);
+  const { data, error, refetch } = useExpression(props.id);
   // A click beside the dialog closes it, but not at the cost of what was being typed in it.
   const unsavedRef = useRef(false);
+  const passageDirty = useRef(false);
+  const dirty = () => unsavedRef.current || passageDirty.current;
+  const confirmDiscard = () => !dirty() || window.confirm(t("放弃未保存的编辑？", "Discard unsaved edits?"));
   return (
-    <Dialog open={props.id !== null} onOpenChange={(open) => !open && props.onClose()}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto" aria-describedby={undefined} onInteractOutside={(ev) => unsavedRef.current && ev.preventDefault()}>
-        <DialogTitle className="sr-only">{t("表达详情", "Expression details")}</DialogTitle>
+    <Dialog open={props.id !== null} onOpenChange={(open) => {
+      if (!open && confirmDiscard()) { unsavedRef.current = false; passageDirty.current = false; props.onClose(); }
+    }}>
+      {props.id !== null && <DraftGuard dirty={dirty} confirmDiscard={confirmDiscard} />}
+      <DialogContent className="expression-dialog" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={props.onCloseAutoFocus} onInteractOutside={(ev) => (unsavedRef.current || passageDirty.current) && ev.preventDefault()}>
+        <div className="expression-toolbar">
+          <DialogTitle className="text-sm font-medium text-muted-foreground">{t("表达详情", "Expression details")}</DialogTitle>
+          <DialogClose asChild><Button size="icon" className="min-h-11 min-w-11" variant="ghost" aria-label={t("关闭", "Close")}><X aria-hidden="true" /></Button></DialogClose>
+        </div>
         {data ? (
           // Keyed by the layer's side of the mask as well: what was typed into, or revealed for, one side says nothing of the other.
-          <Detail key={`${data.id}:${data.masked}`} e={data} glossing={props.glossing} draft={props.draft} focusCue={!!props.focusCue} unsavedRef={unsavedRef} onDeleted={props.onClose} />
+          <Detail key={`${data.id}:${data.masked}`} e={data} glossing={props.glossing} draft={props.draft} focusCue={!!props.focusCue}
+            unsavedRef={unsavedRef} passageDirty={passageDirty} reload={() => void refetch()} onDeleted={props.onClose} />
         ) : error ? (
-          <p className="text-sm text-destructive">{t("读取失败：", "Could not load: ")}{errorMessage(error)}</p>
+          <p className="px-5 py-8 text-sm text-destructive md:px-9">{t("读取失败：", "Could not load: ")}{errorMessage(error)}</p>
         ) : (
-          props.id !== null && <Loader2 className="mx-auto size-5 animate-spin text-muted-foreground" />
+          props.id !== null && <div role="status" className="flex min-h-40 items-center justify-center p-8">
+            <Loader2 aria-hidden="true" className="size-5 animate-spin text-muted-foreground" />
+            <span className="sr-only">{t("读取中…", "Loading expression…")}</span>
+          </div>
         )}
       </DialogContent>
     </Dialog>

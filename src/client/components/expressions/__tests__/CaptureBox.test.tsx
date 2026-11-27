@@ -96,17 +96,30 @@ it("switches interface language while preserving the selected source, focus, and
   expect(writes).toEqual([]);
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(writes).toHaveLength(1));
-  expect(writes[0].body).toEqual({ text: "It dawned on me that I was wrong.", focus: "dawned on me", sourceType: "book", sourceTitle: "私人书名" });
+  expect(writes[0].body).toEqual({ text: "It dawned on me that I was wrong.", focus: "dawned on me", focusRange: { start: 3, end: 15 }, sourceType: "book", sourceTitle: "私人书名" });
 });
 
 describe("what 收下 makes of the box", () => {
+  it("keeps a second sentence typed before the first response arrives", async () => {
+    let release!: () => void;
+    answers.push({ status: 201, body: { id: 2 }, hold: new Promise<void>((resolve) => { release = resolve; }) });
+    const { box, onSaved } = renderBox();
+    type(box, "first sentence");
+    keep();
+    await waitFor(() => expect(writes).toHaveLength(1));
+    type(box, "second sentence");
+    release();
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(2));
+    expect(box).toHaveValue("second sentence");
+  });
+
   it("saves the whole box as the text when nothing is selected", async () => {
     const { box, onSaved } = renderBox();
     type(box, "  It dawned on me that I was wrong.  ");
     keep();
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(1));
-    expect(writes).toEqual([{ method: "POST", url: "/api/expressions", body: { text: "It dawned on me that I was wrong." } }]);
+    expect(writes).toEqual([{ method: "POST", url: "/api/expressions", body: { text: "  It dawned on me that I was wrong.  " } }]);
     expect(box).toHaveValue("");
   });
 
@@ -120,7 +133,7 @@ describe("what 收下 makes of the box", () => {
     keep();
 
     await waitFor(() => expect(writes).toHaveLength(1));
-    expect(writes[0].body).toEqual({ text: "It dawned on me that I was wrong.", focus: "dawned on me" });
+    expect(writes[0].body).toEqual({ text: "It dawned on me that I was wrong.", focus: "dawned on me", focusRange: { start: 3, end: 15 } });
   });
 
   it("takes a selection inside a pasted conversation as the text, and offers the paragraph above as 上文", async () => {

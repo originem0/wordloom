@@ -47,6 +47,8 @@ export interface SchemaAnalysis {
   /** One of the five image schemas, or "none" when no schema fits the word. */
   coreSchema: string;
   coreImageText?: string;
+  /** English example of this scene, with the target form between ** markers. */
+  coreImageExample?: string;
   coreSvg?: string;
   wordType?: string;
   /** No longer generated; cards made before that still carry them. */
@@ -98,6 +100,14 @@ export interface Card extends CardSurface, CardMiddle, CardDeep {
 }
 
 // --- API responses ---
+
+export type CardSummary = Pick<Card, "id" | "word" | "coreMeaning" | "cefr">;
+
+export interface CardJobResult {
+  success: number[];
+  existing?: number[];
+  failed: { word: string; error: string }[];
+}
 
 export interface CardGenerateResult {
   success: Card[];

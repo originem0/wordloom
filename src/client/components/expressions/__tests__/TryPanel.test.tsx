@@ -30,7 +30,7 @@ const UNJUDGED = judged({ status: "failed", verdict: null, outcome: null, answer
 const REVEALED: ExpressionDetail = {
   id: 7, status: "active", masked: true, ...ANSWER, intent: INTENT, intentBy: "self", sourceType: null, sourceTitle: null,
   occurredAt: null, createdAt: 0, updatedAt: 0, produced: false, graduated: false, queued: false,
-  note: null, aiIntent: null, annotated: true, activeSince: 0, timeline: [],
+  note: null, passageNotes: [], aiIntent: null, annotated: true, activeSince: 0, timeline: [],
 };
 
 /** "never": the request is left hanging for as long as the test runs. */

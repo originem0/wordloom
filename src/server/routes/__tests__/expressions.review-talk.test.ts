@@ -29,7 +29,7 @@ function request(path: string, body?: unknown, method?: string, stream = false) 
   const headers = new Headers({ host: HOST, origin: `https://${HOST}`, cookie: `session=${SESSION}` });
   if (body !== undefined) headers.set("content-type", "application/json");
   if (stream) headers.set("accept", "text/event-stream");
-  return app.request(`/api/expressions${path}`, {
+  return app.request(`https://${HOST}/api/expressions${path}`, {
     method: method ?? (body === undefined ? "GET" : "POST"), headers,
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });

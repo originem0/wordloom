@@ -1,9 +1,10 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import { queryClient } from "../lib/query-client";
-import type { CardGenerateResult } from "../../shared/types";
+import type { CardGenerateResult, CardJobResult } from "../../shared/types";
 import { errorMessage, translate } from "../lib/i18n";
-import { ApiError } from "../lib/api";
+import { sessionFetch } from "../lib/session";
+import { apiPost, ApiError } from "../lib/api";
 
 export type TaskStatus = "running" | "done" | "failed" | "cancelled";
 
@@ -12,7 +13,7 @@ type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 type JobResponse = {
   id: string;
   status: JobStatus;
-  result?: unknown;
+  result?: CardJobResult;
   error?: string | null;
 };
 
@@ -23,7 +24,8 @@ export interface Task {
   error?: string;
   errorText?: readonly [string, string];
   errorCause?: Error;
-  result?: CardGenerateResult;
+  result?: CardJobResult;
+  cancelRequested?: boolean;
   createdAt: number;
   jobId?: string;
   wordCount?: number;
@@ -70,7 +72,7 @@ function clearPoll(taskId: string) {
   pollFailures.delete(taskId);
 }
 
-function cardsDoneLabel(result: CardGenerateResult): string {
+function cardsDoneLabel(result: CardJobResult): string {
   const ok = result.success.length;
   const fail = result.failed.length;
   const existingCount = result.existing?.length ?? 0;
@@ -101,6 +103,50 @@ export function taskError(task: Task): string {
   return errorMessage(task.errorCause ?? new Error(task.error ?? ""));
 }
 
+function finishJob(taskId: string, job: JobResponse) {
+  if (!useTaskStore.getState().tasks.some((t) => t.id === taskId && t.status === "running")) return;
+  clearPoll(taskId);
+  if (job.status === "cancelled") {
+    updateTask(taskId, { status: "cancelled" });
+    return;
+  }
+
+  if (job.status === "failed") {
+    failTask(taskId, job.error || ["未知错误", "Unknown error"]);
+    return;
+  }
+
+  // done
+  const result = job.result;
+  if (!result) throw new Error("Missing job result");
+  const doneLabel = cardsDoneLabel(result);
+  updateTask(taskId, { status: "done", result, label: doneLabel });
+  queryClient.invalidateQueries({ queryKey: ["cards"] });
+
+  const existingCount = result.existing?.length ?? 0;
+  const newCount = result.success.length - existingCount;
+  if (existingCount > 0 && newCount === 0) {
+    toast.info(doneLabel);
+  } else if (result.failed.length > 0) {
+    toast.warning(doneLabel);
+  } else {
+    toast.success(doneLabel);
+  }
+}
+
+async function requestCancellation(id: string, jobId: string) {
+  try {
+    const job = await apiPost<JobResponse>(`/api/jobs/${jobId}/cancel`, {});
+    if (job.status !== "running" && job.status !== "queued") finishJob(id, job);
+  } catch {
+    if (useTaskStore.getState().tasks.some((t) => t.id === id && t.status === "running")) {
+      toast.error(translate("未能确认取消，仍在查询任务状态", "Cancellation was not confirmed. Checking job status."));
+    }
+  } finally {
+    updateTask(id, { cancelRequested: false });
+  }
+}
+
 async function pollJob(taskId: string) {
   const task = useTaskStore.getState().tasks.find((t) => t.id === taskId);
   if (!task || task.status !== "running" || !task.jobId) {
@@ -109,7 +155,7 @@ async function pollJob(taskId: string) {
   }
 
   try {
-    const res = await fetch(`/api/jobs/${task.jobId}`, { credentials: "include" });
+    const res = await sessionFetch(`/api/jobs/${task.jobId}`, { credentials: "include" });
     // 404 is definitive — the server has no such job and never will.
     if (res.status === 404) {
       failTask(taskId, ["任务不存在或已过期", "The task does not exist or has expired"]);
@@ -134,31 +180,7 @@ async function pollJob(taskId: string) {
 
     clearPoll(taskId);
 
-    if (job.status === "cancelled") {
-      updateTask(taskId, { status: "cancelled" });
-      return;
-    }
-
-    if (job.status === "failed") {
-      failTask(taskId, job.error || ["未知错误", "Unknown error"]);
-      return;
-    }
-
-    // done
-    const result = job.result as CardGenerateResult;
-    const doneLabel = cardsDoneLabel(result);
-    updateTask(taskId, { status: "done", result, label: doneLabel });
-    queryClient.invalidateQueries({ queryKey: ["cards"] });
-
-    const existingCount = result.existing?.length ?? 0;
-    const newCount = result.success.length - existingCount;
-    if (existingCount > 0 && newCount === 0) {
-      toast.info(doneLabel);
-    } else if (result.failed.length > 0) {
-      toast.warning(doneLabel);
-    } else {
-      toast.success(doneLabel);
-    }
+    finishJob(taskId, job);
   } catch {
     const failures = (pollFailures.get(taskId) ?? 0) + 1;
     if (failures >= MAX_POLL_FAILURES) {
@@ -208,7 +230,7 @@ export const useTaskStore = create<{
       ],
     }));
 
-    fetch("/api/cards/generate?async=1", {
+    sessionFetch("/api/cards/generate?async=1", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ words: unique }),
@@ -227,15 +249,16 @@ export const useTaskStore = create<{
 
         const body = (await res.json()) as { jobId?: string; status?: string } | CardGenerateResult;
         if ("jobId" in body && body.jobId) {
+          const task = useTaskStore.getState().tasks.find((t) => t.id === id);
+          if (!task) return;
           startPolling(id, body.jobId);
+          if (task.cancelRequested) await requestCancellation(id, body.jobId);
           return;
         }
 
         // fallback for unexpected sync response
-        const doneLabel = cardsDoneLabel(body as CardGenerateResult);
-        updateTask(id, { status: "done", result: body as CardGenerateResult, label: doneLabel });
-        queryClient.invalidateQueries({ queryKey: ["cards"] });
-        toast.success(doneLabel);
+        const completed = body as CardGenerateResult;
+        finishJob(id, { id, status: "done", result: { success: completed.success.map((c) => c.id), existing: completed.existing?.map((c) => c.id), failed: completed.failed } });
       })
       .catch((err) => {
         if (err.name === "AbortError") {
@@ -251,25 +274,10 @@ export const useTaskStore = create<{
 
   async cancelTask(id: string) {
     const task = useTaskStore.getState().tasks.find((t) => t.id === id);
-    if (!task) return;
-
-    clearPoll(id);
-
-    const submitController = submitControllers.get(id);
-    if (submitController) submitController.abort();
-
-    if (task.jobId) {
-      try {
-        await fetch(`/api/jobs/${task.jobId}/cancel`, {
-          method: "POST",
-          credentials: "include",
-        });
-      } catch {
-        // ignore best-effort cancel
-      }
-    }
-
-    updateTask(id, { status: "cancelled" });
+    if (!task || task.status !== "running" || task.cancelRequested) return;
+    updateTask(id, { cancelRequested: true });
+    // A submitted job can already exist before its response arrives.
+    if (task.jobId) await requestCancellation(id, task.jobId);
   },
 
   removeTask(id: string) {

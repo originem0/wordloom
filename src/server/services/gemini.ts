@@ -1,8 +1,8 @@
-import { GoogleGenAI } from "@google/genai";
+import { geminiTransport } from "./gemini-transport.js";
 import { aiCardsResponseSchema, aiDeepLayerSchema } from "../../shared/validation.js";
 import {
   Semaphore,
-  getSetting,
+  getProviderCredentials,
   runWithModelFallback,
   runJsonCall,
   runTextCall,
@@ -29,15 +29,11 @@ const geminiDeepSemaphore = new Semaphore(2);   // deep analysis only
 // Gemini client
 // ---------------------------------------------------------------------------
 
-async function getClient(): Promise<GoogleGenAI> {
-  const apiKey = await getSetting("gemini_api_key");
+async function getClient() {
+  const { apiKey, baseUrl } = await getProviderCredentials("gemini");
   if (!apiKey)
     throw new Error("Gemini API Key not configured. Set it in AI Providers.");
-  const baseUrl = await getSetting("gemini_base_url");
-  return new GoogleGenAI({
-    apiKey,
-    ...(baseUrl ? { httpOptions: { baseUrl } } : {}),
-  });
+  return geminiTransport(apiKey, baseUrl);
 }
 
 // ---------------------------------------------------------------------------
@@ -45,7 +41,7 @@ async function getClient(): Promise<GoogleGenAI> {
 // ---------------------------------------------------------------------------
 
 export async function geminiGenerateCards(
-  words: string[],
+  words: string[], signal?: AbortSignal,
 ): Promise<{ success: ParsedCard[]; failed: { word: string; error: string }[] }> {
   await acquireSemaphore(geminiSemaphore);
   try {
@@ -54,10 +50,10 @@ export async function geminiGenerateCards(
       primaryKeys: ["cards_model", "general_model"],
       primaryFallback: "gemini-2.5-flash",
       fallbackKeys: ["cards_fallback_model", "general_fallback_model"],
-      label: "generateCards",
+      label: "generateCards", signal,
       run: async (model, signal) => {
         const ai = await getClient();
-        const response = await ai.models.generateContent({
+        const response = await ai.generateContent({
           model,
           contents: `${CARDS_PROMPT}\n\nLanguage preference: ${languageInstruction}\n\nWords to analyze: ${JSON.stringify(words)}`,
           config: {
@@ -123,7 +119,7 @@ export async function geminiGenerateCards(
 // ---------------------------------------------------------------------------
 
 export async function geminiGenerateDeepLayer(
-  word: string,
+  word: string, signal?: AbortSignal,
 ): Promise<{
   familyComparison: unknown[];
   familyBoundaryNote?: string;
@@ -139,11 +135,11 @@ export async function geminiGenerateDeepLayer(
       primaryKeys: ["deep_model", "general_model"],
       primaryFallback: "gemini-2.5-flash",
       fallbackKeys: ["deep_fallback_model", "general_fallback_model"],
-      label: "generateDeepLayer",
+      label: "generateDeepLayer", signal,
       timeoutMultiplier: 2,
       run: async (model, signal) => {
         const ai = await getClient();
-        const response = await ai.models.generateContent({
+        const response = await ai.generateContent({
           model,
           contents: `${DEEP_PROMPT}\n\nLanguage preference: ${languageInstruction}\n\nWord: "${word}"`,
           config: {
@@ -188,7 +184,7 @@ export async function geminiExtractWords(text: string): Promise<string[]> {
       label: "extractWords",
       run: async (model, signal) => {
         const ai = await getClient();
-        const response = await ai.models.generateContent({
+        const response = await ai.generateContent({
           model,
           contents: `Extract English words worth studying from the following text. Exclude common/simple words (the, is, a, it, etc.). Focus on vocabulary useful for intermediate-to-advanced English learners.
 
@@ -234,7 +230,7 @@ export async function geminiJson(opts: JsonCall): Promise<unknown> {
     retryFast: opts.retryFast,
     run: async (model, signal) => {
       const ai = await getClient();
-      const response = await ai.models.generateContent({
+      const response = await ai.generateContent({
         model,
         contents: opts.user,
         config: { abortSignal: signal, responseMimeType: "application/json", systemInstruction: opts.system },
@@ -256,11 +252,13 @@ export async function geminiTextStream(opts: StreamCall): Promise<string> {
     canRetry: () => !received,
     run: async (model, signal) => {
       const ai = await getClient();
-      const stream = await ai.models.generateContentStream({ model, contents: opts.user, config: { abortSignal: signal, systemInstruction: opts.system } });
+      const stream = await ai.generateContentStream({ model, contents: opts.user, config: { abortSignal: signal, systemInstruction: opts.system } });
       let text = "";
+      let finished = false;
       for await (const part of stream) {
         signal.throwIfAborted();
         const reason = String(part.candidates?.[0]?.finishReason ?? "");
+        if (reason === "STOP") finished = true;
         if (reason && reason !== "STOP" && reason !== "FINISH_REASON_UNSPECIFIED") throw new Error("Incomplete reply");
         if (!part.text) continue;
         received = true;
@@ -268,7 +266,7 @@ export async function geminiTextStream(opts: StreamCall): Promise<string> {
         if (text.length > 8000) throw new Error("Reply too long");
         await opts.onDelta(part.text);
       }
-      if (!text.trim()) throw new Error("Missing reply");
+      if (!finished || !text.trim()) throw new Error("Incomplete reply");
       return text;
     },
   });

@@ -12,10 +12,10 @@ For each word provided, generate a comprehensive card with these fields:
 - pos: part of speech (noun, verb, adj, adv, etc.)
 - cefr: CEFR level (A1/A2/B1/B2/C1/C2)
 - cefrConfidence: confidence in CEFR assessment (high/medium/low)
-- coreMeaning: a concise core meaning in Chinese (一句话核心释义)
+- coreMeaning: a concise core meaning in the selected explanation language
 - wad: word acquisition difficulty (1-5, where 5 is hardest)
 - wap: word academic prevalence (1-5, where 5 is most academic)
-- etymology: brief etymology in Chinese (用中文解释词源，包括来源语言和语义演变，例如"源自拉丁语 per-（贯穿）+ severus（严格），原义'严格坚持到底'，后演变为'坚持不懈'")
+- etymology: brief etymology in the selected explanation language, including origin and semantic change
 - collocations: 4-6 common collocations and set phrases as strings — the chunks a learner would reuse whole (e.g. "a spontaneous decision", "on the spur of the moment")
 - examples: 3 example sentences at basic/intermediate/advanced levels, each with Chinese translation
 - antonyms: 1-3 antonyms
@@ -44,38 +44,29 @@ Step 0 — classify the word before writing anything else. Not every word deserv
 For the given word, generate a JSON object with these fields:
 
 1. familyComparison: Array of related/similar words (word family + common confusables).
-   Each entry: { word, pos, distinction (核心区别 in Chinese), register (情感/语域 in Chinese), typicalScene (典型场景 in Chinese) }
+   Each entry: { word, pos, distinction (核心区别 in the explanation language), register (情感/语域 in the explanation language), typicalScene (典型场景 in the explanation language) }
    Include the target word itself as the first entry (highlighted).
    Include 3-5 comparison words.
 
-2. familyAxes: The 2-3 dimensions along which this family really differs, in Chinese, as one string joined by " / " (e.g. "起因：内心涌出还是外部安排 / 有没有想过后果 / 褒贬").
+2. familyAxes: The 2-3 dimensions along which this family really differs, in the explanation language, as one string joined by " / " (e.g. "起因：内心涌出还是外部安排 / 有没有想过后果 / 褒贬").
    Choose axes that fit the word type: force, direction or degree for spatial and action words; register and domain for academic words; cause, intent or attitude for abstract words.
    Every distinction in familyComparison should read as a position on these axes.
 
-3. familyBoundaryNote: 2-3 key pairs from the family in Chinese, ONE PAIR PER LINE, each line in the form "X vs Y：X 是…；Y 是…". Use concrete metaphors. Separate the pairs with a line break; no bullets, no numbering.
+3. familyBoundaryNote: 2-3 key pairs from the family in the explanation language, ONE PAIR PER LINE, each line in the form "X vs Y：X 是…；Y 是…". Use concrete metaphors. Separate the pairs with a line break; no bullets, no numbering.
 
-4. familyChoiceRule: One sentence in Chinese that a learner can apply while writing: a decision rule that names the words (e.g. "心里一动就做 → spontaneous；没想后果 → impulsive；没准备却要当场讲 → impromptu").
+4. familyChoiceRule: One sentence in the explanation language that a learner can apply while writing: a decision rule that names the words (e.g. "心里一动就做 → spontaneous；没想后果 → impulsive；没准备却要当场讲 → impromptu").
 
 5. schemaAnalysis: Cognitive schema analysis.
    {
      wordType: the type chosen in Step 0,
-     coreSchema: one of "blockage" | "container" | "path" | "link" | "balance" | "none". Use "none" when no schema honestly fits; never pick the closest one just to fill the field,
-     coreImageText: A paragraph in Chinese (2-3 sentences) describing the prototype of the word — the concrete situation its meaning grows from and the mental picture it evokes. Always required, also when nothing is drawn,
-     coreSvg: OPTIONAL. Include it for "spatial" and "action" words, and for any other word only when one concrete picture really explains it. Otherwise omit the field: a forced diagram is worse than none.
-       When included, it is a COMPLETE inline SVG string that vividly illustrates THIS SPECIFIC WORD's core meaning.
-       SVG REQUIREMENTS:
-       - Must start with <svg viewBox="0 0 600 180" xmlns="http://www.w3.org/2000/svg"> and end with </svg>
-       - Use an inline <style> block for CSS @keyframes animations (NO SMIL attributes like <animate>)
-       - The visual must be a METAPHORICAL ILLUSTRATION specific to this word, not a generic diagram
-       - For example: "perseverance" → a figure climbing a steep mountain with falling rocks, still moving up;
-         "diverge" → a single path splitting into multiple colorful branches going different directions;
-         "obscure" → a clear shape gradually being covered by fog/clouds
-       - Use soft colors: teal (#2aa198), gold (#b58900), dark (#073642), muted gray (#93a1a1), cream (#eee8d5)
-       - Add 2-3 subtle CSS animations (floating, pulsing, dashing, moving) to make it feel alive
-       - Add short Chinese labels (1-3) at key positions using <text> elements, font-size 11-12px
-       - Keep the SVG under 2KB — simple shapes, no complex paths
-       - DO NOT use <image>, <foreignObject>, or external resources
-     etymologyChain: Array of 2-4 short Chinese labels showing the semantic evolution stages (e.g. ["物理：昏暗/被遮挡", "认知：晦涩难懂", "社会：默默无闻"]),
+     coreImageText: Choose one everyday use of the word. In one or two short sentences in the learner's explanation language, describe a concrete moment and the detail that makes the word fit. Keep the people, objects and action consistent across the caption, example and any drawing,
+     coreImageExample: One natural English sentence using the target word in that same moment and sense. Wrap the actual word form in double asterisks (e.g. "After lunch, they **resumed** their discussion."). Always include this example and coreImageText, even for a text-only scene,
+     coreSchema: one of "blockage" | "container" | "path" | "link" | "balance" | "none". Use "none" when no such schema fits, including text-only scenes,
+     coreSvg: OPTIONAL. Draw the actual scene when a visible detail clarifies this use. For a process, show the same subject before and after the change. If the meaning rests on intent, timing or context that the caption conveys better, omit coreSvg and use coreSchema "none".
+       - Supply one complete SVG string with xmlns="http://www.w3.org/2000/svg" and viewBox="0 0 392 180". Use simple shapes, a transparent canvas, dark ink (#302D26), muted ink (#625846), teal (#245C54), pale green (#D8E3D2) and paper (#F2E8D5).
+       - Default to a static drawing. Only use motion to show a meaningful change; keep the information visible in a still frame and honor prefers-reduced-motion. No decorative loops.
+       - Include at most three short labels if needed, in the explanation language, at least 18 SVG units high, with room around the edges. Keep it under 2KB. Do not use scripts, <image>, <foreignObject> or external resources.
+     etymologyChain: Array of 2-4 short labels in the explanation language showing the semantic evolution stages (e.g. ["物理：昏暗/被遮挡", "认知：晦涩难懂", "社会：默默无闻"]),
      sceneActivation: Array of 2-3 scene frames, each:
        {
          title: "Scene N — [domain] ([frame name])" in English,
@@ -90,7 +81,7 @@ For the given word, generate a JSON object with these fields:
    {
      sentence: English sentence with a blank (use "______" for the blank),
      options: Array of 2-3 candidate words, each:
-       { verdict: "yes" | "no" | "maybe", word: the candidate word, reason: short explanation in Chinese }
+       { verdict: "yes" | "no" | "maybe", word: the candidate word, reason: short explanation in the explanation language }
    }
    Include the target word and at least one confusable word from familyComparison in the options.
 
@@ -100,7 +91,7 @@ Hard requirements:
 - schemaAnalysis MUST be present.
 - schemaAnalysis.coreSchema MUST be one of: blockage, container, path, link, balance, none.
 
-All Chinese text should use Simplified Chinese.`;
+Follow the language preference for all explanatory fields.`;
 
 // ---------------------------------------------------------------------------
 // Language instruction helper
@@ -109,7 +100,7 @@ All Chinese text should use Simplified Chinese.`;
 export async function getExplanationLanguageInstruction(): Promise<string> {
   const pref = ((await getSetting("analysis_language")).trim() || "zh-CN").toLowerCase();
   if (pref === "en") {
-    return "Use English for explanatory text such as meanings, etymology, distinctions, notes, reasons, and core image descriptions unless a field explicitly requires Chinese.";
+    return "Use English for explanatory text such as meanings, etymology, distinctions, notes, reasons, and core image descriptions. Keep English examples in English and their Chinese translations in Chinese.";
   }
   if (pref === "bilingual") {
     return "Use concise bilingual explanations: English first, then Simplified Chinese where it helps learners. Keep them compact.";

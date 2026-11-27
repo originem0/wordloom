@@ -16,6 +16,8 @@ export interface SvgPresentation {
   accent: string;
   secondary: string;
   border: string;
+  muted: string;
+  highlight: string;
   fontFamily?: string;
 }
 
@@ -39,10 +41,13 @@ export function svgToImageSrc(raw: string | null | undefined, presentation?: Svg
       const minimum = 14 / presentation.scale;
       const margin = 6 / presentation.scale;
       const palette: Record<string, string> = {
-        "#fdf6e3": presentation.background, "#eee8d5": presentation.surface, "#f4f1eb": presentation.background,
+        "#fdf6e3": presentation.surface, "#eee8d5": presentation.background, "#f4f1eb": presentation.surface,
         "#073642": presentation.text, "#002b36": presentation.text, "#586e75": presentation.text,
         "#657b83": presentation.text, "#839496": presentation.text, "#93a1a1": presentation.text,
         "#2aa198": presentation.accent, "#b58900": presentation.secondary, "#d3cbbf": presentation.border,
+        "#f2e8d5": presentation.surface, "#ece1cd": presentation.background, "#302d26": presentation.text,
+        "#625846": presentation.muted, "#245c54": presentation.accent, "#d8e3d2": presentation.highlight,
+        "#c3b8a3": presentation.border,
       };
       for (const element of root.querySelectorAll("*")) {
         const fill = element.getAttribute("fill")?.toLowerCase();
@@ -53,10 +58,10 @@ export function svgToImageSrc(raw: string | null | undefined, presentation?: Svg
           const value = element.getAttribute(attr)?.toLowerCase();
           if (value && palette[value]) element.setAttribute(attr, palette[value]);
         }
-        if (canvas && fill && ["#fff", "#ffffff", "#fdf6e3", "#eee8d5", "#002b36", "#073642"].includes(fill)) element.setAttribute("fill", presentation.background);
+        if (canvas && fill && ["white", "#fff", "#ffffff", "#fdf6e3", "#eee8d5", "#f7f3e8", "#f2e8d5", "#002b36", "#073642"].includes(fill)) element.setAttribute("fill", presentation.background);
         const style = element.localName === "style" ? element.textContent : element.getAttribute("style");
         if (style) {
-          const themed = style.replace(/\b(fill|stroke|color|stop-color)\s*:\s*(#[\da-f]{3,6})(?=[\s;}])/gi, (match, property: string, color: string) => palette[color.toLowerCase()] ? `${property}:${palette[color.toLowerCase()]}` : match);
+          const themed = style.replace(/\b(fill|stroke|color|stop-color)\s*:\s*(#[\da-f]{3,6})(?=[\s;}]|$)/gi, (match, property: string, color: string) => palette[color.toLowerCase()] ? `${property}:${palette[color.toLowerCase()]}` : match);
           if (element.localName === "style") element.textContent = themed;
           else element.setAttribute("style", themed);
         }

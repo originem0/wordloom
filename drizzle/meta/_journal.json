@@ -92,6 +92,34 @@
       "when": 1795603625971,
       "tag": "0012_talk_turns",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1795752181011,
+      "tag": "0013_expression_passage_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1795756591533,
+      "tag": "0014_learning_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1795756839188,
+      "tag": "0015_conversation_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1795759558592,
+      "tag": "0016_card_word_keys",
+      "breakpoints": true
     }
   ]
 }
