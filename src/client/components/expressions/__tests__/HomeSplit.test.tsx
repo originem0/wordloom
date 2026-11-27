@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useEffect } from "react";
+import { useLayoutEffect } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
@@ -17,7 +17,8 @@ let visited: string[];
 let answerAuth: (response: Response) => void;
 
 function Visit({ page }: { page: string }) {
-  useEffect(() => {
+  // Record the committed page before a DOM observer can see its text.
+  useLayoutEffect(() => {
     visited.push(page);
   }, [page]);
   return <p>{page}</p>;
