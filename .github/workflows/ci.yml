@@ -46,7 +46,7 @@ jobs:
           container=$(docker run --rm -d -p 127.0.0.1::3001 --tmpfs /app/data -e AUTH_TOKEN -e AUTH_SECRET -e ALLOWED_ORIGINS="$origin" wordloom-ci)
           trap 'docker stop "$container" >/dev/null' EXIT
           base="http://$(docker port "$container" 3001/tcp)"
-          curl -fsS --retry 20 --retry-connrefused --retry-delay 1 "$base/api/health"
+          curl -fsS --retry 20 --retry-all-errors --retry-delay 1 "$base/api/health"
           login=$(curl -fsS -D - -o /dev/null -H "Origin: $origin" --json "$(jq -nc '{token: env.AUTH_TOKEN}')" "$base/api/auth/login")
           cookie=$(printf '%s\n' "$login" | sed -nE 's/^[Ss]et-[Cc]ookie: (session=[^;]+);.*/\1/p')
           test -n "$cookie"
