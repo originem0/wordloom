@@ -167,13 +167,25 @@ async function openRow(part: string) {
   fireEvent.click(Array.from(document.querySelectorAll("ul > li > button")).find((b) => b.textContent?.includes(part))!);
   const dialog = await screen.findByRole("dialog");
   await waitFor(() => expect(dialog.querySelector(".reading-details, .text-destructive")).not.toBeNull());
-  // These cases exercise editing and the timeline. The reading cases below
-  // open the dialog directly to check its default, before either is opened.
+  return dialog;
+}
+function editCue() {
+  fireEvent.click(screen.getByRole("button", { name: /^编辑提示/ }));
+  return screen.getByRole<HTMLInputElement>("textbox", { name: /提示句/ });
+}
+async function editRow(part: string) {
+  const dialog = await openRow(part);
   for (const details of dialog.querySelectorAll<HTMLDetailsElement>(".reading-details")) {
     if (!details.open) fireEvent.click(details.querySelector("summary")!);
   }
-  const edit = screen.queryByRole("button", { name: "编辑笔记" });
+  const edit = screen.queryByRole("button", { name: /^(写|编辑)笔记$/ });
   if (edit) fireEvent.click(edit);
+  return editCue();
+}
+async function moreItem(name: string, trigger = "更多") {
+  const more = await screen.findByRole("button", { name: trigger });
+  if (more.getAttribute("aria-expanded") !== "true") fireEvent.keyDown(more, { key: "Enter" });
+  return screen.findByRole("menuitem", { name });
 }
 const closeDetail = () => fireEvent.click(screen.getByRole("button", { name: "关闭" }));
 
@@ -186,7 +198,8 @@ describe("permanently deleting a saved expression", () => {
     vi.mocked(window.confirm).mockReturnValue(false);
     renderPage();
     await openRow("Keep this expression.");
-    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+    expect(screen.queryByRole("menuitem", { name: "永久删除" })).toBeNull();
+    fireEvent.click(await moreItem("永久删除"));
     expect(asked("DELETE", "/api/expressions/71")).toHaveLength(0);
     expect(server.entries).toHaveLength(1);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
@@ -195,7 +208,7 @@ describe("permanently deleting a saved expression", () => {
   it.each(["seen", "active", "retired"] as const)("deletes a %s expression after confirmation and closes its detail", async (status) => {
     server.entries = [entry({ id: 71, text: "Delete this expression.", status, intent: "我想删掉这条" })];
     renderPage(["/?expression=71"]);
-    fireEvent.click(await screen.findByRole("button", { name: "永久删除" }));
+    fireEvent.click(await moreItem("永久删除"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(window.confirm).toHaveBeenCalledWith("永久删除这条表达及其学习记录？删除后无法恢复。");
     expect(asked("DELETE", "/api/expressions/71")).toHaveLength(1);
@@ -209,19 +222,20 @@ describe("permanently deleting a saved expression", () => {
     server.deleteFails = true;
     renderPage();
     await openRow("Keep this expression.");
+    fireEvent.click(screen.getByRole("button", { name: "写笔记" }));
     fireEvent.change(screen.getByRole("textbox", { name: "备注" }), { target: { value: "An unsaved note" } });
-    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+    fireEvent.click(await moreItem("永久删除"));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/^删除失败：/)));
     expect(server.entries).toHaveLength(1);
     expect(screen.getByRole("textbox", { name: "备注" })).toHaveValue("An unsaved note");
-    expect(screen.getByRole("button", { name: "永久删除" })).toBeEnabled();
+    expect(await moreItem("永久删除")).toBeEnabled();
   });
 
   it("returns keyboard focus to the list when deletion removes the opener", async () => {
     server.entries = [entry({ id: 71, text: "Delete this expression." }), entry({ id: 72, text: "Keep this expression." })];
     renderPage();
     await openRow("Delete this expression.");
-    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+    fireEvent.click(await moreItem("永久删除"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(screen.getByRole("region", { name: "你的表达" })).toHaveFocus());
   });
@@ -229,7 +243,7 @@ describe("permanently deleting a saved expression", () => {
   it("returns to the originating word card after deleting a linked expression", async () => {
     server.entries = [entry({ id: 71, text: "Delete this expression." })];
     renderPage(["/cards?card=7", { pathname: "/", search: "?expression=71", state: { expressionDetail: true } }]);
-    fireEvent.click(await screen.findByRole("button", { name: "永久删除" }));
+    fireEvent.click(await moreItem("永久删除"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByTestId("location")).toHaveTextContent("/cards?card=7");
   });
@@ -241,7 +255,7 @@ describe("permanently deleting a saved expression", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
     await openRow("Expression 41.");
-    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+    fireEvent.click(await moreItem("永久删除"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(rows()).toHaveLength(20));
     expect(screen.getByText(/第 2 \/ 2 页/)).toBeInTheDocument();
@@ -252,7 +266,7 @@ describe("permanently deleting a saved expression", () => {
     renderPage();
     await openRow("Delete this expression.");
     act(() => useAppStore.setState({ uiLanguage: "en" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
+    fireEvent.click(await moreItem("Delete permanently", "More"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(window.confirm).toHaveBeenCalledWith("Permanently delete this expression and its learning history? This cannot be undone.");
   });
@@ -302,7 +316,7 @@ describe("links from word cards to a saved expression", () => {
     renderPage(["/?expression=88"]);
     await screen.findByRole("button", { name: "看答案" });
     expect(document.body).not.toHaveTextContent("A tree blocked the road.");
-    expect(screen.getByRole("textbox", { name: /提示句/ })).toHaveValue("想说道路不通了");
+    expect(within(screen.getByRole("dialog")).getByText("想说道路不通了")).toBeVisible();
     expect(requests.every((r) => r.method === "GET")).toBe(true);
   });
 
@@ -361,7 +375,7 @@ describe("expression library paging and the first learning step", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
     await openRow("Saved expression 41");
-    fireEvent.click(await screen.findByRole("button", { name: "收起" }));
+    fireEvent.click(await moreItem("收起"));
     await waitFor(() => expect(rows()).toHaveLength(20));
     closeDetail();
     expect(await screen.findByText(/第 2 \/ 2 页/)).toBeInTheDocument();
@@ -393,7 +407,7 @@ describe("expression library paging and the first learning step", () => {
 it("updates library labels and dates while keeping a detail dialog and its unsaved fields open", async () => {
   server.entries = [entry({ id: 71, text: "A private expression.", intent: "我想说自己的意思", sourceType: "book", sourceTitle: "私人书名" })];
   renderPage();
-  await openRow("A private expression.");
+  await editRow("A private expression.");
   const dialog = screen.getByRole("dialog");
   const note = await screen.findByRole("textbox", { name: "备注" });
   fireEvent.change(note, { target: { value: "没写完的私密备注" } });
@@ -614,8 +628,8 @@ describe("收下 on the page", () => {
 
     await openRow("It dawned on me.");
     expect(await screen.findByText("to begin to be understood")).toBeInTheDocument();
-    expect(screen.getByText("补注 · AI 写的")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "补注" })).toBeNull();
+    expect(screen.getByText("· AI 写的")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "生成补注" })).toBeNull();
   });
 
   it("gives up after three looks and leaves it to the 补注 button", async () => {
@@ -623,7 +637,7 @@ describe("收下 on the page", () => {
     await openRow("It dawned on me.");
     // While it is still being looked for, the detail says so and offers no button.
     expect(await screen.findByText("补注中…")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "补注" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "生成补注" })).toBeNull();
 
     await later();
     await later();
@@ -633,7 +647,7 @@ describe("收下 on the page", () => {
     await later();
     expect(asked("GET", url)).toHaveLength(3);
 
-    fireEvent.click(screen.getByRole("button", { name: "补注" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成补注" }));
     expect(await screen.findByText("to begin to be understood")).toBeInTheDocument();
     expect(asked("POST", `${url}/annotate`)).toHaveLength(1);
   });
@@ -666,7 +680,7 @@ describe("reading and writing passage notes", () => {
     expect(other).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText(/这里设想另一种办法/)).toBeVisible();
     expect(screen.queryByText(one.body)).toBeNull();
-    fireEvent.click(screen.getByText("回想与练习"));
+    editCue();
     fireEvent.change(screen.getByRole("combobox", { name: "练习焦点" }), { target: { value: `${two.start}:${two.end}` } });
     expect(screen.getByRole("button", { name: "放进想用" })).toBeDisabled();
     fireEvent.change(screen.getByRole("textbox", { name: /提示句/ }), { target: { value: "想说还有其他办法" } });
@@ -683,6 +697,8 @@ describe("reading and writing passage notes", () => {
     expect(screen.queryByText(one.body)).toBeNull();
     expect(screen.queryByRole("button", { name: "写批注" })).toBeNull();
     fireEvent.click(reveal);
+    expect(await screen.findByText(/这里设想另一种办法/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "gotten to" }));
     await screen.findByText(one.body);
     expect(screen.queryByRole("button", { name: "编辑批注" })).toBeNull();
     expect(JSON.stringify(client.getQueryCache().getAll().map((q) => q.state.data))).not.toContain(one.body);
@@ -725,7 +741,7 @@ describe("reading and writing passage notes", () => {
     await waitFor(() => expect(screen.queryByLabelText("片段批注")).toBeNull());
     expect(server.entries[0].passageNotes).toEqual([]);
     expect(screen.getByText("旧笔记")).toBeVisible();
-    expect(screen.getByText("补注 · AI 写的").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("· AI 写的").closest("details")).toHaveAttribute("open");
   });
 
   it("keeps overlapping passages individually reachable and a failed edit available to retry", async () => {
@@ -766,7 +782,8 @@ describe("reading a saved expression before editing it", () => {
     const excerpt = `例句性质：原笔记例句，材料出处未记录。\n笔记摘录：${text}\n原遇见日期未记录。`;
     server.entries = [entry({ id: 29, text, note: excerpt })];
     renderPage(["/?expression=29"]);
-    const summary = await screen.findByText("原笔记摘录");
+    const summary = (await screen.findByText("出处与原笔记")).closest("summary")!;
+    expect(summary.closest("details")).toContainElement(screen.getByText("原笔记摘录"));
     expect(summary.closest("details")).not.toHaveAttribute("open");
     fireEvent.click(summary);
     fireEvent.click(screen.getByRole("button", { name: "编辑笔记" }));
@@ -784,25 +801,91 @@ describe("reading a saved expression before editing it", () => {
     const opener = await screen.findByRole("button", { name: /Read this expression\./ });
     opener.focus();
     fireEvent.click(opener);
-    await screen.findByRole("button", { name: "编辑笔记" });
+    await screen.findByRole("button", { name: "写笔记" });
     closeDetail();
     await waitFor(() => expect(opener).toHaveFocus());
   });
 
   it("leads with the original and readable notes, then the signed annotation and recall cue", async () => {
-    server.entries = [entry({ id: 90, text: "She took to reading late at night.", focus: "took to", note: "开始做某事，并成为习惯。", gloss: "take to + doing", annotated: true })];
+    server.entries = [entry({ id: 90, text: "She took to reading late at night.", focus: "took to", note: "开始做某事，并成为习惯。", gloss: "take to + doing", intent: "想说自己渐渐有了一个习惯", annotated: true })];
     renderPage(["/?expression=90"]);
     const notes = await screen.findByRole("region", { name: "学习笔记" });
     expect(within(notes).getByText("开始做某事，并成为习惯。")).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "备注" })).toBeNull();
-    expect(screen.queryByRole("textbox", { name: "焦点" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "练习焦点" })).toBeNull();
     const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("take to + doing")).toBeVisible();
+    expect(within(dialog).getByText("想说自己渐渐有了一个习惯")).toBeVisible();
+    expect(within(dialog).getByText("took to", { selector: "dd" })).toBeVisible();
+    expect(within(dialog).queryByRole("textbox", { name: /提示句/ })).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "保存" })).toBeNull();
     const order = (text: string) => dialog.textContent!.indexOf(text);
     expect(order("She took to reading")).toBeLessThan(order("学习笔记"));
     expect(order("开始做某事")).toBeLessThan(order("补注 · AI 写的"));
-    expect(order("补注 · AI 写的")).toBeLessThan(order("回想提示"));
+    expect(order("补注 · AI 写的")).toBeLessThan(order("回想与练习"));
     expect(screen.getByText("学习记录").closest("details")).not.toHaveAttribute("open");
     expect(requests.every((r) => r.method === "GET")).toBe(true);
+  });
+
+  it("keeps both reading sections collapsed by hand across a refresh and expands them on a new visit", async () => {
+    server.entries = [entry({ id: 90, text: "That tracks.", intent: "想说讲得通", gloss: "这个解释和事实相符。" })];
+    renderPage();
+    const dialog = await openRow("That tracks.");
+    const first = within(dialog).getByText("· AI 写的").closest("details")!;
+    const second = within(dialog).getByText("回想与练习").closest("details")!;
+    for (const section of [first, second]) {
+      expect(section.open).toBe(true);
+      fireEvent.click(section.querySelector("summary")!);
+    }
+    Object.assign(server.entries[0], { gloss: "这样说和事实相符。", intent: "换过的提示", updatedAt: MET_AT + 1 });
+    await act(() => client.invalidateQueries());
+    expect(await within(dialog).findByText("这样说和事实相符。")).not.toBeVisible();
+    expect(within(dialog).getByText("换过的提示")).not.toBeVisible();
+    closeDetail();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const reopened = await openRow("That tracks.");
+    expect(within(reopened).getByText("这样说和事实相符。")).toBeVisible();
+    expect(within(reopened).getByText("换过的提示")).toBeVisible();
+    expect(requests.every((r) => r.method === "GET")).toBe(true);
+  });
+
+  it("retains an unsaved cue and its revision when another reader has changed the entry", async () => {
+    server.entries = [entry({ id: 90, text: "That tracks.", intent: "想说讲得通" })];
+    renderPage();
+    await openRow("That tracks.");
+    const cue = editCue();
+    fireEvent.change(cue, { target: { value: "我还在写" } });
+    Object.assign(server.entries[0], { intent: "另一个窗口保存的提示", updatedAt: MET_AT + 1 });
+    await act(() => client.invalidateQueries());
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(cue).toHaveValue("我还在写");
+    expect(patches(90)[0]).toMatchObject({ expectedUpdatedAt: MET_AT, intent: "我还在写" });
+    expect(server.entries[0].intent).toBe("另一个窗口保存的提示");
+  });
+
+  it("saves a repeated passage by position and allows a custom focus alongside passage notes", async () => {
+    const text = "this way, that way";
+    server.entries = [entry({ id: 91, text, focus: "way", focusRange: { start: 5, end: 8 }, intent: "原来的提示",
+      passageNotes: [5, 15].map((start) => ({ start, end: start + 3, body: "我的批注", examples: null })) })];
+    renderPage();
+    await openRow(text);
+    const cue = editCue();
+    fireEvent.change(screen.getByRole("combobox", { name: "练习焦点" }), { target: { value: "15:18" } });
+    expect(cue).toHaveValue("");
+    fireEvent.change(cue, { target: { value: "原来的提示" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await screen.findByRole("button", { name: "编辑提示与焦点" });
+    expect(patches(91)[0]).toMatchObject({ focus: "way", focusRange: { start: 15, end: 18 }, intent: "原来的提示" });
+    expect(screen.getAllByRole("button", { name: "way" })[1]).toHaveAttribute("aria-pressed", "true");
+    editCue();
+    const picker = screen.getByRole("combobox", { name: "练习焦点" });
+    expect(picker).toHaveValue("15:18");
+    fireEvent.change(picker, { target: { value: "custom" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "自填焦点" }), { target: { value: "that way" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByText("that way", { selector: "dd" })).toBeVisible();
+    expect(patches(91)[1]).toMatchObject({ focus: "that way", focusRange: null, intent: null });
   });
 
   it("previews an unsaved note, preserves it on returning to the editor, and saves its original text", async () => {
@@ -884,7 +967,7 @@ describe("the detail", () => {
 
   async function open() {
     renderPage();
-    await openRow("It dawned on me");
+    await editRow("It dawned on me");
     return screen.findByRole("textbox", { name: "备注" });
   }
 
@@ -919,14 +1002,16 @@ describe("the detail", () => {
 
   it("changes the focus, and clears it with an empty field", async () => {
     await open();
-    const focus = screen.getByRole("textbox", { name: "焦点" });
+    const focus = screen.getByRole("textbox", { name: "练习焦点" });
     expect(focus).toHaveValue("dawned on");
 
     fireEvent.change(focus, { target: { value: "dawned on me" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(screen.getByRole("dialog").querySelector("mark")).toHaveTextContent("dawned on me"));
 
-    fireEvent.change(focus, { target: { value: "" } });
+    await screen.findByRole("button", { name: "编辑提示与焦点" });
+    editCue();
+    fireEvent.change(screen.getByRole("textbox", { name: "练习焦点" }), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(asked("PATCH", "/api/expressions/2")).toHaveLength(2));
     expect(asked("PATCH", "/api/expressions/2").map((r) => r.body)).toEqual([{ expectedUpdatedAt: MET_AT, focus: "dawned on me", focusRange: null }, { expectedUpdatedAt: MET_AT + 1, focus: null, focusRange: null }]);
@@ -960,13 +1045,13 @@ describe("the detail", () => {
 
   it("puts an entry away and brings it back", async () => {
     await open();
-    fireEvent.click(screen.getByRole("button", { name: "收起" }));
-    fireEvent.click(await screen.findByRole("button", { name: "恢复" }));
-    await screen.findByRole("button", { name: "收起" });
+    fireEvent.click(await moreItem("收起"));
+    fireEvent.click(await moreItem("恢复"));
+    await moreItem("收起");
     expect(asked("PATCH", "/api/expressions/2").map((r) => r.body)).toEqual([{ expectedUpdatedAt: MET_AT, status: "retired" }, { expectedUpdatedAt: MET_AT + 1, status: "seen" }]);
 
-    fireEvent.click(screen.getByRole("button", { name: "收起" }));
-    await screen.findByRole("button", { name: "恢复" });
+    fireEvent.click(await moreItem("收起"));
+    await moreItem("恢复");
     // What was put away is in neither layer: it is brought back to 见过 first.
     for (const name of ["放进想用", "退回见过"]) expect(screen.queryByRole("button", { name })).toBeNull();
     closeDetail();
@@ -979,10 +1064,10 @@ describe("the detail", () => {
     Object.assign(server.entries[0], { gloss: null, annotated: false });
     server.glossOnAnnotate = null;
     await open();
-    fireEvent.click(screen.getByRole("button", { name: "补注" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成补注" }));
     await waitFor(() => expect(asked("POST", "/api/expressions/2/annotate")).toHaveLength(1));
     // Still offered: the entry itself was never at stake.
-    expect(await screen.findByRole("button", { name: "补注" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "生成补注" })).toBeEnabled();
   });
 });
 
@@ -1001,8 +1086,7 @@ describe("the 提示句 and the two layers, in the detail", () => {
 
   async function open(part: string) {
     renderPage();
-    await openRow(part);
-    return screen.findByRole<HTMLInputElement>("textbox", { name: /提示句/ });
+    return editRow(part);
   }
   const button = (name: string) => screen.getByRole("button", { name });
 
@@ -1014,15 +1098,16 @@ describe("the 提示句 and the two layers, in the detail", () => {
     fireEvent.change(intent, { target: { value: "  想说：我突然明白了 " } });
     fireEvent.click(button("保存"));
     await waitFor(() => expect(patches(2)).toEqual([{ expectedUpdatedAt: MET_AT, intent: "想说：我突然明白了", intentBy: "self" }]));
-    await waitFor(() => expect(intent).toHaveValue("想说：我突然明白了"));
+    expect(await within(screen.getByRole("dialog")).findByText("想说：我突然明白了")).toBeVisible();
     expect(button("保存")).toBeDisabled();
 
     // In 见过 an entry may be without one again: blanks clear it.
-    fireEvent.change(intent, { target: { value: "   " } });
+    fireEvent.change(editCue(), { target: { value: "   " } });
     fireEvent.click(button("保存"));
     await waitFor(() => expect(patches(2)).toHaveLength(2));
     expect(patches(2)[1]).toMatchObject({ intent: null });
-    await waitFor(() => expect(intent).toHaveValue(""));
+    await screen.findByRole("button", { name: "编辑提示与焦点" });
+    expect(screen.queryByRole("textbox", { name: /提示句/ })).toBeNull();
     expect(button("保存")).toBeDisabled();
   });
 
@@ -1038,7 +1123,8 @@ describe("the 提示句 and the two layers, in the detail", () => {
     fireEvent.click(button("保存"));
     await waitFor(() => expect(patches(5)).toEqual([{ expectedUpdatedAt: MET_AT, note: "said at work" }]));
     await waitFor(() => expect(button("保存")).toBeDisabled());
-    expect(intent).toHaveValue("今天就到这吧");
+    expect(within(screen.getByRole("dialog")).getByText("取自上文的提示")).toBeVisible();
+    expect(editCue()).toHaveValue("今天就到这吧");
 
     await clickBeside();
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -1051,7 +1137,7 @@ describe("the 提示句 and the two layers, in the detail", () => {
     // The answer to that request is the entry as it now reads: asked for by its intent, the English withheld.
     await screen.findByRole("button", { name: "看答案" });
     expect(document.body.textContent).not.toMatch(/call it a day|stop today/i);
-    expect(screen.getByRole("textbox", { name: /提示句/ })).toHaveValue("今天就到这吧");
+    expect(within(screen.getByRole("dialog")).getByText("今天就到这吧")).toBeVisible();
     expect(asked("GET", "/api/expressions/5")).toHaveLength(1);
   });
 
@@ -1118,7 +1204,8 @@ describe("the 提示句 and the two layers, in the detail", () => {
     await waitFor(() => expect(patches(2)).toEqual([{ expectedUpdatedAt: MET_AT, status: "seen" }]));
     fireEvent.click(await screen.findByRole("button", { name: "编辑笔记" }));
     expect(await screen.findByRole("textbox", { name: "备注" })).toHaveValue("from a podcast");
-    expect(screen.getByRole("textbox", { name: "焦点" })).toHaveValue("dawned on");
+    editCue();
+    expect(screen.getByRole("textbox", { name: "练习焦点" })).toHaveValue("dawned on");
     expect(screen.getByRole("dialog").querySelector("mark")).toHaveTextContent("dawned on");
     expect(button("保存")).toBeDisabled();
     expect(button("放进想用")).toBeEnabled();
@@ -1140,17 +1227,17 @@ describe("the 提示句 and the two layers, in the detail", () => {
     fireEvent.click(button("退回见过"));
     await waitFor(() => expect(patches(2)).toEqual([{ expectedUpdatedAt: MET_AT, intent: "想说：忽然想通了", intentBy: "self", status: "seen" }]));
     await screen.findByRole("button", { name: "编辑笔记" });
-    expect(screen.getByRole("textbox", { name: /提示句/ })).toHaveValue("想说：忽然想通了");
+    expect(within(screen.getByRole("dialog")).getByText("想说：忽然想通了")).toBeVisible();
   });
 
   it("takes it along when the entry is put away from 想用 as well", async () => {
     Object.assign(server.entries[2], { status: "active", intent: "想说：我突然明白了", intentBy: "self" });
     const intent = await open("我突然明白了");
     fireEvent.change(intent, { target: { value: "想说：忽然想通了" } });
-    fireEvent.click(button("收起"));
+    fireEvent.click(await moreItem("收起"));
     await waitFor(() => expect(patches(2)).toEqual([{ expectedUpdatedAt: MET_AT, intent: "想说：忽然想通了", intentBy: "self", status: "retired" }]));
-    expect(await screen.findByRole("button", { name: "恢复" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: /提示句/ })).toHaveValue("想说：忽然想通了");
+    expect(await moreItem("恢复")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText("想说：忽然想通了")).toBeVisible();
   });
 });
 
@@ -1170,8 +1257,7 @@ describe("帮我起草", () => {
   }
   async function open() {
     renderPage();
-    await openRow("call it a day");
-    return screen.findByRole("textbox", { name: /提示句/ });
+    return editRow("call it a day");
   }
   const offered = () => screen.queryByRole("button", { name: "帮我起草" });
 
@@ -1198,7 +1284,7 @@ describe("帮我起草", () => {
 
     // The draft has been read: what is typed over it later is still not the user's own.
     await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).toBeDisabled());
-    fireEvent.change(intent, { target: { value: "想说：收工" } });
+    fireEvent.change(editCue(), { target: { value: "想说：收工" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(patches(99)).toHaveLength(2));
     expect(patches(99)[1]).toEqual({ expectedUpdatedAt: MET_AT + 1, intent: "想说：收工", intentBy: "ai" });
@@ -1340,7 +1426,7 @@ describe("the timeline, in the detail", () => {
   it("lists every row, oldest first, with what it holds", async () => {
     renderPage();
     await openRow("Let me sleep on it.");
-    await screen.findByRole("textbox", { name: "备注" });
+    fireEvent.click(screen.getByText("学习记录"));
     expect(timeline()).toEqual(FULL);
     // Each 上文 once: the first with the sentence, a later one on its own row.
     expect(screen.getByRole("dialog").textContent?.split("Rachel: so, are you in?")).toHaveLength(2);
@@ -1386,33 +1472,60 @@ describe("the detail of an entry in 想用", () => {
 
   async function open() {
     renderPage();
-    await openRow("先放一放");
-    return screen.findByRole("textbox", { name: /提示句/ });
+    return openRow("先放一放");
   }
 
   it("shows the intent, the source and the date, and no field that would be empty", async () => {
-    const intent = await open();
-    const dialog = screen.getByRole("dialog");
-    expect(intent).toHaveValue("想说：先放一放再决定");
+    const dialog = await open();
+    expect(within(dialog).getByText("想说：先放一放再决定")).toBeVisible();
+    fireEvent.click(screen.getByText("出处与时间"));
     expect(dialog).toHaveTextContent("出处：影视 · Friends");
     expect(screen.getByLabelText("遇到的时间")).toHaveValue("2026-11-20T09:30");
-    for (const name of ["焦点", "备注"]) expect(screen.queryByRole("textbox", { name })).toBeNull();
+    for (const name of ["练习焦点", "备注"]) expect(screen.queryByRole("textbox", { name })).toBeNull();
     expect(dialog).not.toHaveTextContent("补注");
     expect(document.body.textContent).not.toMatch(ENGLISH);
     expect(document.querySelector("mark")).toBeNull();
   });
 
   it("shows the English after 看答案, which is a request that says where it was asked", async () => {
-    await open();
+    const masked = await open();
+    expect(within(masked).queryByText("回想与练习")).toBeNull();
+    expect(within(masked).queryByText("练习焦点")).toBeNull();
+    expect(within(masked).queryByText("· AI 写的")).toBeNull();
+    expect(within(masked).queryByRole("textbox", { name: /提示句/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "看答案" }));
     const dialog = screen.getByRole("dialog");
     await waitFor(() => expect(dialog).toHaveTextContent("Let me sleep on it."));
     expect(asked("POST", "/api/expressions/4/reveal").map((r) => r.body)).toEqual([{ cue: "masked" }]);
     expect(dialog.querySelector("mark")).toHaveTextContent("sleep on");
+    expect(within(dialog).getByText("to postpone a decision")).toBeVisible();
+    expect(within(dialog).getByText("sleep on", { selector: "dd" })).toBeVisible();
+    expect(within(dialog).getByText("想说：先放一放再决定")).toBeVisible();
     for (const shown of ["Can you decide tomorrow?", "a note of mine", "补注 · AI 写的", "to postpone a decision"]) expect(dialog).toHaveTextContent(shown);
     // Read-only: an entry is edited in 见过, where nothing about it is withheld.
-    for (const name of ["焦点", "备注"]) expect(screen.queryByRole("textbox", { name })).toBeNull();
+    for (const name of ["练习焦点", "备注"]) expect(screen.queryByRole("textbox", { name })).toBeNull();
     expect(screen.queryByRole("button", { name: "看答案" })).toBeNull();
+  });
+
+  it("offers a missing gloss only after reveal, keeping the answer out of ordinary reads and the reveal count accurate", async () => {
+    Object.assign(server.entries[0], { gloss: null, annotated: false });
+    const dialog = await open();
+    expect(within(dialog).queryByText("生成补注")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "看答案" }));
+    const generate = await within(dialog).findByRole("button", { name: "生成补注" });
+    expect(asked("POST", "/api/expressions/4/annotate")).toHaveLength(0);
+    fireEvent.click(generate);
+    expect(await within(dialog).findByText(/补注已生成/)).toBeVisible();
+    expect(asked("POST", "/api/expressions/4/reveal")).toHaveLength(1);
+    fireEvent.click(within(dialog).getByRole("button", { name: "看含补注的答案" }));
+    expect(await within(dialog).findByText(server.glossOnAnnotate!)).toBeVisible();
+    expect(asked("POST", "/api/expressions/4/reveal")).toHaveLength(2);
+    closeDetail();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const reopened = await openRow("先放一放");
+    expect(reopened).not.toHaveTextContent(server.glossOnAnnotate!);
+    fireEvent.click(within(reopened).getByRole("button", { name: "看答案" }));
+    expect(await within(reopened).findByText(server.glossOnAnnotate!)).toBeVisible();
   });
 
   // Kept anywhere but in the open dialog, the answer would come back on the
@@ -1461,7 +1574,8 @@ describe("the detail of an entry in 想用", () => {
     await act(() => client.invalidateQueries());
     fireEvent.click(await screen.findByRole("button", { name: "编辑笔记" }));
     expect(await screen.findByRole("textbox", { name: "备注" })).toHaveValue("a note of mine");
-    expect(screen.getByRole("textbox", { name: "焦点" })).toHaveValue("sleep on");
+    editCue();
+    expect(screen.getByRole("textbox", { name: "练习焦点" })).toHaveValue("sleep on");
     expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "看答案" })).toBeNull();
   });
@@ -1491,7 +1605,7 @@ describe("the 表达 page never materialises pasted HTML", () => {
     server.settings = { expressions_draft: "1" };
     server.entries = [hostileEntry()];
     renderPage();
-    await openRow("It **dawned** on");
+    await editRow("It **dawned** on");
     const dialog = await screen.findByRole("dialog");
     await screen.findByText(`gloss ${HOSTILE}`);
 

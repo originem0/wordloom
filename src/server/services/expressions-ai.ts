@@ -17,7 +17,7 @@ Its keys: "text" is the sentence or passage they met, verbatim; "focus" (optiona
 Return one JSON object and nothing else:
 { "gloss": "...", "aiIntent": "...", "scene": "..." }
 
-- gloss: at most three short lines separated by "\\n": what the target does in this sentence; its register; one common collocation (the collocation itself in English).
+- gloss: up to three short plain-text lines separated by "\\n". Start with what the speaker means by the target here, using the actual sentence and any context. Then give one reusable English pattern or contrast that helps the learner choose this wording. If the sentence itself contrasts two expressions, explain that distinction. Include register only when it changes how someone would use the expression. One good line is enough. No headings, Markdown, or invented context.
 - aiIntent: one sentence in Simplified Chinese that starts with 「我想说」 and says what a speaker means when they reach for the target. It must not contain the target, nor any English.
 - scene: ${SCENE}`;
 

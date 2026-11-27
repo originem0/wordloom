@@ -131,8 +131,8 @@ function PassageEditor({ text, edit, save, finish, busy, dirtyRef }: {
   </fieldset>;
 }
 
-export function PassageReader({ text, notes, children, save, busy, onEditing, dirtyRef, noteAction }: {
-  text: string; notes: PassageNote[]; children: ReactNode; save?: SaveNote; busy: boolean; onEditing: (value: boolean) => void; dirtyRef: RefObject<boolean>; noteAction?: ReactNode;
+export function PassageReader({ text, notes, preferred, children, save, busy, onEditing, dirtyRef, noteAction }: {
+  text: string; notes: PassageNote[]; preferred?: PassageRange; children: ReactNode; save?: SaveNote; busy: boolean; onEditing: (value: boolean) => void; dirtyRef: RefObject<boolean>; noteAction?: ReactNode;
 }) {
   const { t } = useI18n();
   const panelId = useId();
@@ -142,7 +142,9 @@ export function PassageReader({ text, notes, children, save, busy, onEditing, di
   const [selected, setSelected] = useState("");
   const [edit, setEdit] = useState<Editing | "pick" | null>(null);
   const groups = groupRanges(notes);
-  const active = notes.find((n) => rangeKey(n) === selected) ?? notes[0];
+  const active = notes.find((n) => rangeKey(n) === selected)
+    ?? notes.find((n) => n.start === preferred?.start && n.end === preferred.end)
+    ?? notes[0];
   const activeGroup = active && groups.find((group) => group.notes.includes(active));
   function begin(range: PassageRange | null) {
     const found = range && notes.find((n) => rangeKey(n) === rangeKey(range));
@@ -161,6 +163,12 @@ export function PassageReader({ text, notes, children, save, busy, onEditing, di
 
   if (edit === "pick") return <PassagePicker text={text} onPick={begin} onCancel={() => finish(null)} />;
   const hasMargin = !!(edit || active);
+  const addNote = save && !edit && <Button ref={addButton} size="sm" variant="ghost" className="passage-write" disabled={busy}
+    onPointerDown={() => { pendingSelection.current = selectedPassage(original.current); }}
+    onClick={() => {
+      begin(pendingSelection.current ?? selectedPassage(original.current));
+      pendingSelection.current = null;
+    }}>{!active && <PencilLine aria-hidden="true" />}{t("写批注", "Add passage note")}</Button>;
   return <div className={hasMargin ? "passage-reader has-margin" : "passage-reader"}>
     <div className="passage-source">
       <p ref={original} className="expression-original">
@@ -178,26 +186,27 @@ export function PassageReader({ text, notes, children, save, busy, onEditing, di
     </div>
     {hasMargin && <aside id={panelId} className="passage-margin" aria-label={t("片段批注", "Passage note")}>
       {edit && save ? <PassageEditor text={text} edit={edit} save={save} finish={finish} busy={busy} dirtyRef={dirtyRef} /> : active && <>
+        <div className="passage-margin-heading">
+          <span>{t("片段批注", "Passage note")}</span>
+          {save && <div className="passage-actions">
+            <button type="button" disabled={busy} className="passage-link" aria-label={t("编辑批注", "Edit passage note")} onClick={() => begin(active)}>{t("编辑", "Edit")}</button>
+            {addNote}
+          </div>}
+        </div>
         {activeGroup && activeGroup.notes.length > 1 && <select className="passage-select" aria-label={t("选择重叠片段", "Select overlapping passage")}
           value={rangeKey(active)} onChange={(ev) => setSelected(ev.target.value)}>
           {activeGroup.notes.map((n) => <option key={rangeKey(n)} value={rangeKey(n)}>{text.slice(n.start, n.end)}</option>)}
         </select>}
         <div aria-live="polite" aria-atomic="true">
-          {(active.start !== 0 || active.end !== text.length) && <h4 className="passage-quote">{text.slice(active.start, active.end)}</h4>}
+          {(active.start !== 0 || active.end !== text.length) && <span className="sr-only">{text.slice(active.start, active.end)}</span>}
           <p className="passage-body">{active.body}</p>
           {active.examples && <figure className="passage-examples" aria-labelledby={`${panelId}-examples`}>
             <figcaption id={`${panelId}-examples`}>{t("对照例句", "Example pair")}</figcaption>
             {active.examples.map((line, i) => <p key={i}>{line}</p>)}
           </figure>}
         </div>
-        {save && <button type="button" disabled={busy} className="passage-link" onClick={() => begin(active)}>{t("编辑批注", "Edit passage note")}</button>}
       </>}
     </aside>}
-    {save && !edit && <div className="passage-actions passage-add"><Button ref={addButton} size="sm" variant="ghost" disabled={busy}
-      onPointerDown={() => { pendingSelection.current = selectedPassage(original.current); }}
-      onClick={() => {
-        begin(pendingSelection.current ?? selectedPassage(original.current));
-        pendingSelection.current = null;
-      }}><PencilLine aria-hidden="true" />{t("写批注", "Add passage note")}</Button>{noteAction}</div>}
+    {save && !edit && (!active || noteAction) && <div className="passage-actions passage-add">{!active && addNote}{noteAction}</div>}
   </div>;
 }
